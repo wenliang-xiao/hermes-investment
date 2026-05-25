@@ -106,7 +106,14 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。JQData主源→baostock备→AKShare兜底。"""
+    """获取个股日线数据（含PE/PB）。Tushare→JQData→baostock→AKShare。"""
+    try:
+        from .tushare_layer import get_stock_daily_ts
+        df = get_stock_daily_ts(symbol, days)
+        if not df.empty:
+            return df
+    except Exception:
+        pass
     try:
         from .jqdata_layer import get_stock_daily_jq
         df = get_stock_daily_jq(symbol, days)
@@ -156,7 +163,14 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
 # 3. 基本面数据（baostock）
 # ═══════════════════════════════════════════
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率, 净利率。JQData主源→baostock备。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→JQData→baostock。"""
+    try:
+        from .tushare_layer import get_financial_report_ts
+        result = get_financial_report_ts(symbol)
+        if result:
+            return result
+    except Exception:
+        pass
     try:
         from .jqdata_layer import get_financial_report_jq
         result = get_financial_report_jq(symbol)
@@ -304,9 +318,16 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
     """
     获取个股 PE-TTM 历史序列，用于计算历史百分位。
-    JQData主源（试用账号约12个月）→ baostock备（重算）。
+    Tushare（5年完整）→ JQData（试用约12个月）→ baostock（从日线重算）。
     返回 pd.Series，index=date，values=pe
     """
+    try:
+        from .tushare_layer import get_pe_history_ts
+        s = get_pe_history_ts(symbol, years=years)
+        if len(s) >= 60:
+            return s
+    except Exception:
+        pass
     try:
         from .jqdata_layer import get_pe_history_jq
         s = get_pe_history_jq(symbol, days=min(years * 365, 400))
@@ -442,7 +463,14 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
 # 5. 宏观经济数据（AKShare不可用时的默认值）
 # ═══════════════════════════════════════════
 def get_macro_data() -> dict:
-    """获取宏观数据（CPI/PMI/M2/社融）。JQData主源→AKShare备→缓存兜底。"""
+    """获取宏观数据（CPI/PMI/M2/社融）。Tushare→JQData→AKShare→缓存兜底。"""
+    try:
+        from .tushare_layer import get_macro_data_ts
+        ts_result = get_macro_data_ts()
+        if ts_result.get("cpi") is not None and ts_result.get("pmi") is not None:
+            return ts_result
+    except Exception:
+        pass
     try:
         from .jqdata_layer import get_macro_data_jq
         jq_result = get_macro_data_jq()
@@ -621,10 +649,16 @@ _NORTHBOUND_TTL = 3600
 
 def get_northbound_flow() -> dict:
     """
-    获取北向资金（沪股通+深股通）日度净流入数据
-    返回今日净流入、5日累计、20日累计及信号判断
-    数据源：AKShare stock_hsgt_hist_em（旧接口stock_em_hsgt_north_net_flow_in_em已于2024年移除）
+    获取北向资金净流入。Tushare（需2000积分）→ AKShare历史→ 缓存。
+    2024-08-19起交易所停止每日披露，AKShare历史数据仅供参考。
     """
+    try:
+        from .tushare_layer import get_northbound_flow_ts
+        ts_result = get_northbound_flow_ts()
+        if ts_result.get("data_ok"):
+            return ts_result
+    except Exception:
+        pass
     from . import config as _cfg
     global _northbound_cache, _northbound_cache_time
 

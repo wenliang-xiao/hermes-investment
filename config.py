@@ -16,6 +16,12 @@ DATA_DIR.mkdir(exist_ok=True)
 JQDATA_USER = "18813017039"
 JQDATA_PASS = "112xwl@XWL"
 
+# ─── Tushare Pro（宏观/社融/北向/PE历史5年，补充JQData）───
+# 注册：tushare.pro → 个人中心 → 接口TOKEN
+# 120积分（注册即送）可用大部分接口；2000积分解锁北向资金历史
+# 也可通过环境变量 TUSHARE_TOKEN 设置（优先）
+TUSHARE_TOKEN = "a123a8e0b24ac30890b65c6e83a8211a7309647066fd786b541873b3"
+
 # ─── 飞书 ───
 FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
 FEISHU_FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"
