@@ -746,177 +746,171 @@ def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
         return None
 
 
-def _build_llm_prompt(news_titles: List[str]) -> str:
-    """
-    构建LLM总结提示词。
-    输入标题列表，要求输出结构化总结。
-    """
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles))
-    
-    prompt = f"""你是一位资深投资分析师。请基于以下 {len(news_titles)} 条今日新闻标题，生成一份结构化总结。
+def _build_llm_prompt(news_items: List[Dict]) -> str:
+    items_text = "\n".join(
+        f"{i+1}. [{item.get('source_name','?')}] {item.get('title','')}"
+        for i, item in enumerate(news_items)
+    )
+    return f"""你是一位面向A股/港股/美股投资者的专业分析师，具备面基播客的产业链分析框架和LDS实战思维。
 
-新闻标题：
-{titles_text}
+今日财经新闻（共{len(news_items)}条）：
+{items_text}
 
-请按以下格式输出 3-5 段总结，每段格式严格为：
-[N] [摘要标题] → 影响链: [产业链名称] → 方向: [↑利好/↓利空/→中性]
+任务：生成一份「今日市场情报」，格式严格如下：
 
-可选的产业链名称（匹配最接近的）：
-- GPU/AI芯片
-- 先进制程+封装
-- 存储/HBM
-- AI电力
-- AI网络+云计算
-- AI应用/Agent
-- 网络安全/国产替代
-- 机器人
-- 新能源
-- 消费电子
-- 全球宏观
-- 地缘政治
-- 中国市场
+【市场情绪】
+整体：[🟢偏多/🔴偏空/🟡中性] | 多空得分：[利好条数]/[利空条数]/[中性条数]
+核心矛盾：[一句话概括今日最大的市场矛盾或主线]
 
-最后一段综合判断格式：
-综合判断: [一句话概述今日全球市场情绪和主要矛盾]，整体偏[多/空/中性]
+【重要事件（按影响力排序，最多5条）】
+① [事件标题，20字以内] → 影响：[产业链] [↑利好/↓利空/→中性] | 关注标的：[最多3个股票/ETF代码或名称]
+② ...
 
-请用中文输出。只输出总结，不要额外解释。"""
-    return prompt
+【产业链情绪变化】
+[链名]：[↑升温/↓降温/→平稳]（[1句理由]）
+（只列有变化的链，最多5条）
+
+【投资者行动建议】
+双门[开/关]状态下：[1-2句具体建议，结合LDS宏观开关]
+
+产业链范围：GPU/AI芯片、先进制程+封装、存储/HBM、AI电力、AI网络+云计算、AI应用/Agent、网络安全/国产替代、机器人、新能源、消费电子、中国市场、地缘政治、全球宏观
+
+严格用中文，只输出以上格式，不添加其他内容。"""
 
 
-def _build_fallback_prompt(news_titles: List[str]) -> str:
-    """简化的fallback prompt，适用于token限制较低的场景"""
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles[:15]))
-    
-    prompt = f"""分析以下今日财经新闻标题，生成3-5段结构化总结：
+def _calc_sentiment_score(news_list: List[Dict]) -> dict:
+    bullish, bearish, neutral = 0, 0, 0
+    chain_sentiment: Dict[str, Dict] = {}
 
-{titles_text}
+    for item in news_list:
+        item_bullish = item_bearish = False
+        for imp in item.get("impacts", []):
+            chain = imp["chain"]
+            d = imp["direction"]
+            if chain not in chain_sentiment:
+                chain_sentiment[chain] = {"up": 0, "down": 0, "neutral": 0}
+            if "利好" in d or "↑" in d:
+                chain_sentiment[chain]["up"] += 1
+                item_bullish = True
+            elif "利空" in d or "↓" in d:
+                chain_sentiment[chain]["down"] += 1
+                item_bearish = True
+            else:
+                chain_sentiment[chain]["neutral"] += 1
+        if item_bullish and not item_bearish:
+            bullish += 1
+        elif item_bearish and not item_bullish:
+            bearish += 1
+        else:
+            neutral += 1
 
-每段格式：[摘要标题] → 影响链: [链名] → 方向: [↑利好/↓利空/→中性]
-最后一段：综合判断
+    total = bullish + bearish + neutral or 1
+    if bullish > bearish * 1.5:
+        overall = "🟢 偏多"
+    elif bearish > bullish * 1.5:
+        overall = "🔴 偏空"
+    else:
+        overall = "🟡 中性"
 
-链名从以下选：GPU/AI芯片、先进制程+封装、存储/HBM、AI电力、AI网络+云计算、AI应用/Agent、网络安全/国产替代、机器人、新能源、消费电子、全球宏观、地缘政治、中国市场
-
-只输出总结，不解释。"""
-    return prompt
-
-
-def summarize_news(
-    news_list: List[Dict],
-    use_llm: bool = True,
-) -> str:
-    """
-    生成新闻总结。
-    
-    优先使用LLM生成结构化总结（如果API可用）。
-    降级方案：基于关键词匹配生成标题列表+链影响标注。
-    
-    Args:
-        news_list: 新闻列表
-        use_llm: 是否尝试LLM总结
-    
-    Returns:
-        格式化的总结文本
-    """
-    if not news_list:
-        return "📰 今日无重大新闻信号"
-    
-    # 先做链分类
-    news_list = classify_impact(news_list)
-    
-    if use_llm:
-        titles = [item.get("title", "") for item in news_list[:20]]
-        system_prompt = "你是一位专业投资分析师，擅长从新闻中提取产业链影响。请用中文回复。"
-        prompt = _build_llm_prompt(titles)
-        
-        summary = _call_llm(prompt, system_prompt)
-        if summary:
-            return f"## 📰 LLM结构化总结\n\n{summary.strip()}\n\n> 🤖 由AI自动生成，仅供参考"
-        
-        # 尝试fallback prompt
-        fallback_prompt = _build_fallback_prompt(titles)
-        summary = _call_llm(fallback_prompt)
-        if summary:
-            return f"## 📰 LLM结构化总结\n\n{summary.strip()}\n\n> 🤖 由AI自动生成，仅供参考"
-    
-    # ── 降级方案：关键词匹配 + 影响标注 ──
-    return _build_keyword_summary(news_list)
+    return {
+        "overall": overall,
+        "bullish": bullish,
+        "bearish": bearish,
+        "neutral": neutral,
+        "score": round((bullish - bearish) / total * 100, 0),
+        "chain_sentiment": chain_sentiment,
+    }
 
 
 def _build_keyword_summary(news_list: List[Dict]) -> str:
-    """
-    降级方案：基于关键词匹配的总结。
-    按链聚合新闻，标注方向。
-    """
-    # 按链聚合
+    sentiment = _calc_sentiment_score(news_list)
     chain_groups: Dict[str, List[Dict]] = {}
-    no_impact = []
-    
-    for item in news_list[:20]:
+    uncategorized = []
+
+    for item in news_list:
         impacts = item.get("impacts", [])
         if impacts:
             for imp in impacts:
-                chain = imp["chain"]
-                if chain not in chain_groups:
-                    chain_groups[chain] = []
-                chain_groups[chain].append(item)
+                chain_groups.setdefault(imp["chain"], []).append((item, imp))
         else:
-            no_impact.append(item)
-    
-    lines = ["## 📰 今日新闻要点（关键词标注）\n"]
-    
-    # 有链影响的新闻
+            uncategorized.append(item)
+
+    lines = ["## 📰 本周市场要闻与情绪\n"]
+
+    lines.append(
+        f"**市场情绪**: {sentiment['overall']} "
+        f"| 利好{sentiment['bullish']}条 / 利空{sentiment['bearish']}条 / 中性{sentiment['neutral']}条 "
+        f"| 情绪得分{sentiment['score']:+.0f}\n"
+    )
+
     if chain_groups:
         lines.append("### 🔗 产业链影响新闻\n")
-        for chain_name, items in chain_groups.items():
-            lines.append(f"**{chain_name}**（{len(items)}条）")
-            for item in items[:3]:
-                title = item.get("title", "")
+        for chain, items_imps in sorted(chain_groups.items(),
+                                        key=lambda x: len(x[1]), reverse=True)[:8]:
+            cs = sentiment["chain_sentiment"].get(chain, {})
+            up, down = cs.get("up", 0), cs.get("down", 0)
+            trend = "↑升温" if up > down else ("↓降温" if down > up else "→平稳")
+            lines.append(f"\n**{chain}**（{len(items_imps)}条, {trend}）")
+            seen = set()
+            for item, imp in items_imps[:3]:
+                title = item.get("title", "")[:80]
+                if title in seen:
+                    continue
+                seen.add(title)
                 link = item.get("link", "")
-                direction = ""
-                for imp in item.get("impacts", []):
-                    if imp["chain"] == chain_name:
-                        direction = imp["direction"]
-                        break
-                if link:
-                    lines.append(f"  • {direction} [{title}]({link})")
-                else:
-                    lines.append(f"  • {direction} {title}")
-            lines.append("")
-    
-    # 无链影响的新闻
-    if no_impact:
-        lines.append("### 🌐 其他重要新闻\n")
-        for item in no_impact[:8]:
-            title = item.get("title", "")
-            link = item.get("link", "")
-            if link:
-                lines.append(f"  • [{title}]({link})")
-            else:
-                lines.append(f"  • {title}")
-        lines.append("")
-    
-    # 综合信号统计
-    up_count = sum(
-        1 for item in news_list[:20]
-        for imp in item.get("impacts", [])
-        if "利好" in imp.get("direction", "")
-    )
-    down_count = sum(
-        1 for item in news_list[:20]
-        for imp in item.get("impacts", [])
-        if "利空" in imp.get("direction", "")
-    )
-    
-    if up_count > down_count:
-        sentiment = f"🟢 今日偏多（利好 {up_count} vs 利空 {down_count}）"
-    elif down_count > up_count:
-        sentiment = f"🔴 今日偏空（利空 {down_count} vs 利好 {up_count}）"
-    else:
-        sentiment = "🟡 今日中性，信号混杂"
-    
-    lines.append(f"**综合判断**: {sentiment}")
-    
+                direction = imp["direction"]
+                src = item.get("source_name", "")
+                line = f"  • {direction} [{title}]({link})" if link else f"  • {direction} {title}"
+                if src:
+                    line += f" [{src}]"
+                lines.append(line)
+
+    lines.append("\n### **链影响分布**")
+    for chain, items_imps in sorted(chain_groups.items(), key=lambda x: len(x[1]), reverse=True):
+        cs = sentiment["chain_sentiment"].get(chain, {})
+        up, down = cs.get("up", 0), cs.get("down", 0)
+        dir_str = "↑利好" if up > down else ("↓利空" if down > up else "→中性")
+        lines.append(f"- {chain}: {len(items_imps)}条新闻 | 方向: {dir_str}")
+
+    lines.append("\n### **关键事件 Top 5**")
+    seen_kw = set()
+    shown = 0
+    for item in sorted(news_list, key=lambda x: len(x.get("impacts", [])), reverse=True):
+        if shown >= 5:
+            break
+        title = item.get("title", "")
+        if not title or title in seen_kw:
+            continue
+        seen_kw.add(title)
+        shown += 1
+        impacts = item.get("impacts", [])
+        imp_str = " → ".join(f"[{i['chain']}]{i['direction']}" for i in impacts[:2])
+        lines.append(f"- {title[:100]}  {imp_str}" if imp_str else f"- {title[:100]}")
+
     return "\n".join(lines)
+
+
+def summarize_news(news_list: List[Dict], use_llm: bool = True) -> str:
+    if not news_list:
+        return "📰 今日无重大新闻信号"
+
+    news_list = classify_impact(news_list)
+
+    if use_llm:
+        system_prompt = "你是一位专业的A股/港股/美股投资分析师，熟悉面基播客的产业链分析框架和LDS实战体系。请用中文回复，格式严谨，观点犀利。"
+        prompt = _build_llm_prompt(news_list[:25])
+        summary = _call_llm(prompt, system_prompt)
+        if summary:
+            sentiment = _calc_sentiment_score(news_list)
+            header = (
+                f"## 📰 今日市场情报（AI分析）\n\n"
+                f"> 情绪得分 {sentiment['score']:+.0f} | "
+                f"利好{sentiment['bullish']} / 利空{sentiment['bearish']} / 中性{sentiment['neutral']}\n\n"
+            )
+            return header + summary.strip()
+
+    return _build_keyword_summary(news_list)
+
 
 
 # ═══════════════════════════════════════════════════════════════

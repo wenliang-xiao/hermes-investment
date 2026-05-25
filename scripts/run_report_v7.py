@@ -86,7 +86,10 @@ try:
     log("Bridgewater done")
 
     # ═══ 三、LDS 全天候组合 ═══
-    lds = track_lds_portfolio_v2(version="A")
+    bw_q = bw.get("current_quadrant", "") if isinstance(bw, dict) else ""
+    dual_open = not (macro.get("dual_gate", {}).get("macro_gate") == "红灯" and
+                     macro.get("dual_gate", {}).get("trend_gate") == "红灯")
+    lds = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
     dq = lds.get('data_quality', {})
     w.write(doc_id, [
         ('divider', ''),
@@ -249,6 +252,7 @@ try:
     log("News done")
 
     # ═══ 十二、追踪+调仓+概念 ═══
+    macro["bw_quadrant"] = bw_q
     rpt.build_tracking_section(w, doc_id, scanner, macro)
     rpt.build_action_section(w, doc_id, macro)
     rpt.build_concept_section(w, doc_id)

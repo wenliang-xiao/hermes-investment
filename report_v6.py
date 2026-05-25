@@ -22,7 +22,7 @@ v6.1 修复：恢复 v5.3 所有动态分析板块 + 静态框架引用总纲
   - 结论末尾标注引用来源
 """
 import sys, os, json, time, urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -298,7 +298,7 @@ def build_market_snapshot(w, doc_id):
         w.write(doc_id, [("bullet", "VIX: ⚠️ 获取失败")])
 
     try:
-        from .data_layer import get_northbound_flow
+        from investment_system.data_layer import get_northbound_flow
         nb = get_northbound_flow()
         if nb.get("data_ok"):
             today_net = nb.get("today_net", 0)
@@ -467,8 +467,62 @@ _CHAIN_CONFIGS = [
         "assumption_hold": ["AI训练Capex不出现断崖式下降", "CUDA生态护城河维持（无竞争性替代）"],
         "assumption_break": "如果开源模型效率突破→专用芯片需求下降→AVGO/AMD受益、NVDA受损",
         "perez_stage": "frenzy(狂热期)→synergy过渡", "profit_pool": "expanding—上游GPU环节利润池最厚，但ASIC定制化分流在加速",
-        "dcf_tv": "NVDA $5T市值翻倍需$10T→永续段占比需>60%→概率低。关注AVGO(ASIC替代)和AMD(性价比路径)",
+        "dcf_tv": "NVDA $5T市值翻倍需$10T→永续段占比需>60%→概率低。关注AVBO(ASIC替代)和AMD(性价比路径)",
         "mianji_refs": "E7/E84(中观四层次), E124(DCF永续段), E94(Perez狂热期), E155(五层蛋糕Capex层)",
+        "a_profit_pool": [
+            {"code": "300502", "name": "新易盛",  "env": "光模块(毛利率35-45%)", "roe_ref": 38, "why": "800G→1.6T升级直接受益，AI算力互联核心"},
+            {"code": "301489", "name": "中际旭创", "env": "光模块(毛利率35-45%)", "roe_ref": 43, "why": "全球光模块市占率TOP3，ROE43%是链上最高"},
+            {"code": "688183", "name": "海目星",   "env": "激光器件(毛利率45%+)", "roe_ref": 18, "why": "CPO共封装光学的上游激光光源"},
+            {"code": "300308", "name": "中际旭创",  "env": "光PCB(毛利率20-30%)", "roe_ref": 15, "why": "高速光模块PCB配套，毛利率中等"},
+        ],
+        "a_avoid": "服务器组装（毛利率5-8%）：工控/组装利润极薄，不符合LDS选股逻辑",
+    },
+    # ═══ 核心链2: 先进制程+先进封装 ═══
+    {
+        "name": "先进制程+先进封装", "key_players": "TSM→ASML→AMAT→LRCX",
+        "lead_ticker": "TSM", "support_tickers": ["ASML", "AMAT", "LRCX", "KLAC"],
+        "all_tickers": ["TSM", "ASML", "AMAT", "LRCX", "KLAC", "INTC"],
+        "is_conditional": False,
+        "hist_doubling_pe": 15, "prev_doubling": "2020.3→2021.1, TSM $45→$140, 历时10月",
+        "supply": "TSM 3nm产能2025满负荷；2nm 2026H2量产；CoWoS-L 2025产能3.5万片/月→2026扩至5.5万；Intel 18A追赶中",
+        "demand": "AI芯片(CoWoS必需)+手机SoC(3nm)+汽车芯片三线拉动；先进封装(CoWoS/InFO)成为制程微缩外的第二增长曲线",
+        "gap_pct": 20, "gap_direction": "扩大中（2nm+CoWoS需求超预期，设备交期>12月）",
+        "catalysts": ["TSM月度营收(每月10日)", "2nm试产良率报告(2026Q3)", "CoWoS扩产进度更新(季报)", "台海地缘事件(持续关注)"],
+        "assumption_hold": ["台海不发生军事冲突", "3nm/2nm技术领先优势维持>18个月", "CoWoS作为AI芯片封装标准不被替代"],
+        "assumption_break": "如果台海封锁→全球芯片断供→TSM折价扩大但短期无法变现；地缘折价修复是翻倍核心逻辑",
+        "perez_stage": "synergy(协同期)", "profit_pool": "peaking→设备上游迁移—代工利润池见顶，CoWoS/先进封装成为新利润池增长点",
+        "dcf_tv": "TSM永续段占比~50%；地缘折价(PE 15x vs 全球同业25x)提供安全边际；CoWoS贡献2026年营收>8%",
+        "mianji_refs": "E7/E84(链定位=核心制造环节), E124(DCF+地缘折价), E42(周期逆向=地缘恐慌时买入), E155(CoWoS=HALO层关键封装)",
+        "a_profit_pool": [
+            {"code": "688012", "name": "中微公司",  "env": "刻蚀设备(毛利率45-55%)", "roe_ref": 22, "why": "CoWoS需要特殊刻蚀，台积电扩产=确定性订单"},
+            {"code": "688041", "name": "北方华创", "env": "CVD/刻蚀(毛利率45%+)", "roe_ref": 20, "why": "大基金三期设备招标最大受益方"},
+            {"code": "688328", "name": "华海清科", "env": "CMP设备(毛利率40%+)",   "roe_ref": 18, "why": "国内CMP唯一规模化，稀缺标的"},
+            {"code": "603501", "name": "韦尔股份",  "env": "图像传感器(毛利率35%)", "roe_ref": 16, "why": "AI手机+汽车芯片双驱动"},
+        ],
+        "a_avoid": "封测代工（毛利率15-20%）：通富/长电毛利薄，不如设备商确定性高",
+    },
+    # ═══ 核心链3: 存储/HBM ═══
+    {
+        "name": "存储/HBM", "key_players": "MU→SK海力士→三星",
+        "lead_ticker": "MU", "support_tickers": [],
+        "all_tickers": ["MU"],
+        "is_conditional": False,
+        "hist_doubling_pe": 8, "prev_doubling": "MU 2016→2018: $10→$60, 周期上行涨幅200-300%",
+        "supply": "HBM3E仅SK海力士+三星+MU三家；扩产周期12-18月；产能2026年前排满；HBM4样品2026H2送样",
+        "demand": "B200/GB300每GPU配8颗HBM；HBM4 2026量产需求翻倍；缺口>30%",
+        "gap_pct": 30, "gap_direction": "持续扩大（GPU功耗每代翻倍→HBM位宽需求非线性增长）",
+        "catalysts": ["三星HBM3E认证通过(关键!)", "MU财报(6月)—HBM毛利率指引", "HBM4规格发布(JEDEC)"],
+        "assumption_hold": ["三星HBM3E通过英伟达认证(当前最大变量)", "HBM价格不出现暴跌"],
+        "assumption_break": "如果HBM产能过剩→存储周期下行→MU从周期高点回落50%+。但2026年缺口>30%，过剩风险低",
+        "perez_stage": "synergy(协同期)", "profit_pool": "expanding—HBM是存储行业利润池最大的细分",
+        "dcf_tv": "MU周期股不适合DCF；用PB-Band：PB<1.5x为周期底部买点，当前PB约2.5x",
+        "mianji_refs": "E42(周期股逆向买入), E68(FCF两朵花), E155(五层蛋糕HALO层=HBM是关键硬件)",
+        "a_profit_pool": [
+            {"code": "688008", "name": "澜起科技",  "env": "内存接口芯片(毛利率60%+)", "roe_ref": 28, "why": "HBM接口芯片唯一A股纯正标的，毛利率极高"},
+            {"code": "603986", "name": "兆易创新",  "env": "存储设计(毛利率45%)",    "roe_ref": 20, "why": "国产存储设计龙头，NOR Flash+MCU"},
+            {"code": "688110", "name": "东芯股份",  "env": "NAND存储(毛利率35%)",   "roe_ref": 12, "why": "国产NAND Flash，存储国产化方向"},
+        ],
+        "a_avoid": "封装基板（毛利率25-30%）：HBM铲子逻辑成立，但IC载板毛利低于接口芯片",
     },
     # ═══ 核心链2: 先进制程+先进封装 ═══
     {
@@ -1024,6 +1078,35 @@ def _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regim
         ("bullet", f"相关期数: {cfg['mianji_refs']}"),
     ])
 
+    # ── ⑥ A股利润池排序（LDS核心：找利润率最高的环节）──
+    a_pool = cfg.get("a_profit_pool", [])
+    a_avoid = cfg.get("a_avoid", "")
+    if a_pool and is_active:
+        blocks.append(("bold", "🇨🇳 A股利润池映射（按毛利率排序）"))
+        for rank, item in enumerate(a_pool, 1):
+            code = item["code"]
+            name = item["name"]
+            env = item["env"]
+            roe_ref = item.get("roe_ref")
+            why = item.get("why", "")
+            roe_str = f"ROE参考~{roe_ref}%" if roe_ref else ""
+            price_info = ""
+            try:
+                from investment_system.data_layer import get_stock_daily
+                d = get_stock_daily(code, 3)
+                if not d.empty:
+                    px = float(d.iloc[-1]["close"])
+                    chg = float((d.iloc[-1]["close"] / d.iloc[-2]["close"] - 1) * 100) if len(d) >= 2 else 0
+                    arrow = "🔺" if chg > 0 else "🔻"
+                    price_info = f" ¥{px:.2f} {arrow}{chg:+.1f}%"
+            except Exception:
+                pass
+            blocks.append(("bullet",
+                f"#{rank} {name}({code}){price_info} | {env} | {roe_str} | {why}"
+            ))
+        if a_avoid:
+            blocks.append(("bullet", f"❌ 回避: {a_avoid}"))
+
     w.write(doc_id, blocks)
 
 # ═══════════════════════════════════
@@ -1059,10 +1142,12 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
         name = p.get("name", p.get("symbol", "?"))
         code = p.get("code", p.get("symbol", "?"))
         score = p.get("score", 0)
-        pe = p.get("pe", "?")
+        pe = p.get("pe")
+        pe_str = f"{pe:.1f}x" if isinstance(pe, (int, float)) else "?"
         roe_raw = p.get("roe")
-        roe_str = f"{roe_raw*100:.0f}%" if isinstance(roe_raw, (int, float)) and abs(roe_raw) < 10 else (
-            f"{roe_raw:.1f}%" if isinstance(roe_raw, (int, float)) else "?")
+        roe_str = f"{roe_raw:.1f}%" if isinstance(roe_raw, (int, float)) else "?"
+        rev_g = p.get("rev_growth")
+        rev_str = f" 营收{rev_g:+.1f}%" if isinstance(rev_g, (int, float)) else ""
         sector = p.get("sector", "?")
         
         # 扩张期过滤防御板块
@@ -1081,7 +1166,27 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
         except Exception:
             pass
         
-        w.write(doc_id, [("bullet", f"{name}({code}): 评分 {score:.1f} | PE {pe} | ROE {roe_str}{chain_tag}{kelly_str}")])
+        chg = p.get("change_pct", 0) or 0
+        chg_arrow = "🔺" if chg > 0 else ("🔻" if chg < 0 else "➖")
+        price = p.get("price", 0)
+        price_str = f"¥{price:.2f}" if price else ""
+
+        # LDS四条标准检验（来自原则文档：30-200亿市值 + ROE>15% + 增速>20% + 机构持仓<30%）
+        roe_num = roe_raw if isinstance(roe_raw, (int, float)) else None
+        rev_num = p.get("rev_growth") if isinstance(p.get("rev_growth"), (int, float)) else None
+        mkt_cap = p.get("price", 0) * 1e8
+
+        lds_checks = []
+        if roe_num is not None:
+            lds_checks.append("✅ROE" if roe_num >= 15 else "⚠️ROE低")
+        if rev_num is not None:
+            lds_checks.append("✅增速" if rev_num >= 20 else "⚠️增速低")
+        lds_tag = " [" + " ".join(lds_checks) + "]" if lds_checks else ""
+
+        w.write(doc_id, [("bullet",
+            f"{name}({code}) {price_str} {chg_arrow}{chg:+.2f}%: "
+            f"评分{score:.1f} | PE {pe_str} | ROE {roe_str}{rev_str}{lds_tag}{chain_tag}{kelly_str}"
+        )])
     
     if exclude_sectors:
         w.write(doc_id, [("text", f"⚡ 已过滤 {filtered_count} 只防御板块标的（{'/'.join(exclude_sectors)}），聚焦进攻逻辑")])
@@ -1272,35 +1377,99 @@ def _build_hk_channel(w, doc_id):
         
         w.write(doc_id, [("bullet", f"{name}({symbol}): 评分 {score:.1f} | PE {pe_str}{discount_str}{tag_str}{kelly_str} | {mkt_str}")])
 
+def _fetch_watchlist_prices(codes: list) -> dict:
+    prices = {}
+    a_codes = [c for c in codes if c.isdigit() and len(c) == 6]
+    other_codes = [c for c in codes if c not in a_codes]
+
+    if a_codes:
+        try:
+            import baostock as bs
+            lg = bs.login()
+            if lg.error_code == "0":
+                for code in a_codes[:20]:
+                    sym = f"sh.{code}" if code.startswith(("5", "6")) else f"sz.{code}"
+                    rs = bs.query_history_k_data_plus(
+                        sym, "date,close,pctChg",
+                        start_date=(datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
+                        end_date=datetime.now().strftime("%Y-%m-%d"),
+                        frequency="d",
+                    )
+                    rows = []
+                    while rs.next():
+                        rows.append(rs.get_row_data())
+                    if rows:
+                        r = rows[-1]
+                        try:
+                            prices[code] = {
+                                "price": float(r[1]) if r[1] else None,
+                                "chg": float(r[2]) if r[2] else None,
+                            }
+                        except (ValueError, IndexError):
+                            pass
+                bs.logout()
+        except Exception:
+            pass
+
+    if other_codes:
+        try:
+            from .yf_data_layer import get_current_price
+            import time
+            for code in other_codes[:15]:
+                try:
+                    p = get_current_price(code)
+                    if p:
+                        prices[code] = {"price": round(float(p), 2), "chg": None}
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    return prices
+
+
 def _build_watchlist_section(w, doc_id):
     try:
         from . import config as _cfg
         watchlist = getattr(_cfg, "WATCHLIST", {})
         if not watchlist:
             return
-        w.write(doc_id, [("h3", "📋 核心观察池（面基/LDS框架选定）")])
-        tiers = {"核心": [], "关注": [], "底仓": [], "追踪": []}
+        w.write(doc_id, [("h3", "📋 核心观察池（含今日行情）")])
+
+        tiers = {"核心": [], "底仓": [], "关注": [], "追踪": []}
         for code, info in watchlist.items():
-            t = info.get("tier", "关注")
-            tiers.setdefault(t, []).append((code, info))
+            tiers.setdefault(info.get("tier", "关注"), []).append((code, info))
+
+        all_codes = list(watchlist.keys())
+        prices = _fetch_watchlist_prices(all_codes)
 
         tier_icons = {"核心": "⭐", "底仓": "🏛️", "关注": "👁️", "追踪": "📡"}
         for tier_name in ["核心", "底仓", "关注", "追踪"]:
             items = tiers.get(tier_name, [])
             if not items:
                 continue
-            lines = []
-            for code, info in items[:8]:
+            w.write(doc_id, [("bold", f"{tier_icons.get(tier_name,'')} {tier_name}标的")])
+            for code, info in items[:10]:
                 name = info.get("name", code)
                 chain = info.get("chain", "")
-                focus = info.get("focus", "")[:50]
-                lines.append(f"{name}({code}) [{chain}]: {focus}")
-            icon = tier_icons.get(tier_name, "")
-            w.write(doc_id, [("bold", f"{icon} {tier_name}标的")])
-            for line in lines:
-                w.write(doc_id, [("bullet", line)])
+                focus = info.get("focus", "")[:45]
+                pd_info = prices.get(code, {})
+                price = pd_info.get("price")
+                chg = pd_info.get("chg")
+
+                price_str = f"¥{price:.2f}" if price else "—"
+                if chg is not None:
+                    arrow = "🔺" if chg > 0 else ("🔻" if chg < 0 else "➖")
+                    chg_str = f" {arrow}{chg:+.2f}%"
+                else:
+                    chg_str = ""
+
+                w.write(doc_id, [("bullet",
+                    f"{name}({code}) {price_str}{chg_str} [{chain}]: {focus}"
+                )])
     except Exception as e:
-        w.write(doc_id, [("bullet", f"⚠️ 观察池加载失败: {str(e)[:40]}")])
+        w.write(doc_id, [("bullet", f"⚠️ 观察池加载失败: {str(e)[:60]}")])
 
 
 def _build_opportunity_themes_section(w, doc_id):
@@ -1529,11 +1698,59 @@ def build_tracking_section(w, doc_id, scanner, macro):
 # ═══════════════════════════════════
 def build_action_section(w, doc_id, macro):
     regime = macro.get("regime", "?")
+    dual_gate = macro.get("dual_gate", {})
+    macro_gate = dual_gate.get("macro_gate", "")
+    trend_gate = dual_gate.get("trend_gate", "")
+    dual_closed = (macro_gate == "红灯" and trend_gate == "红灯")
+    bw_q = macro.get("bw_quadrant", "")
+    credit_src = macro.get("credit_signal_source", "")
+
+    regime_to_favor = {
+        "扩张期": ("科技/半导体/AI/国产替代/高端制造", "公用事业/消费必需品/地产"),
+        "复苏期": ("消费/金融/地产/汽车 + 国产替代(政策独立驱动)", "能源/材料"),
+        "过热期": ("能源/材料/大宗商品/银行", "科技/消费/地产"),
+        "衰退期": ("公用事业/医药/消费必需品/黄金/长债", "科技/金融/地产/工业"),
+    }
+    favor, avoid = regime_to_favor.get(regime, ("均衡配置", "无明显回避"))
+
+    bw_asset_hint = {
+        "Q1": "商品>黄金>TIPS>股票>现金>长债",
+        "Q2": "股票>信用债>商品>国债 ← 最优象限",
+        "Q3": "黄金>TIPS>商品>现金 ← 滞胀最难",
+        "Q4": "长期国债(TLT/159926)>防御股>黄金 ← 增配债券",
+    }
+    bw_key = bw_q[:2] if bw_q else ""
+    bw_hint = bw_asset_hint.get(bw_key, "")
+
     w.write(doc_id, [("divider", ""), ("h2", "八、⚖️ 调仓建议")])
-    
+
+    w.write(doc_id, [("h3", "宏观基调")])
+    w.write(doc_id, [("bullet", f"当前象限: {regime} → 偏好: {favor}")])
+    w.write(doc_id, [("bullet", f"回避: {avoid}")])
+    if credit_src:
+        w.write(doc_id, [("bullet", f"信用判断来源: {credit_src}")])
+    if bw_hint:
+        w.write(doc_id, [("bullet", f"桥水{bw_key}象限资产排序: {bw_hint}")])
+
+    if dual_closed:
+        w.write(doc_id, [("bold", "🔒 双门关闭 → 防御模式")])
+        w.write(doc_id, [("bullet", "不开新仓 | 持有票检查8%止损线 | 不追高不加仓")])
+        if "Q4" in bw_q:
+            w.write(doc_id, [("bullet",
+                "象限4(增长↓通胀↓)建议: 可建长债底仓(TLT/159926/511010)，黄金维持底仓，"
+                "等待CPI回升至1.5%+再考虑股票"
+            )])
+        cpi = macro.get("macro_data", {}).get("cpi")
+        trend = macro.get("trend_temp", "?")
+        cpi_need = "1.5%+" if cpi is not None else "?"
+        w.write(doc_id, [("bullet",
+            f"双门转绿条件: CPI回升至{cpi_need} (当前={cpi}%) + 趋势温度回升至温 (当前={trend})"
+        )])
+    else:
+        w.write(doc_id, [("bold", "✅ 双门开启 → 正常操作")])
+        w.write(doc_id, [("bullet", f"优先进攻: {favor}")])
+
     w.write(doc_id, [
-        ("h3", "宏观基调"),
-        ("bullet", f"当前象限: {regime} → 偏好消费/金融/地产/汽车 → 回避能源/材料"),
         ("h3", "纪律检查"),
         ("bullet", "8% 硬止损：每票买入后立即设止损价 = 成本 × 0.92"),
         ("bullet", "15% 止盈减半仓 / 30% 止盈清仓"),

@@ -82,11 +82,20 @@ class MacroEngine:
     def _classify_quadrant(self):
         md = self.macro_data
         shibor = md.get("shibor", 1.75) or 1.75
+
+        # 信用宽紧：优先用社融同比增速（面基/LDS核心：社融才是真正的信用指标）
+        # 社融增速 > 10% 且趋势向上 = 宽信用；< 8% 且趋势向下 = 紧信用
+        sf_growth = md.get("social_financing_growth")
         m2g = md.get("m2_growth", 7.2) or 7.2
+        if sf_growth is not None:
+            loose_credit = "宽信用" if sf_growth > 9.0 else "紧信用"
+            self._credit_signal_source = f"社融增速{sf_growth:.1f}%"
+        else:
+            loose_credit = "宽信用" if m2g > config.MACRO_THRESHOLDS["m2_loose"] else "紧信用"
+            self._credit_signal_source = f"M2增速{m2g:.1f}%（社融数据不可用）"
 
         t = config.MACRO_THRESHOLDS
         loose_money = "宽货币" if shibor < t["shibor_loose"] else "紧货币"
-        loose_credit = "宽信用" if m2g > t["m2_loose"] else "紧信用"
         self.quadrant = f"{loose_money}·{loose_credit}"
 
         # 四象限→经济状态映射
@@ -315,7 +324,9 @@ class MacroEngine:
             "suggested_position": round(self.suggested_position, 2),
             "macro_data": {k: v for k, v in self.macro_data.items()
                           if k in ("cpi", "pmi", "m2_growth", "shibor", "cny_usd",
-                                   "cpi_trend", "pmi_trend", "cpi_date", "pmi_date")},
+                                   "cpi_trend", "pmi_trend", "cpi_date", "pmi_date",
+                                   "social_financing_growth")},
+            "credit_signal_source": getattr(self, "_credit_signal_source", ""),
             "guoyun": {
                 "price": self.guoyun_price,
                 "deviation": self.price_deviation,

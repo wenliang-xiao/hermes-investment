@@ -291,6 +291,15 @@ def get_macro_data() -> dict:
             result["m2_growth"] = float(m2_row.iloc[2])
             result["m2"] = float(m2_row.iloc[1])
         except: pass
+
+        # 社融增速（面基/LDS核心信用指标，优先于M2）
+        try:
+            sf = ak.macro_china_shrzgm()
+            if not sf.empty:
+                sf_row = sf.dropna().iloc[-1]
+                result["social_financing_growth"] = float(sf_row.iloc[2])
+                result["social_financing_date"] = str(sf_row.iloc[0])
+        except: pass
             
     except ImportError:
         print("  AKShare未安装，使用默认宏观数据")

@@ -142,10 +142,12 @@ def _price_signal(ret_20d: float, vol_20d: float) -> str:
     return "🔴 弱势"
 
 
-def track_lds_portfolio_v2(version: str = "A") -> dict:
+def track_lds_portfolio_v2(version: str = "A", bw_quadrant: str = "", dual_gate_open: bool = True) -> dict:
     """
     追踪 LDS 全天候组合（v2，使用 data_source_layer）
     version: "A"=A股版, "US"=美股版, "both"=两个版本对比
+    bw_quadrant: 桥水象限，如 "Q4_增长↓_通胀↓"，用于再平衡建议
+    dual_gate_open: LDS双门是否开启，关闭时暂缓再平衡
     """
     portfolio = LDS_PORTFOLIO_A if version in ("A", "both") else LDS_PORTFOLIO_US
     us_portfolio = LDS_PORTFOLIO_US if version == "both" else None
@@ -184,7 +186,7 @@ def track_lds_portfolio_v2(version: str = "A") -> dict:
         if ytd_valid:
             portfolio_ytd = round(sum(c["ytd"] * c["weight"] for c in ytd_valid), 2)
 
-    need_rebalance, rebalance_note = _check_rebalance(valid)
+    need_rebalance, rebalance_note = _check_rebalance(valid, bw_quadrant=bw_quadrant, dual_gate_open=dual_gate_open)
     quality_summary = summarize_data_quality(data_results)
 
     result_dict = {
@@ -204,15 +206,31 @@ def track_lds_portfolio_v2(version: str = "A") -> dict:
     return result_dict
 
 
-def _check_rebalance(components: list) -> tuple:
+def _check_rebalance(components: list, bw_quadrant: str = "", dual_gate_open: bool = True) -> tuple:
     rets = [c["ret_20d"] for c in components if c.get("ret_20d") is not None]
     if not rets or len(rets) < 2:
         return False, "数据不足，无法判断再平衡"
     spread = max(rets) - min(rets)
+
     if spread > 10:
         best = max(components, key=lambda c: c.get("ret_20d") or -999)
-        worst = max(components, key=lambda c: -(c.get("ret_20d") or 0))
-        return True, f"成分20日收益差={spread:.1f}%>10%，建议减{best['name']}补{worst['name']}"
+        worst_comp = min(components, key=lambda c: c.get("ret_20d") or 0)
+
+        if not dual_gate_open:
+            return False, (
+                f"成分20日收益差={spread:.1f}%>10%，技术上应再平衡，"
+                f"但双门关闭→底仓维持，等双门转绿再调仓"
+            )
+
+        q4_hint = ""
+        if "Q4" in bw_quadrant or "增长↓" in bw_quadrant:
+            q4_hint = "（象限4建议：增配长债/黄金，减商品）"
+
+        return True, (
+            f"成分20日收益差={spread:.1f}%>10%，"
+            f"建议减{best['name']}补{worst_comp['name']}{q4_hint}"
+        )
+
     return False, f"成分20日收益差={spread:.1f}%，未触发再平衡"
 
 

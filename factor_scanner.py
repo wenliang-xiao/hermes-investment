@@ -227,20 +227,28 @@ class FactorScanner:
             tech_bonus = max(0, (tech["total_tech_score"] - 5) * 0.2)
             total_score = min(10, total_score + tech_bonus)
 
+            last_row = daily.iloc[-1]
+            pe_val = last_row.get("pe") if "pe" in daily.columns else None
+            pb_val = last_row.get("pb") if "pb" in daily.columns else None
+            roe_val = fin.get("净资产收益率")
+            rev_growth = fin.get("营业收入同比增长率")
+            profit_growth = fin.get("净利润同比增长率")
+
             return {
                 "symbol": symbol,
                 "score": round(total_score, 2),
                 "factors": {
-                    "质量": quality,
-                    "价值": value,
-                    "成长": growth,
-                    "低波": lowvol,
-                    "红利": div,
-                    "动量": momentum,
+                    "质量": quality, "价值": value, "成长": growth,
+                    "低波": lowvol, "红利": div, "动量": momentum,
                 },
                 "tech": tech,
                 "price": float(close.iloc[-1]) if len(close) > 0 else 0,
                 "change_pct": self._calc_chg(daily),
+                "pe": round(float(pe_val), 1) if pe_val and pe_val > 0 else None,
+                "pb": round(float(pb_val), 2) if pb_val and pb_val > 0 else None,
+                "roe": round(float(roe_val), 1) if roe_val is not None else None,
+                "rev_growth": round(float(rev_growth), 1) if rev_growth is not None else None,
+                "profit_growth": round(float(profit_growth), 1) if profit_growth is not None else None,
             }
         except Exception as e:
             return {"symbol": symbol, "score": 0, "error": str(e)[:100]}
