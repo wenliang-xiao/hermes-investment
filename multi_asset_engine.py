@@ -473,12 +473,15 @@ def _build_summary(regime: str, by_class: dict, recs: dict) -> str:
     return " | ".join(lines)
 
 
-def run_daily_multi_asset_scan(regime: str = "default", asset_ids: list = None) -> dict:
+def run_daily_multi_asset_scan(regime: str = "default", asset_ids: list = None,
+                               bw_quadrant_override: str = "") -> dict:
     """
     每日多资产扫描入口函数
-    regime: 来自 MacroEngine().regime 的当前宏观象限
-    asset_ids: None = 扫描全资产宇宙，list = 指定子集
+    regime: 来自 MacroEngine().regime（如"复苏期"）
+    bw_quadrant_override: 桥水实际象限（如"Q4_增长↓_通胀↓"），优先于 REGIME_BRIDGE 静态映射
     """
+    effective_bw = bw_quadrant_override or REGIME_BRIDGE.get(regime, REGIME_BRIDGE["default"])
     engine = MultiAssetEngine(macro_regime=regime)
+    engine.bw_quadrant = effective_bw
     engine.score_all(asset_ids=asset_ids)
     return engine.to_report()

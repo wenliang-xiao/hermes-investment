@@ -212,7 +212,7 @@ def build_market_snapshot(w, doc_id):
     fas_fx = _fas_fx()
     fas_bonds = _fas_bonds()
 
-    w.write(doc_id, [("divider", ""), ("h2", "一、🌐 全球市场全景")])
+    w.write(doc_id, [("divider", ""), ("h2", "八、🌐 全球市场全景")])
 
     w.write(doc_id, [("h3", "核心指数")])
     try:
@@ -226,22 +226,6 @@ def build_market_snapshot(w, doc_id):
                 price_str = f"{price:,.0f}" if price else "⚠️"
                 chg_str = f" ({chg:+.2f}%)" if chg is not None else ""
                 w.write(doc_id, [("bullet", f"{idx_name}: {price_str}{chg_str}")])
-        comms_snap = snap.get("commodities", {})
-        if comms_snap:
-            parts = []
-            for name, p in comms_snap.items():
-                if p is not None:
-                    parts.append(f"{name}: ${p:.1f}")
-            if parts:
-                w.write(doc_id, [("bullet", " | ".join(parts))])
-        fx_snap = snap.get("fx", {})
-        if fx_snap:
-            fx_parts = []
-            for name, p in fx_snap.items():
-                if p is not None:
-                    fx_parts.append(f"{name}: {p:.4f}")
-            if fx_parts:
-                w.write(doc_id, [("bullet", " | ".join(fx_parts))])
         bonds_snap = snap.get("bonds", {})
         if bonds_snap:
             b_parts = [f"{n}: {v:.2f}%" for n, v in bonds_snap.items() if v is not None]
@@ -250,34 +234,7 @@ def build_market_snapshot(w, doc_id):
     except Exception as e:
         w.write(doc_id, [("bullet", f"⚠️ 市场快照失败: {str(e)[:40]}")])
 
-    # ── 大宗商品（统一用 full_asset_scanner，有价格校验）──
-    w.write(doc_id, [("h3", "大宗商品")])
-    comms = fas_comm.get('commodities', [])
-    if comms:
-        for c in comms[:6]:
-            price = c.get('price')
-            ret20 = c.get('ret_20d')
-            price_str = f"${price:.0f}" if price is not None else "⚠️ 暂无"
-            ret_str = f"({ret20:+.1f}%)" if ret20 is not None else ""
-            note = c.get('note', '')
-            warning = f" [{note}]" if note and '⚠' in note else ""
-            w.write(doc_id, [("bullet", f"{c['name']}: {price_str} {ret_str}{warning}")])
-    else:
-        w.write(doc_id, [("bullet", "⚠️ 商品数据延迟")])
 
-    # ── 汇率（统一用 full_asset_scanner）──
-    w.write(doc_id, [("h3", "主要汇率")])
-    fx_pairs = fas_fx.get('fx_pairs', [])
-    if fx_pairs:
-        for p in fx_pairs[:5]:
-            name = p.get('name', p.get('key', '?'))
-            price = p.get('price')
-            note = p.get('note', '')
-            price_str = f"{price:.4f}" if price is not None else "⚠️ 暂无"
-            warning = f" [{note}]" if note else ""
-            w.write(doc_id, [("bullet", f"{name}: {price_str}{warning}")])
-    else:
-        w.write(doc_id, [("bullet", "⚠️ 汇率数据延迟")])
 
     # ── VIX 恐慌指数 + 北向资金（情绪信号）──
     w.write(doc_id, [("h3", "市场情绪信号")])
@@ -473,7 +430,7 @@ _CHAIN_CONFIGS = [
             {"code": "300502", "name": "新易盛",  "env": "光模块(毛利率35-45%)", "roe_ref": 38, "why": "800G→1.6T升级直接受益，AI算力互联核心"},
             {"code": "301489", "name": "中际旭创", "env": "光模块(毛利率35-45%)", "roe_ref": 43, "why": "全球光模块市占率TOP3，ROE43%是链上最高"},
             {"code": "688183", "name": "海目星",   "env": "激光器件(毛利率45%+)", "roe_ref": 18, "why": "CPO共封装光学的上游激光光源"},
-            {"code": "300308", "name": "中际旭创",  "env": "光PCB(毛利率20-30%)", "roe_ref": 15, "why": "高速光模块PCB配套，毛利率中等"},
+            {"code": "002463", "name": "沪电股份",  "env": "高速光模块PCB(毛利率20-30%)", "roe_ref": 15, "why": "AI服务器高速背板PCB配套，量价齐升"},
         ],
         "a_avoid": "服务器组装（毛利率5-8%）：工控/组装利润极薄，不符合LDS选股逻辑",
     },
@@ -802,7 +759,7 @@ def build_chain_section(w, doc_id, scanner, macro):
       4. 供需缺口增加「缺口方向变化(扩大/缩小)」
       5. 条件触发链标⚡，通缩环境下注明不满足条件
     """
-    w.write(doc_id, [("divider", ""), ("h2", "四、🔗 产业链 10 链深度分析")])
+    w.write(doc_id, [("divider", ""), ("h2", "九、🔗 产业链 10 链深度分析")])
 
     chain_mode = macro.get('chain_mode', 'active')
     if chain_mode == 'observation':
@@ -1479,7 +1436,7 @@ def _build_opportunity_themes_section(w, doc_id):
 
 
 def build_discovery_section(w, doc_id, scanner, macro):
-    w.write(doc_id, [("divider", ""), ("h2", "五、🔍 多因子新票发现")])
+    w.write(doc_id, [("divider", ""), ("h2", "十、🔍 多因子新票发现")])
 
     regime = macro.get('regime', '')
     exclude_sectors = []

@@ -118,7 +118,7 @@ try:
     # ═══ 四、多资产配置引擎（风险调整收益最大化）═══
     try:
         regime_for_engine = macro.get('regime', 'default')
-        ma_report = run_daily_multi_asset_scan(regime=regime_for_engine)
+        ma_report = run_daily_multi_asset_scan(regime=regime_for_engine, bw_quadrant_override=bw_q)
         w.write(doc_id, [
             ('divider', ''),
             ('h2', '四、🎯 多资产配置建议（风险平价 × 宏观匹配）'),

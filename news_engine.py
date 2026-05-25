@@ -711,6 +711,14 @@ def classify_impact(news_list: List[Dict]) -> List[Dict]:
             })
         
         item["impacts"] = impacts
+        if not impacts:
+            _signal = _detect_general_sentiment(text)
+            if _signal == 1:
+                item["general_sentiment"] = "↑利好"
+            elif _signal == -1:
+                item["general_sentiment"] = "↓利空"
+            else:
+                item["general_sentiment"] = "→中性"
     
     return news_list
 
@@ -840,7 +848,13 @@ def _calc_sentiment_score(news_list: List[Dict]) -> dict:
         elif item_bearish and not item_bullish:
             bearish += 1
         else:
-            neutral += 1
+            gs = item.get("general_sentiment", "→中性")
+            if "↑" in gs:
+                bullish += 1
+            elif "↓" in gs:
+                bearish += 1
+            else:
+                neutral += 1
 
     total = bullish + bearish + neutral or 1
     if bullish > bearish * 1.5:
