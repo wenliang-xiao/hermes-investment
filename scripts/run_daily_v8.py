@@ -3,6 +3,8 @@
 import sys, time
 sys.path.insert(0, '/home/admin/.hermes')
 import investment_system.report_v6 as rpt
+from investment_system.macro_engine import MacroEngine
+from investment_system.factor_scanner import FactorScanner
 from scripts.build_daily_report import (
     build_gate_line, build_market_snapshot, build_key_news,
     build_position_status, build_mining_signals, build_discipline
@@ -17,8 +19,8 @@ def log(msg):
 log("=== 日报 v8 START ===")
 
 try:
-    scanner = rpt.FactorScanner()
-    macro_engine = rpt.MacroEngine()
+    scanner = FactorScanner()
+    macro_engine = MacroEngine()
     macro = macro_engine.refresh()
     
     w = rpt.FeishuWriter()

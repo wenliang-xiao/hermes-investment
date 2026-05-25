@@ -25,16 +25,21 @@ def _ret_badge(ret, fmt="%+.1f%%"):
 
 def build_gate_line(w, doc_id, macro):
     """🚦 宏观信号 — 1行结论"""
-    gates = macro.get('gate_status', {})
-    mg = '🔴 关' if gates.get('macro_gate') == 'closed' else '🟢 开'
-    tg = '🔴 关' if gates.get('trend_gate') == 'closed' else '🟢 开'
-    cpi = macro.get('cpi', '?')
+    dual = macro.get('dual_gate', {})
+    macro_ok = dual.get('macro_ok', False)
+    trend_ok = dual.get('trend_ok', False)
+    action = dual.get('action', '观望')
+    mg = '🟢 开' if macro_ok else '🔴 关'
+    tg = '🟢 开' if trend_ok else '🔴 关'
+    cpi = macro.get('macro_data', {}).get('cpi', '?')
     regime = macro.get('regime', '?')
-    action = '观望为主' if mg == '🔴 关' and tg == '🔴 关' else '精选操作'
+    drift = macro.get('trend_deviation_20', '?')
+    switch = macro.get('strategy_switch', '?')
     w.write(doc_id, [
         ('h2', '🚦 今日宏观信号'),
         ('bold', f"双门: {mg} + {tg} → {action}"),
-        ('bullet', f"象限: {regime} | CPI={cpi}%"),
+        ('bullet', f"象限: {regime} | CPI={cpi}% | 策略: {switch}"),
+        ('bullet', f"趋势温度: {macro.get('trend_temp','?')} | 20日偏离: {drift}%"),
     ])
 
 def build_market_snapshot(w, doc_id):
@@ -104,8 +109,10 @@ def build_mining_signals(w, doc_id, scanner, macro):
 
 def build_discipline(w, doc_id, macro):
     """⚙ 今日操作纪律"""
-    gates = macro.get('gate_status', {})
-    both_closed = gates.get('macro_gate') == 'closed' and gates.get('trend_gate') == 'closed'
+    dual = macro.get('dual_gate', {})
+    macro_ok = dual.get('macro_ok', False)
+    trend_ok = dual.get('trend_ok', False)
+    both_closed = not macro_ok and not trend_ok
     w.write(doc_id, [('h2', '⚙ 今日操作纪律')])
     if both_closed:
         w.write(doc_id, [
