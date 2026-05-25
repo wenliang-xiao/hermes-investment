@@ -4,10 +4,9 @@ import sys, time
 sys.path.insert(0, '/home/admin/.hermes')
 import investment_system.report_v6 as rpt
 from investment_system.macro_engine import MacroEngine
-from investment_system.factor_scanner import FactorScanner
 from scripts.build_daily_report import (
-    build_gate_line, build_market_snapshot, build_key_news,
-    build_position_status, build_mining_signals, build_discipline
+    build_gate_line, build_market_snapshot, build_weekly_news,
+    build_key_watchlist, build_chain_mining, build_discipline
 )
 
 LF = '/tmp/report_v8_log.txt'
@@ -19,7 +18,6 @@ def log(msg):
 log("=== 日报 v8 START ===")
 
 try:
-    scanner = FactorScanner()
     macro_engine = MacroEngine()
     macro = macro_engine.refresh()
     
@@ -32,17 +30,17 @@ try:
     # 1. 标题
     w.write(doc_id, [
         ('h2', f"{rpt.SAN_YUAN_NAME}·日报"),
-        ('text', f"{time.strftime('%Y/%m/%d')} | v8 文档矩阵·指挥中心"),
+        ('text', f"{time.strftime('%Y/%m/%d')} | v8 全球市场全景版"),
         ('text', f"数据质量: ✅ 核心数据正常 (检查中)"),
         ('divider', ''),
     ])
     
-    # 2-7. 六大板块
+    # 2-7. 六大板块（v8重写版）
     build_gate_line(w, doc_id, macro)
     build_market_snapshot(w, doc_id)
-    build_key_news(w, doc_id)
-    build_position_status(w, doc_id)
-    build_mining_signals(w, doc_id, scanner, macro)
+    build_weekly_news(w, doc_id)
+    build_key_watchlist(w, doc_id, macro)
+    build_chain_mining(w, doc_id, macro)
     build_discipline(w, doc_id, macro)
     
     # 8. 脚注
