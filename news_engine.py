@@ -924,10 +924,23 @@ def _build_keyword_summary(news_list: List[Dict]) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def _is_relevant(item: Dict) -> bool:
-    lang = item.get("lang", "zh")
-    text = (item.get("title", "") + " " + item.get("description", "")).lower()
-    keywords = _RELEVANCE_KEYWORDS.get(lang, _RELEVANCE_KEYWORDS["zh"])
-    return any(kw in text for kw in keywords)
+    """
+    ★ v5.3 宽松模式：RSS源本身已是金融类，过滤从"关键词白名单"降为"标题长度+简单有效性校验"
+    因为 RSS_SOURCES 里的搜索关键词已经是投资相关（如 "AI chip NVIDIA"、"证监会" 等），
+    返回的标题天然就是金融/产业类，无需再用严格白名单过滤。
+    只排除：空标题、纯噪音标题
+    """
+    title = (item.get("title", "") or "").strip()
+    if not title or len(title) < 5:
+        return False
+    # 排除明显的非新闻噪音条目
+    noise_patterns = ["subscribe", "sign up", "privacy policy", "terms of service",
+                      "cookie", "advertisement", "sponsored"]
+    title_lower = title.lower()
+    for p in noise_patterns:
+        if p in title_lower:
+            return False
+    return True
 
 
 def _is_within_window(item: Dict, days: int = NEWS_WINDOW_DAYS) -> bool:

@@ -83,7 +83,7 @@ CHAIN_BOTTLENECKS = {
     },
     "半导体链": {
         "bottleneck": "先进制程(3nm以下)良率+设备出口限制→国产替代窗口期，成熟制程产能过剩拖累",
-        "direction": "国产设备(北方华创/中微)、chiplet先进封装(通富微电/长电)、EDA工具"
+        "direction": "chiplet先进封装(通富微电/长电)、EDA工具、第三代半导体(三安光电)"
     },
     "存储/HBM链": {
         "bottleneck": "HBM由三星+SK海力士双寡头垄断，A股缺少纯正标的；封装基板国产化率<5%",
@@ -170,23 +170,65 @@ def _get_cross_themes(regime):
 # ============================================================
 
 def build_gate_line(w, doc_id, macro):
-    """🚦 宏观信号 — 1行结论"""
+    """🚦 宏观信号 — 双门 + 桥水象限 + 资产配置建议"""
     dual = macro.get('dual_gate', {})
     macro_ok = dual.get('macro_ok', False)
     trend_ok = dual.get('trend_ok', False)
     action = dual.get('action', '观望')
     mg = '🟢 开' if macro_ok else '🔴 关'
     tg = '🟢 开' if trend_ok else '🔴 关'
-    cpi = macro.get('macro_data', {}).get('cpi', '?')
+    md = macro.get('macro_data', {})
+    cpi = md.get('cpi', '?')
+    pmi = md.get('pmi', '?')
     regime = macro.get('regime', '?')
     drift = macro.get('trend_deviation_20', '?')
     switch = macro.get('strategy_switch', '?')
+    
     w.write(doc_id, [
         ('h2', '🚦 今日宏观信号'),
         ('bold', f"双门: {mg} + {tg} → {action}"),
-        ('bullet', f"象限: {regime} | CPI={cpi}% | 策略: {switch}"),
+        ('bullet', f"象限: {regime} | CPI={cpi}% | PMI={pmi} | 策略: {switch}"),
         ('bullet', f"趋势温度: {macro.get('trend_temp', '?')} | 20日偏离: {drift}%"),
     ])
+    
+    # ★ 桥水全天候四象限 → 资产配置建议
+    try:
+        cpi_val = _safe_float(cpi, 0)
+        pmi_val = _safe_float(pmi, 50)
+        growth_up = pmi_val >= 50
+        inflation_up = cpi_val >= 2.5
+        
+        if growth_up and inflation_up:
+            bw_quad = "象限1（增长↑通胀↑）"
+            bw_assets = "商品 > 黄金 > 新兴市场股 > TIPS"
+            bw_china = "过热期 → 大宗商品+上游资源"
+        elif growth_up and not inflation_up:
+            bw_quad = "象限2（增长↑通胀↓）"
+            bw_assets = "股票 > 信用债 > 商品 > 现金"
+            bw_china = "扩张期 → A股成长+美股科技"
+        elif not growth_up and inflation_up:
+            bw_quad = "象限3（增长↓通胀↑）"
+            bw_assets = "黄金 > 商品 > TIPS > 现金"
+            bw_china = "滞胀风险 → 黄金+能源+必需消费"
+        else:
+            bw_quad = "象限4（增长↓通胀↓）"
+            bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
+            bw_china = "衰退/通缩 → TLT/长债底仓+黄金+红利低波"
+        
+        w.write(doc_id, [
+            ('h3', f'🌐 桥水参考: {bw_quad}'),
+            ('bullet', f'资产排序: {bw_assets}'),
+            ('bullet', f'中国对照: {bw_china}'),
+        ])
+        
+        # ★ 象限4特殊提示：TLT底仓优先于黄金
+        if not growth_up and not inflation_up:
+            w.write(doc_id, [
+                ('bold', '⚠️ 通缩象限: 长期国债(TLT) > 黄金 — 建TLT/长债底仓优于加黄金'),
+                ('bullet', '双门关闭时不是完全观望 → 可建TLT/159926长债底仓作为防御配置'),
+            ])
+    except Exception:
+        pass  # 静默降级
 
 
 # ============================================================
@@ -270,6 +312,10 @@ def build_market_snapshot(w, doc_id):
         cn_spread = bonds.get('cn_us_spread')
         if cn_spread is not None:
             w.write(doc_id, [('bullet', f"中美利差: {cn_spread}bp")])
+        # ★ 中国10Y收益率
+        cn_10y = bonds.get('cn_10y_estimated')
+        if cn_10y is not None:
+            w.write(doc_id, [('bullet', f"中国10Y收益率: {cn_10y:.2f}%")])
     else:
         w.write(doc_id, [('bullet', '⚠️ 债券数据暂不可用')])
 
@@ -419,27 +465,43 @@ def build_weekly_news(w, doc_id):
 # ============================================================
 
 def build_key_watchlist(w, doc_id, macro):
-    """🎯 核心观察池 — 面基知识链龙头 + LDS组合 + 跨资产"""
+    """🎯 核心观察池 — 面基/LDS框架下的重点票关注池（WATCHLIST） + LDS组合 + 跨资产"""
 
     w.write(doc_id, [('h2', '🎯 核心观察池')])
 
-    # ── 1. 10链核心标的（来自config INDUSTRY_CHAINS）──
-    w.write(doc_id, [('h3', '🔗 10链核心标的')])
-    chains = list(cfg.INDUSTRY_CHAINS.items())[:8]
-    for chain_id, chain_data in chains:
-        name = chain_data.get('name', chain_id)
-        # Use the dict key as name if 'name' not present
-        if name == chain_id:
-            name = chain_id
-        stocks = chain_data.get('key_stocks_a', [])
-        if not stocks:
-            # fallback: use 'symbols'
-            stocks = chain_data.get('symbols', [])[:3]
-        perez = chain_data.get('perez_stage', '')
-        if stocks:
-            stock_str = ', '.join(stocks[:4])
-            perez_short = perez[:20] if perez else ''
-            w.write(doc_id, [('bullet', f"{name}: {stock_str}  [{perez_short}]")])
+    # ── 1. 重点票关注池（来自config.WATCHLIST — 面基/LDS框架标的）──
+    w.write(doc_id, [('h3', '🔗 重点票关注池')])
+    try:
+        watchlist = getattr(cfg, 'WATCHLIST', {})
+        if watchlist:
+            # 按chain分组展示
+            by_chain = {}
+            for code, info in watchlist.items():
+                chain = info.get('chain', '其他')
+                by_chain.setdefault(chain, []).append((code, info))
+
+            for chain, items in sorted(by_chain.items()):
+                # 每条链最多展示3个标的
+                core_items = [i for i in items if i[1].get('tier') == '核心'][:2]
+                focus_items = [i for i in items if i[1].get('tier') == '关注'][:1]
+                show_items = core_items + focus_items
+                if show_items:
+                    parts = []
+                    for code, info in show_items[:3]:
+                        name = info.get('name', code)
+                        focus = info.get('focus', '')[:40]
+                        parts.append(f"{name}({focus})")
+                    w.write(doc_id, [('bullet', f"{chain}: {' | '.join(parts)}")])
+        else:
+            # fallback to INDUSTRY_CHAINS
+            chains = list(cfg.INDUSTRY_CHAINS.items())[:8]
+            for chain_id, chain_data in chains:
+                name = chain_data.get('name', chain_id)
+                stocks = chain_data.get('key_stocks_a', [])
+                if stocks:
+                    w.write(doc_id, [('bullet', f"{name}: {', '.join(stocks[:3])}")])
+    except Exception as e:
+        w.write(doc_id, [('bullet', f'⚠️ 关注池暂不可用: {str(e)[:40]}')])
 
     # ── 2. LDS全天候组合状态 ──
     w.write(doc_id, [('h3', '📦 LDS全天候组合')])
@@ -572,6 +634,43 @@ def build_chain_mining(w, doc_id, macro):
     for theme in cross_themes:
         w.write(doc_id, [('bullet', theme)])
 
+    # ★ OPPORTUNITY_THEMES — 7大挖掘机会主题（来自config，面基/LDS产业逻辑验证）
+    try:
+        opp_themes = getattr(cfg, 'OPPORTUNITY_THEMES', {})
+        if opp_themes:
+            w.write(doc_id, [('h3', '⭐ 7大挖掘机会主题')])
+            for theme_name, theme_data in list(opp_themes.items())[:5]:
+                logic = theme_data.get('logic', '')[:120]
+                bottleneck = theme_data.get('bottleneck', '')[:100]
+                stage = theme_data.get('perez_stage', '')
+                catalysts = theme_data.get('key_catalysts', [])
+                
+                w.write(doc_id, [
+                    ('h4', f'📌 {theme_name}'),
+                    ('bullet', f'逻辑: {logic}'),
+                ])
+                if bottleneck:
+                    w.write(doc_id, [('bold', f'瓶颈: {bottleneck}')])
+                if stage:
+                    w.write(doc_id, [('bullet', f'阶段: {stage}')])
+                if catalysts:
+                    w.write(doc_id, [('bullet', f'催化剂: {", ".join(catalysts[:3])}')])
+                # 标的
+                a_stocks = theme_data.get('a_stocks_focus', [])
+                us_stocks = theme_data.get('us_stocks_focus', [])
+                hk_stocks = theme_data.get('hk_stocks_focus', [])
+                stocks_parts = []
+                if a_stocks: stocks_parts.append(f"A股: {', '.join(a_stocks[:3])}")
+                if us_stocks: stocks_parts.append(f"美股: {', '.join(us_stocks[:3])}")
+                if hk_stocks: stocks_parts.append(f"港股: {', '.join(hk_stocks[:3])}")
+                if stocks_parts:
+                    w.write(doc_id, [('bullet', ' | '.join(stocks_parts))])
+                risk = theme_data.get('risk', '')
+                if risk:
+                    w.write(doc_id, [('bullet', f'⚠️ 风险: {risk[:100]}')])
+    except Exception:
+        pass  # 静默降级
+
     # ── 链资金流向信号（如果多资产扫描可用）──
     try:
         from investment_system.multi_asset_engine import run_daily_multi_asset_scan
@@ -600,15 +699,34 @@ def build_discipline(w, doc_id, macro):
     macro_ok = dual.get('macro_ok', False)
     trend_ok = dual.get('trend_ok', False)
     both_closed = not macro_ok and not trend_ok
+    
+    # 桥水象限判断
+    md = macro.get('macro_data', {})
+    cpi = _safe_float(md.get('cpi'), 0)
+    pmi = _safe_float(md.get('pmi'), 50)
+    is_q4 = (pmi < 50 and cpi < 2.5)  # 象限4: 增长↓通胀↓
+    
     w.write(doc_id, [('h2', '⚙ 今日操作纪律')])
     if both_closed:
         w.write(doc_id, [
             ('bullet', '双门关闭 → 不开新仓'),
             ('bullet', '持有中: 检查是否触发8%止损线'),
-            ('bullet', '观察中: 等待双门转绿再行动'),
         ])
+        if is_q4:
+            w.write(doc_id, [
+                ('bold', '🧊 通缩象限(桥水Q4): 可建TLT/159926长债底仓 — 不冲突于"不开新仓"原则'),
+                ('bullet', '长债底仓逻辑: 利率下行→长久期资产受益最大, Q4象限长期国债>黄金'),
+            ])
+        else:
+            w.write(doc_id, [
+                ('bullet', '观察中: 等待双门转绿再行动'),
+            ])
     else:
         w.write(doc_id, [
             ('bullet', f"当前象限: {macro.get('regime', '?')} — 正常操作"),
             ('bullet', '单票≤2%仓位 | 持有≤8只 | 8%硬止损不可商量'),
         ])
+        if is_q4:
+            w.write(doc_id, [
+                ('bullet', '🧊 通缩象限: TLT/长债优先于黄金, 红利低波(512890)做底仓'),
+            ])
