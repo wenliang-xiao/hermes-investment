@@ -1,15 +1,20 @@
 """
 Data Layer — 统一数据获取
-主数据源: baostock（本地稳定，A股全量数据，不含HTTP依赖）
-辅助: AKShare（重试机制+超时保护，用于补充数据）
+优先级：JQData（主，需配置账号）→ baostock（备）→ AKShare（兜底）
+
+配置 JQData：在环境变量中设置 JQDATA_USER / JQDATA_PASS
+或在 config.py 中添加 JQDATA_USER = "手机号", JQDATA_PASS = "密码"
 """
 import baostock as bs
 import pandas as pd
 import numpy as np
 import time
+import logging
 from datetime import datetime, timedelta
 from . import config
 from .stock_universe import ALL_CORE_STOCKS, INDEX_DATA
+
+logger = logging.getLogger(__name__)
 
 # ─── Baostock 连接管理 ───
 _bs_logged_in = False
@@ -101,7 +106,14 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。baostock主源，AKShare降级回退。"""
+    """获取个股日线数据（含PE/PB）。JQData主源→baostock备→AKShare兜底。"""
+    try:
+        from .jqdata_layer import get_stock_daily_jq
+        df = get_stock_daily_jq(symbol, days)
+        if not df.empty:
+            return df
+    except Exception:
+        pass
     _bs_login()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
@@ -144,7 +156,14 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
 # 3. 基本面数据（baostock）
 # ═══════════════════════════════════════════
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率, 净利率"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率, 净利率。JQData主源→baostock备。"""
+    try:
+        from .jqdata_layer import get_financial_report_jq
+        result = get_financial_report_jq(symbol)
+        if result:
+            return result
+    except Exception:
+        pass
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
@@ -212,7 +231,15 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
     """
     获取多季度财务历史：ROE趋势 + FCF 计算所需数据
     返回按时间倒序的季度列表，用于计算 ROE 趋势和 FCF
+    JQData主源→baostock备
     """
+    try:
+        from .jqdata_layer import get_financial_history_jq
+        result = get_financial_history_jq(symbol, quarters)
+        if result:
+            return result
+    except Exception:
+        pass
     _bs_login()
     bs_code = _bs_code(symbol)
     history = []
@@ -276,9 +303,17 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
 
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
     """
-    获取个股 5 年 PE-TTM 历史序列，用于计算历史百分位。
+    获取个股 PE-TTM 历史序列，用于计算历史百分位。
+    JQData主源（试用账号约12个月）→ baostock备（重算）。
     返回 pd.Series，index=date，values=pe
     """
+    try:
+        from .jqdata_layer import get_pe_history_jq
+        s = get_pe_history_jq(symbol, days=min(years * 365, 400))
+        if len(s) >= 30:
+            return s
+    except Exception:
+        pass
     _bs_login()
     start = (datetime.now() - timedelta(days=years * 365 + 30)).strftime("%Y-%m-%d")
     end = datetime.now().strftime("%Y-%m-%d")
@@ -407,11 +442,14 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
 # 5. 宏观经济数据（AKShare不可用时的默认值）
 # ═══════════════════════════════════════════
 def get_macro_data() -> dict:
-    """获取宏观数据（默认值，AKShare补充作为可选升级）
-    
-    宏观数据（CPI/PMI/M2）月频更新，不影响日内决策。
-    使用合理默认值，AKShare服务可用时会覆盖。
-    """
+    """获取宏观数据（CPI/PMI/M2/社融）。JQData主源→AKShare备→缓存兜底。"""
+    try:
+        from .jqdata_layer import get_macro_data_jq
+        jq_result = get_macro_data_jq()
+        if jq_result.get("cpi") is not None and jq_result.get("pmi") is not None:
+            return jq_result
+    except Exception:
+        pass
     import json, os
     cache_file = os.path.join(os.path.dirname(__file__), "data", "macro_raw_cache.json")
     

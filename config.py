@@ -9,6 +9,13 @@ BASE = Path("/home/admin/.hermes/investment_system")
 DATA_DIR = BASE / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+# ─── JQData 聚宽数据（主数据源，优先级高于baostock）───
+# 申请地址：joinquant.com → JQData试用
+# 账号：手机号，密码：聚宽官网登录密码
+# 也可通过环境变量 JQDATA_USER / JQDATA_PASS 设置（优先）
+JQDATA_USER = "18813017039"
+JQDATA_PASS = "112xwl@XWL"
+
 # ─── 飞书 ───
 FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
 FEISHU_FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"
