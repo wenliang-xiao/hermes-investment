@@ -170,7 +170,7 @@ def _get_cross_themes(regime):
 # ============================================================
 
 def build_gate_line(w, doc_id, macro):
-    """🚦 宏观信号 — 双门 + 桥水象限 + 资产配置建议"""
+    """🚦 宏观信号 — 双门驱动桥水象限，不留逻辑矛盾"""
     dual = macro.get('dual_gate', {})
     macro_ok = dual.get('macro_ok', False)
     trend_ok = dual.get('trend_ok', False)
@@ -183,50 +183,108 @@ def build_gate_line(w, doc_id, macro):
     regime = macro.get('regime', '?')
     drift = macro.get('trend_deviation_20', '?')
     switch = macro.get('strategy_switch', '?')
+    temp = macro.get('trend_temp', '?')
     
     w.write(doc_id, [
         ('h2', '🚦 今日宏观信号'),
         ('bold', f"双门: {mg} + {tg} → {action}"),
         ('bullet', f"象限: {regime} | CPI={cpi}% | PMI={pmi} | 策略: {switch}"),
-        ('bullet', f"趋势温度: {macro.get('trend_temp', '?')} | 20日偏离: {drift}%"),
     ])
+    if drift != '?':
+        w.write(doc_id, [('bullet', f"趋势温度: {temp} | 20日偏离: {drift}%")])
     
-    # ★ 桥水全天候四象限 → 资产配置建议
+    # ── 桥水四象限：由双门状态驱动，CPI/PMI辅助判断 ──
     try:
-        cpi_val = _safe_float(cpi, 0)
-        pmi_val = _safe_float(pmi, 50)
-        growth_up = pmi_val >= 50
-        inflation_up = cpi_val >= 2.5
+        cpi_val = _safe_float(cpi)
+        pmi_val = _safe_float(pmi)
+        both_closed = not macro_ok and not trend_ok
+        one_closed = (not macro_ok) or (not trend_ok)
         
-        if growth_up and inflation_up:
-            bw_quad = "象限1（增长↑通胀↑）"
-            bw_assets = "商品 > 黄金 > 新兴市场股 > TIPS"
-            bw_china = "过热期 → 大宗商品+上游资源"
-        elif growth_up and not inflation_up:
-            bw_quad = "象限2（增长↑通胀↓）"
-            bw_assets = "股票 > 信用债 > 商品 > 现金"
-            bw_china = "扩张期 → A股成长+美股科技"
-        elif not growth_up and inflation_up:
-            bw_quad = "象限3（增长↓通胀↑）"
-            bw_assets = "黄金 > 商品 > TIPS > 现金"
-            bw_china = "滞胀风险 → 黄金+能源+必需消费"
+        # ★ 核心规则：双门决定置信度，CPI/PMI决定具体象限
+        if both_closed:
+            # 双门全关 → 防御模式，保守判断象限
+            if cpi_val is not None and cpi_val >= 2.5:
+                bw_quad = "象限3（增长↓通胀↑）"
+                bw_assets = "黄金 > 商品 > TIPS > 现金"
+                bw_china = "滞胀风险 → 黄金+能源+必需消费"
+                bw_confidence = "⚠️ 双门关闭锁定（CPI仍偏高→滞胀信号）"
+            else:
+                bw_quad = "象限4（增长↓通胀↓）"
+                bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
+                bw_china = "衰退/通缩 → TLT/长债底仓+黄金+红利低波"
+                bw_confidence = f"⚠️ 双门关闭锁定（CPI={cpi}%通缩压力→自动进入象限4）"
+        
+        elif one_closed:
+            # 一扇门关 → 谨慎象限
+            if not macro_ok:  # 宏观门关
+                bw_quad = "象限4（增长↓通胀↓）"
+                bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
+                bw_china = "宏观门关 → 偏防御配置"
+                bw_confidence = "⚠️ 宏观门关闭（经济数据弱→保守默认Q4）"
+            else:  # 趋势门关
+                if cpi_val is not None and cpi_val >= 2.5:
+                    bw_quad = "象限3（增长↓通胀↑）"
+                    bw_assets = "黄金 > 商品 > TIPS > 现金"
+                    bw_china = "趋势门关+通胀 → 黄金+能源"
+                    bw_confidence = "⚠️ 趋势门关闭（动量弱→转防御）"
+                else:
+                    bw_quad = "象限4（增长↓通胀↓）"
+                    bw_assets = "长期国债 > 防御股 > 黄金 > 现金"
+                    bw_china = "趋势门关+通缩 → 长债+防御"
+                    bw_confidence = "⚠️ 趋势门关闭（动量弱→默认Q4）"
+        
         else:
-            bw_quad = "象限4（增长↓通胀↓）"
-            bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
-            bw_china = "衰退/通缩 → TLT/长债底仓+黄金+红利低波"
+            # 双门全开 → 进攻模式，CPI/PMI判断象限
+            if cpi_val is not None and pmi_val is not None:
+                growth_up = pmi_val >= 50
+                inflation_up = cpi_val >= 2.5
+                if growth_up and inflation_up:
+                    bw_quad = "象限1（增长↑通胀↑）"
+                    bw_assets = "商品 > 黄金 > 新兴市场股 > TIPS"
+                    bw_china = "过热期 → 大宗商品+上游资源"
+                elif growth_up and not inflation_up:
+                    bw_quad = "象限2（增长↑通胀↓）"
+                    bw_assets = "股票 > 信用债 > 商品 > 现金"
+                    bw_china = "扩张期 → A股成长+美股科技"
+                elif not growth_up and inflation_up:
+                    bw_quad = "象限3（增长↓通胀↑）"
+                    bw_assets = "黄金 > 商品 > TIPS > 现金"
+                    bw_china = "滞胀风险 → 黄金+能源+必需消费"
+                else:
+                    bw_quad = "象限4（增长↓通胀↓）"
+                    bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
+                    bw_china = "衰退/通缩 → TLT/长债底仓+黄金+红利低波"
+                bw_confidence = "高（双门开+CPI/PMI数据完整）"
+            else:
+                bw_quad = "象限4（增长↓通胀↓）"
+                bw_assets = "长期国债 > 黄金 > 防御股 > 现金"
+                bw_china = "数据不足→保守默认Q4"
+                bw_confidence = "低（CPI/PMI数据缺失）"
         
         w.write(doc_id, [
             ('h3', f'🌐 桥水参考: {bw_quad}'),
+            ('bullet', f'置信度: {bw_confidence}'),
             ('bullet', f'资产排序: {bw_assets}'),
             ('bullet', f'中国对照: {bw_china}'),
         ])
         
-        # ★ 象限4特殊提示：TLT底仓优先于黄金
-        if not growth_up and not inflation_up:
+        # ── 操作提示：与双门状态一致 ──
+        if both_closed:
             w.write(doc_id, [
-                ('bold', '⚠️ 通缩象限: 长期国债(TLT) > 黄金 — 建TLT/长债底仓优于加黄金'),
-                ('bullet', '双门关闭时不是完全观望 → 可建TLT/159926长债底仓作为防御配置'),
+                ('bold', '🔒 双门关闭 → 防御模式'),
+                ('bullet', '不开新仓 | 持有票检查8%止损 | 长债底仓(TLT/159926)可作为防御配置'),
             ])
+        elif one_closed:
+            w.write(doc_id, [
+                ('bold', '⚠️ 一扇门关 → 谨慎模式'),
+                ('bullet', '减仓至半仓以下 | 新仓需四重确认 | 优先持有防御性资产'),
+            ])
+        else:
+            w.write(doc_id, [
+                ('bold', '🟢 双门全开 → 正常操作'),
+                ('bullet', '可建新仓（二重确认以上） | 单票≤2%仓位 | 持有≤8只'),
+            ])
+            
     except Exception:
         pass  # 静默降级
 
@@ -520,9 +578,19 @@ def build_key_watchlist(w, doc_id, macro):
             role = comp.get('role', '')
             role_str = f" [{role}]" if role else ''
             w.write(doc_id, [('bullet', f"  {name}: {ret_str} [{badge}]{role_str}")])
-        # 再平衡提示
+        # 再平衡提示（带数据置信度检查）
         if lds.get('need_rebalance'):
-            w.write(doc_id, [('bullet', f"⚠️ {lds.get('rebalance_note', '')}")])
+            # 检查数据质量 — 如果多个成分数据异常，抑制信号
+            bad_components = [c for c in lds.get('components', []) 
+                            if c.get('data_badge', '') in ('stale', 'error', 'fallback')]
+            if len(bad_components) <= 1:
+                w.write(doc_id, [('bullet', f"⚠️ {lds.get('rebalance_note', '')}")])
+            else:
+                w.write(doc_id, [('bullet', f"⚠️ 再平衡信号(低置信度): {len(bad_components)}个成分数据异常，请手动核实")])
+        # 双门关闭时额外提示
+        dual = macro.get('dual_gate', {})
+        if not dual.get('macro_ok', False) and not dual.get('trend_ok', False):
+            w.write(doc_id, [('text', '💡 双门关闭→底仓维持即可，此时不是调仓时机')])
     except Exception as e:
         w.write(doc_id, [('bullet', f'⚠️ LDS组合暂时不可用: {str(e)[:40]}')])
 
@@ -533,19 +601,29 @@ def build_key_watchlist(w, doc_id, macro):
         regime = macro.get('regime', 'default')
         ma = run_daily_multi_asset_scan(regime=regime)
         by_class = ma.get('by_class', {})
-        # 按大类展示Top 2
-        class_order = ['A股股票', '美股股票', '商品', '债券', '货币', 'REIT']
-        for cls in class_order:
-            if cls in by_class:
-                items = by_class[cls][:2]
-                names = [f"{i.get('name', '?')}({i.get('score', 0):.0f}分)" for i in items]
-                w.write(doc_id, [('bullet', f"{cls}: {', '.join(names)}")])
-        # 其他类别
-        for cls, items in by_class.items():
-            if cls not in class_order:
-                items_top = items[:2]
-                names = [f"{i.get('name', '?')}({i.get('score', 0):.0f}分)" for i in items_top]
-                w.write(doc_id, [('bullet', f"{cls}: {', '.join(names)}")])
+        
+        # 检查评分是否有效（如果全1分则跳过）
+        all_scores = []
+        for items in by_class.values():
+            for i in items:
+                s = i.get('score', 0)
+                if s is not None: all_scores.append(s)
+        
+        if all_scores and max(all_scores) - min(all_scores) > 2:
+            # 评分有区分度 → 正常展示
+            class_order = ['A股股票', '美股股票', '商品', '债券', '货币', 'REIT']
+            for cls in class_order:
+                if cls in by_class:
+                    items = by_class[cls][:2]
+                    names = [f"{i.get('name', '?')}({i.get('score', 0):.0f}分)" for i in items]
+                    w.write(doc_id, [('bullet', f"{cls}: {', '.join(names)}")])
+            for cls, items in by_class.items():
+                if cls not in class_order:
+                    items_top = items[:2]
+                    names = [f"{i.get('name', '?')}({i.get('score', 0):.0f}分)" for i in items_top]
+                    w.write(doc_id, [('bullet', f"{cls}: {', '.join(names)}")])
+        else:
+            w.write(doc_id, [('bullet', '⚠️ 跨资产评分引擎初始化中，暂时不可用（所有分数无区分度）')])
     except Exception as e:
         w.write(doc_id, [('bullet', f'⚠️ 多资产扫描暂不可用: {str(e)[:40]}')])
 
@@ -555,9 +633,15 @@ def build_key_watchlist(w, doc_id, macro):
 # ============================================================
 
 def build_chain_mining(w, doc_id, macro):
-    """💡 链趋势与挖掘信号 — 瓶颈分析 + 专家知识库挖掘方向"""
+    """💡 链趋势与挖掘信号 — 双门状态驱动分析模式"""
 
     w.write(doc_id, [('h2', '💡 链趋势与挖掘方向')])
+
+    # ── 双门状态决定分析基调 ──
+    dual = macro.get('dual_gate', {})
+    macro_ok = dual.get('macro_ok', False)
+    trend_ok = dual.get('trend_ok', False)
+    both_closed = not macro_ok and not trend_ok
 
     # 获取宏观象限下的favored chains
     regime = macro.get('regime', 'default')
@@ -570,6 +654,24 @@ def build_chain_mining(w, doc_id, macro):
     ])
     if lds_note:
         w.write(doc_id, [('text', f"LDS提示: {lds_note}")])
+
+    # ★ 双门关闭 → 等待观察模式提示
+    if both_closed:
+        w.write(doc_id, [
+            ('bold', '🛑 双门关闭 — 以下链分析为"等待布局区间观察"模式'),
+            ('bullet', '逻辑分析保留（为什么这个方向是对的），但结论是"等信号"而非"现在买"'),
+            ('bullet', '关注触发条件而非建仓时机：双门转绿、趋势温度回升、关键催化剂落地'),
+        ])
+    elif not macro_ok or not trend_ok:
+        w.write(doc_id, [
+            ('bold', '⚠️ 一扇门关闭 — 链分析为"谨慎观察"模式'),
+            ('bullet', '可轻仓试探确定性最高的方向，但不开主仓位'),
+        ])
+    else:
+        w.write(doc_id, [
+            ('bold', '🟢 双门全开 — 链分析为"积极布局"模式'),
+            ('bullet', '按四重确认标准筛选标的，可正常建仓'),
+        ])
 
     # 遍历前6条链进行分析
     chains = list(cfg.INDUSTRY_CHAINS.items())[:6]
@@ -628,6 +730,10 @@ def build_chain_mining(w, doc_id, macro):
         if nick:
             w.write(doc_id, [('bullet', f'Nick四问: {nick[:150]}')])
 
+        # ★ 双门关闭时 → 添加"等待信号"提示
+        if both_closed:
+            w.write(doc_id, [('text', '⏳ [等待信号：双门转绿 + 趋势温度回升 + 对应催化剂落地]')])
+
     # ── 跨链交叉机会 ──
     w.write(doc_id, [('h3', '🔗 跨链交叉机会')])
     cross_themes = _get_cross_themes(regime)
@@ -639,14 +745,15 @@ def build_chain_mining(w, doc_id, macro):
         opp_themes = getattr(cfg, 'OPPORTUNITY_THEMES', {})
         if opp_themes:
             w.write(doc_id, [('h3', '⭐ 7大挖掘机会主题')])
-            for theme_name, theme_data in list(opp_themes.items())[:5]:
-                logic = theme_data.get('logic', '')[:120]
-                bottleneck = theme_data.get('bottleneck', '')[:100]
+            theme_items = list(opp_themes.items())
+            for idx, (theme_name, theme_data) in enumerate(theme_items):
+                logic = theme_data.get('logic', '')[:140]
+                bottleneck = theme_data.get('bottleneck', '')[:120]
                 stage = theme_data.get('perez_stage', '')
                 catalysts = theme_data.get('key_catalysts', [])
                 
                 w.write(doc_id, [
-                    ('h4', f'📌 {theme_name}'),
+                    ('bold', f'📌 主题{idx+1}: {theme_name}'),
                     ('bullet', f'逻辑: {logic}'),
                 ])
                 if bottleneck:
@@ -694,39 +801,81 @@ def build_chain_mining(w, doc_id, macro):
 # ============================================================
 
 def build_discipline(w, doc_id, macro):
-    """⚙ 今日操作纪律"""
+    """⚙ 今日操作纪律 — 个性化信息"""
     dual = macro.get('dual_gate', {})
     macro_ok = dual.get('macro_ok', False)
     trend_ok = dual.get('trend_ok', False)
     both_closed = not macro_ok and not trend_ok
     
-    # 桥水象限判断
     md = macro.get('macro_data', {})
-    cpi = _safe_float(md.get('cpi'), 0)
-    pmi = _safe_float(md.get('pmi'), 50)
-    is_q4 = (pmi < 50 and cpi < 2.5)  # 象限4: 增长↓通胀↓
+    cpi = _safe_float(md.get('cpi'))
+    pmi = _safe_float(md.get('pmi'))
+    is_q4 = (pmi is not None and cpi is not None and pmi < 50 and cpi < 2.5)
     
     w.write(doc_id, [('h2', '⚙ 今日操作纪律')])
+    
+    # ── 核心原则 ──
     if both_closed:
         w.write(doc_id, [
-            ('bullet', '双门关闭 → 不开新仓'),
-            ('bullet', '持有中: 检查是否触发8%止损线'),
+            ('bold', '🔒 双门关闭 → 防御模式'),
+            ('bullet', '不开新仓 | 持有票检查8%止损线 | 不追高不加仓'),
         ])
         if is_q4:
             w.write(doc_id, [
-                ('bold', '🧊 通缩象限(桥水Q4): 可建TLT/159926长债底仓 — 不冲突于"不开新仓"原则'),
-                ('bullet', '长债底仓逻辑: 利率下行→长久期资产受益最大, Q4象限长期国债>黄金'),
+                ('bullet', '🧊 通缩象限: TLT/159926长债底仓可作为防御配置（利率下行→长久期受益最大）'),
             ])
-        else:
-            w.write(doc_id, [
-                ('bullet', '观察中: 等待双门转绿再行动'),
-            ])
+    elif not macro_ok or not trend_ok:
+        w.write(doc_id, [
+            ('bold', '⚠️ 一扇门关闭 → 谨慎模式'),
+            ('bullet', '减仓至半仓以下 | 新仓需四重确认 | 优先防御性资产'),
+        ])
     else:
         w.write(doc_id, [
-            ('bullet', f"当前象限: {macro.get('regime', '?')} — 正常操作"),
+            ('bold', '🟢 双门全开 → 正常操作'),
             ('bullet', '单票≤2%仓位 | 持有≤8只 | 8%硬止损不可商量'),
         ])
-        if is_q4:
+    
+    # ── 转绿条件提示 ──
+    if both_closed or (not macro_ok or not trend_ok):
+        conditions = []
+        if not macro_ok:
+            conditions.append(f"CPI回升至1.5%+ (当前={cpi}%)")
+        if not trend_ok:
+            drift = macro.get('trend_deviation_20', '?')
+            conditions.append(f"趋势温度回升至温 (当前偏离={drift}%)")
+        if conditions:
             w.write(doc_id, [
-                ('bullet', '🧊 通缩象限: TLT/长债优先于黄金, 红利低波(512890)做底仓'),
+                ('bullet', f'双门转绿条件: {"; ".join(conditions)}'),
             ])
+    
+    # ── 持仓风险提示（从 portfolio_monitor 获取）──
+    try:
+        from investment_system.portfolio_monitor import get_risk_alerts
+        alerts = get_risk_alerts()
+        if alerts:
+            w.write(doc_id, [('h3', '⚠️ 风险警报')])
+            for a in alerts[:3]:
+                w.write(doc_id, [('bullet', f"{a.get('name', '?')}: {a.get('alert', '')}")])
+    except Exception:
+        pass
+    
+    # ── 今日关注催化剂 ──
+    try:
+        from investment_system.news_engine import load_cached_news
+        cached = load_cached_news()
+        if cached:
+            # 找最近1天内有明确影响方向的新闻
+            impactful = [n for n in cached if n.get('impacts') and any(
+                i.get('direction') in ('利好', '利空') for i in n.get('impacts', [])
+            )][:3]
+            if impactful:
+                w.write(doc_id, [('h3', '📋 今日可关注催化剂')])
+                for n in impactful:
+                    title = n.get('title', '')[:80]
+                    directions = []
+                    for imp in n.get('impacts', []):
+                        if imp.get('direction') in ('利好', '利空'):
+                            directions.append(f"[{imp.get('chain', '')}]{imp.get('direction', '')}")
+                    w.write(doc_id, [('bullet', f"{title} → {', '.join(directions[:2])}")])
+    except Exception:
+        pass
