@@ -52,10 +52,10 @@ UA = (
 # 每条源的抓取上限和全局上限
 MAX_PER_SOURCE = 15       # 每源最多15条
 MAX_TOTAL = 60            # 全局原始上限（过滤前）
-MAX_FINAL = 40            # 过滤去重后最终返回数量（覆盖7天）
+MAX_FINAL = 60            # 过滤去重后最终返回数量（覆盖30天）
 
 # 新闻时间窗口（天）
-NEWS_WINDOW_DAYS = 7      # 只保留7天内的新闻
+NEWS_WINDOW_DAYS = 30     # 周度视角+月度复盘，当天新闻不一定最重要
 
 # 投资相关性关键词白名单（必须命中至少1个才算有效新闻）
 _RELEVANCE_KEYWORDS = {
@@ -757,17 +757,20 @@ def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
     if not api_key:
         return None
     
-    # 判断API类型
-    if os.environ.get("ARK_API_KEY"):
+    # 判断API类型：ARK需 model 非占位符，否则回退OpenAI
+    ark_model = os.environ.get("ARK_MODEL", "")
+    if os.environ.get("ARK_API_KEY") and ark_model and "xxxxx" not in ark_model:
         # 火山方舟 Ark API
         api_url = os.environ.get("ARK_API_BASE", "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
-        model = os.environ.get("ARK_MODEL", "ep-20250523123456-xxxxx")  # 需替换为实际endpoint
-        auth_header = {"Authorization": f"Bearer {api_key}"}
-    else:
-        # OpenAI 兼容接口
+        model = ark_model
+    elif os.environ.get("OPENAI_API_KEY"):
+        # OpenAI 兼容接口（ARK不可用时回退）
         api_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1/chat/completions")
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-        auth_header = {"Authorization": f"Bearer {api_key}"}
+        api_key = os.environ.get("OPENAI_API_KEY")
+    else:
+        return None
+    auth_header = {"Authorization": f"Bearer {api_key}"}
     
     messages = []
     if system_prompt:
