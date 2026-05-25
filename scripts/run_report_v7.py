@@ -63,13 +63,16 @@ try:
 
     # ═══ 二、桥水全天候四象限 ═══
     bw = determine_bridgewater_quadrant(macro.get('macro_data', {}))
+    d = bw.get('detail', {})
+    gw = '↑' if d.get('growth_signal') == 'up' else '↓'
+    iw = '↑' if d.get('inflation_signal') == 'up' else '↓'
     w.write(doc_id, [
         ('h2', '二、🌐 桥水全天候·宏观象限'),
         ('bold', f"当前象限: {bw.get('quadrant_name', '?')}"),
-        ('bullet', f"增长: {'↑' if bw.get('growth','')=='up' else '↓'} | 通胀: {'↑' if bw.get('inflation','')=='up' else '↓'}"),
-        ('bullet', f"推荐资产: {', '.join(bw.get('recommended', [])[:4])}"),
-        ('bullet', f"回避: {', '.join(bw.get('avoid', [])[:3])}"),
-        ('bullet', f"中国对照: {bw.get('china_note', '')}"),
+        ('bullet', f"增长: {gw} ({d.get('pmi','?')}) | 通胀: {iw} ({d.get('cpi','?')}%)"),
+        ('bullet', f"推荐资产: {', '.join(bw.get('recommended_assets', [])[:4])}"),
+        ('bullet', f"回避: {', '.join(bw.get('avoid_assets', [])[:3])}"),
+        ('bullet', f"中国对照: {bw.get('china_parallel', '')}"),
         ('text', rpt.FeishuWriter.ref(w, '二、资产配置·LDS全天候ETF')),
     ])
     log("Bridgewater done")
@@ -141,19 +144,28 @@ try:
         ('divider', ''),
         ('h2', '四B、📦 ETF 动量-风险-费率 三维排序'),
     ])
-    for etf in etfs.get('top5', [])[:5]:
+    for etf in etfs.get('top_5', [])[:5]:
         w.write(doc_id, [('bullet', f"{etf['name']}({etf['symbol']}): 综合{etf.get('_composite','?')} | 动量{etf.get('ret_20d','?')}%")])
     w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '二、资产配置·LDS全天候ETF'))])
     log("ETF done")
 
     # ═══ 五、债券 ═══
     bonds = scan_bonds()
+    ut = bonds.get('us_treasury', {})
+    yields_by_name = {}
+    for y in ut.get('yields', []):
+        yields_by_name[y.get('name', '')] = y.get('current', '?')
+    y10 = yields_by_name.get('美国10年期国债收益率', '?')
+    y30 = yields_by_name.get('美国30年期国债收益率', '?')
+    curve_spread = ut.get('2y_10y_spread', '?')
+    curve_signal = ut.get('signal', '?')
+    cn_spread = bonds.get('cn_us_spread', '?')
     w.write(doc_id, [
         ('divider', ''),
         ('h2', '五、🏦 债券与收益率曲线'),
-        ('bold', f"美债10Y: {bonds.get('us_10y_yield', '?')}% | 30Y: {bonds.get('us_30y_yield', '?')}%"),
-        ('bullet', f"2Y-10Y利差: {bonds.get('curve_spread_bp', '?')}bp → 曲线: {bonds.get('curve_signal', '?')}"),
-        ('bullet', f"中美利差: {bonds.get('cn_us_spread_bp', '?')}bp"),
+        ('bold', f"美债10Y: {y10}% | 30Y: {y30}%"),
+        ('bullet', f"2Y-10Y利差: {curve_spread}bp → 曲线: {curve_signal}"),
+        ('bullet', f"中美利差: {cn_spread}bp"),
         ('text', rpt.FeishuWriter.ref(w, '十六、全球经济格局')),
     ])
     log("Bonds done")
@@ -165,7 +177,7 @@ try:
         ('h2', '六、🛢️ 大宗商品'),
     ])
     for c in comms.get('commodities', [])[:6]:
-        w.write(doc_id, [('bullet', f"{c['name']}: ${c.get('price','?')} | 20日{c.get('chg_20d_pct','?')}% | RSI{c.get('rsi_14','?')} | {c.get('signal','?')}")])
+        w.write(doc_id, [('bullet', f"{c['name']}: ${c.get('price','?')} | 20日{c.get('ret_20d','?')}% | RSI{c.get('rsi_14','?')} | {c.get('signal','?')}")])
     w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '十六、全球经济格局'))])
     log("Commodities done")
 
@@ -175,10 +187,12 @@ try:
         ('divider', ''),
         ('h2', '七、💱 外汇与地缘折价'),
     ])
-    for pair_name in ['dxy', 'usdcny', 'usdjpy', 'eurusd']:
-        p = fx.get(pair_name, {})
+    fx_pairs = fx.get('fx_pairs', [])
+    fx_by_key = {p.get('key'): p for p in fx_pairs if p.get('key')}
+    for pair_name in ['DXY', 'USDCNY', 'USDJPY', 'EURUSD']:
+        p = fx_by_key.get(pair_name, {})
         if p:
-            w.write(doc_id, [('bullet', f"{p.get('name', pair_name)}: {p.get('price', '?')} | 20日{p.get('chg_pct', '?')}%")])
+            w.write(doc_id, [('bullet', f"{p.get('name', pair_name)}: {p.get('price', '?')} | 20日{p.get('ret_20d', '?')}%")])
     w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '十六、全球经济格局'))])
     log("FX done")
 
