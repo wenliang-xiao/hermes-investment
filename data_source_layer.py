@@ -71,18 +71,23 @@ class DataResult:
 # ═══════════════════════════════════════════
 
 _call_timestamps: dict = {}
-_MIN_INTERVALS = {"akshare": 0.3, "yfinance": 0.5, "baostock": 0.2}
+_MIN_INTERVALS = {"akshare": 1.0, "yfinance": 0.5, "baostock": 0.3}
 
 def _rate_limit(source: str):
     now = time.time()
     last = _call_timestamps.get(source, 0)
-    gap = _MIN_INTERVALS.get(source, 0.3)
+    gap = _MIN_INTERVALS.get(source, 0.5)
     if now - last < gap:
         time.sleep(gap - (now - last))
     _call_timestamps[source] = time.time()
 
 
-def _retry(fn, max_attempts: int = 3, delay: float = 0.8, source: str = ""):
+def _is_connection_reset(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in ("connection aborted", "remote end closed", "remotedisconnected", "connection reset"))
+
+
+def _retry(fn, max_attempts: int = 4, delay: float = 2.0, source: str = ""):
     last_err = None
     for attempt in range(max_attempts):
         try:
@@ -91,7 +96,12 @@ def _retry(fn, max_attempts: int = 3, delay: float = 0.8, source: str = ""):
         except Exception as e:
             last_err = e
             if attempt < max_attempts - 1:
-                time.sleep(delay * (2 ** attempt))
+                wait = delay * (2 ** attempt)
+                if _is_connection_reset(e):
+                    wait = max(wait, 5.0)
+                logger.debug("[retry] %s attempt %d/%d failed: %s, wait %.1fs",
+                             source, attempt + 1, max_attempts, str(e)[:60], wait)
+                time.sleep(wait)
     raise last_err
 
 
@@ -136,6 +146,27 @@ def _freshness(fetched_at: str) -> float:
 # 1. A股 ETF 行情  — AKShare 主力
 # ═══════════════════════════════════════════
 
+def _a_etf_bs_code(code: str) -> str:
+    """
+    将6位ETF代码转换为baostock格式（sh./sz.前缀）
+    规则：
+      6开头 → sh（上交所普通股/ETF）
+      5开头 → sh（上交所ETF：510xxx/511xxx/512xxx/513xxx/515xxx/516xxx/518xxx）
+      1开头 → sh（上交所基金：159xxx部分是深交所，但16xxxx/15xxxx需要判断）
+      159xxx → sz（深交所ETF）
+      其他1开头 → sh（上交所基金，如162xxx/164xxx/165xxx/166xxx等）
+      0/2/3开头 → sz
+    """
+    c = str(code).zfill(6)
+    if c.startswith("6") or c.startswith("5"):
+        return f"sh.{c}"
+    if c.startswith("159"):
+        return f"sz.{c}"
+    if c.startswith("1"):
+        return f"sh.{c}"
+    return f"sz.{c}"
+
+
 def get_a_etf_hist(code: str, days: int = 60) -> DataResult:
     """
     获取 A 股 ETF 历史行情（日线）
@@ -172,7 +203,7 @@ def get_a_etf_hist(code: str, days: int = 60) -> DataResult:
 
     def _fetch_baostock_fallback():
         import baostock as bs
-        sym = f"sh.{code}" if code.startswith("5") else f"sz.{code}"
+        sym = _a_etf_bs_code(code)
         lg = bs.login()
         if lg.error_code != "0":
             raise ConnectionError("baostock login failed")

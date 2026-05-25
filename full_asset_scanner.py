@@ -1393,8 +1393,10 @@ def determine_bridgewater_quadrant(macro_data: dict) -> dict:
         else:
             inflation_signal = "neutral"
     
-    # 确定象限
-    if growth_signal == "up" and inflation_signal == "up":
+    if growth_signal is None and inflation_signal is None:
+        quadrant_key = "Q4_增长↓_通胀↓"
+        confidence = "⚠️ 宏观数据缺失，无法判断象限，保守默认Q4"
+    elif growth_signal == "up" and inflation_signal == "up":
         quadrant_key = "Q1_增长↑_通胀↑"
         confidence = "高" if pmi and cpi else "中"
     elif growth_signal == "up" and inflation_signal == "down":
@@ -1424,8 +1426,8 @@ def determine_bridgewater_quadrant(macro_data: dict) -> dict:
                 quadrant_key = "Q3_增长↓_通胀↑"
             confidence = "中（通胀方向不确定）"
         else:
-            quadrant_key = "Q2_增长↑_通胀↓"
-            confidence = "低（数据不足）"
+            quadrant_key = "Q4_增长↓_通胀↓"
+            confidence = "低（数据不足，保守默认象限4）"
     
     quad = BRIDGEWATER_QUADRANTS.get(quadrant_key, BRIDGEWATER_QUADRANTS["Q2_增长↑_通胀↓"])
     
