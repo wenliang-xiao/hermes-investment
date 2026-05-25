@@ -10,35 +10,56 @@
   5. 因子权重 → 动态配比
   6. 建议仓位 → 综合以上全部
 """
-import json, os
+import json, os, logging
 from datetime import datetime, timedelta
 import numpy as np
 from . import config
 from .data_layer import get_macro_data, get_index_data
 
+logger = logging.getLogger(__name__)
+
 
 class MacroEngine:
     def __init__(self):
-        self.macro_data = get_macro_data()
-        self.quadrant = "宽货币·紧信用"
-        self.regime = "经济衰退"
+        self.macro_data = {}
+        self.macro_data_ok = False
+        self.macro_warnings = []
+        self.quadrant = "数据未加载"
+        self.regime = "default"
         self.trend_temp = "平"
-        self.strategy_switch = "on"
-        self.suggested_position = 0.5
+        self.strategy_switch = "hold"
+        self.suggested_position = 0.3
         self.factor_weights = config.FACTOR_WEIGHTS["default"]
         self.last_refreshed = None
 
     def refresh(self, force=False):
-        """刷新全部宏观数据"""
         cache_file = os.path.join(os.path.dirname(__file__), "data", "macro_engine_cache.json")
 
-        # 缓存策略：1小时内不刷新
         if not force and self.last_refreshed:
             age = (datetime.now() - self.last_refreshed).total_seconds()
             if age < 3600:
                 return self.summarize()
 
-        self.macro_data = get_macro_data()
+        self.macro_warnings = []
+
+        try:
+            raw = get_macro_data()
+            cpi = raw.get("cpi")
+            pmi = raw.get("pmi")
+            if cpi is None or pmi is None:
+                raise ValueError(f"宏观数据不完整: cpi={cpi}, pmi={pmi}")
+            self.macro_data = raw
+            self.macro_data_ok = True
+        except Exception as e:
+            self.macro_data_ok = False
+            self.macro_warnings.append(f"⚠️ 宏观数据获取失败({e})，策略开关暂停，维持现有仓位")
+            self.quadrant = "数据不可用"
+            self.regime = "default"
+            self.strategy_switch = "hold"
+            self.suggested_position = 0.3
+            self.last_refreshed = datetime.now()
+            return self.summarize()
+
         self._classify_quadrant()
         self._calc_trend_temp()
         self._calc_factor_weights()
@@ -102,32 +123,38 @@ class MacroEngine:
             elif deviation > -0.05: self.trend_temp = "平"
             else: self.trend_temp = "凉"
             
-            # 国运线 — 240月 ≈ 20年
+            # 国运线 — 上证240月均线（约20年）
             try:
-                idx_long = get_index_data("sh000001", 5000)
-                if len(idx_long) >= 240:
+                idx_long = get_index_data("sh000001", 5500)
+                if idx_long is not None and len(idx_long) >= 240:
                     idx_long["ma240"] = idx_long["close"].rolling(240).mean()
                     p240 = idx_long.iloc[-1]["ma240"]
-                    if not np.isnan(p240):
+                    if p240 is not None and not np.isnan(float(p240)):
                         self.guoyun_price = round(float(p240), 0)
-                        self.price_deviation = round((float(price) - self.guoyun_price) / self.guoyun_price * 100, 1)
-                        note_parts = []
+                        self.price_deviation = round(
+                            (float(price) - self.guoyun_price) / self.guoyun_price * 100, 1
+                        )
                         if self.price_deviation > 20:
-                            note_parts.append("⚠️ 大幅高于国运线")
+                            zone = "⚠️ 大幅高于国运线"
                         elif self.price_deviation > 10:
-                            note_parts.append("偏高区域")
+                            zone = "偏高区域"
                         elif self.price_deviation > 0:
-                            note_parts.append("略高于国运线")
+                            zone = "略高于国运线"
                         elif self.price_deviation > -10:
-                            note_parts.append("接近国运线，底部区域")
+                            zone = "接近国运线，底部区域"
                         else:
-                            note_parts.append("🔴 大幅低于国运线")
-                        note_parts.append(f"偏离{self.price_deviation:+.1f}%")
-                        self.guoyun_note = "，".join(note_parts)
-            except:
-                pass
-                
-        except:
+                            zone = "🔴 大幅低于国运线"
+                        self.guoyun_note = f"{zone}，偏离{self.price_deviation:+.1f}%"
+                    else:
+                        logger.warning("[国运线] ma240计算结果为NaN，历史数据可能不足240条")
+                else:
+                    logger.warning("[国运线] 历史数据不足，获取到%d条，需要>=240条",
+                                   len(idx_long) if idx_long is not None else 0)
+            except Exception as e:
+                logger.warning("[国运线] 计算失败: %s", e)
+
+        except Exception as e:
+            logger.warning("[趋势温度] 计算失败: %s，设为默认值'平'", e)
             self.trend_temp = "平"
     
     # ═══ ②.5 板块温度统计（LDS趋势周期：凉→平→温→热） ═══
@@ -167,10 +194,14 @@ class MacroEngine:
     
     # ═══ LDS双门状态（宏观 × 趋势） ═══
     def _calc_dual_gate(self):
-        """LDS双门判断：宏观+趋势同时决定开仓方向"""
         md = self.macro_data
-        cpi = md.get("cpi", 1.5)
-        pmi = md.get("pmi", 50)
+        cpi = md.get("cpi")
+        pmi = md.get("pmi")
+        if cpi is None or pmi is None:
+            self.dual_gate = {"macro_gate": "数据缺失", "trend_gate": "未知", "action": "hold", "detail": "宏观数据不完整"}
+            self.dual_action = "hold"
+            self.dual_detail = "宏观数据不完整，维持现有仓位"
+            return
         
         # 宏观门：CPI<2 + PMI≥50 = 绿灯；CPI≥2.5 = 红灯
         if cpi < 1.0:
@@ -293,6 +324,8 @@ class MacroEngine:
             "dual_gate": getattr(self, "dual_gate", {}),
             "sector_temp": getattr(self, "sector_temp_counts", {}),
             "market": getattr(self, "_market_overview", {}),
+            "macro_data_ok": self.macro_data_ok,
+            "warnings": self.macro_warnings,
         }
 
 

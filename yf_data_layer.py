@@ -7,12 +7,14 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import time
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-# ─── 限流控制 ───
+logger = logging.getLogger(__name__)
+
 _LAST_CALL = 0
-_MIN_INTERVAL = 0.5  # 秒
+_MIN_INTERVAL = 0.5
 
 def _rate_limit():
     global _LAST_CALL
@@ -21,14 +23,24 @@ def _rate_limit():
         time.sleep(_MIN_INTERVAL - elapsed)
     _LAST_CALL = time.time()
 
+def _fetch_with_retry(fn, max_attempts: int = 3, delay: float = 0.8):
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if attempt < max_attempts - 1:
+                time.sleep(delay * (2 ** attempt))
+    raise last_err
+
 # ═══════════════════════════════════════════
 # 1. 价格数据
 # ═══════════════════════════════════════════
 
 def get_price_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
-    """获取OHLCV历史数据"""
     _rate_limit()
-    try:
+    def _fetch():
         t = yf.Ticker(symbol)
         df = t.history(period=period)
         if df.empty:
@@ -36,18 +48,23 @@ def get_price_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
         return df
+    try:
+        result = _fetch_with_retry(_fetch)
+        return result if result is not None else pd.DataFrame()
     except Exception as e:
-        print(f"  [yf] {symbol} 价格获取失败: {e}")
+        logger.warning("[yf] %s 价格获取失败: %s", symbol, e)
         return pd.DataFrame()
 
 def get_current_price(symbol: str) -> Optional[float]:
-    """获取最新价格"""
     _rate_limit()
-    try:
+    def _fetch():
         t = yf.Ticker(symbol)
         info = t.fast_info
         return info.get("lastPrice") or info.get("regularMarketPrice")
-    except:
+    try:
+        return _fetch_with_retry(_fetch)
+    except Exception as e:
+        logger.warning("[yf] %s 价格获取失败: %s", symbol, e)
         return None
 
 def get_current_prices_batch(symbols: list) -> Dict[str, float]:
@@ -136,7 +153,7 @@ def get_factor_data(symbol: str) -> dict:
 # 4. 多因子评分（与A股6因子体系对齐）
 # ═══════════════════════════════════════════
 
-def _percentile_score(value, lo, hi, reverse=False) -> float:
+def _bounded_linear_score(value, lo, hi, reverse=False) -> float:
     """将值映射到1-10分"""
     if value is None or hi <= lo:
         return 5.0
@@ -161,22 +178,22 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
     pe = factor_data.get("pe")
     pb = factor_data.get("pb")
     # 美股PE参考范围: 10-45, PB: 1-15
-    s_pe = _percentile_score(pe, 10, 45, reverse=True) if pe and pe > 0 else 5.0
-    s_pb = _percentile_score(pb, 1, 15, reverse=True) if pb and pb > 0 else 5.0
+    s_pe = _bounded_linear_score(pe, 10, 45, reverse=True) if pe and pe > 0 else 5.0
+    s_pb = _bounded_linear_score(pb, 1, 15, reverse=True) if pb and pb > 0 else 5.0
     value_score = round(s_pe * 0.6 + s_pb * 0.4, 1)
     
     # ── 2. 质量因子 (ROE高=高分) ──
     roe = factor_data.get("roe")
     margin = factor_data.get("profit_margin")
-    s_roe = _percentile_score(roe, 0, 0.50) if roe is not None else 5.0  # ROE 0-50%
-    s_margin = _percentile_score(margin, 0, 0.45) if margin is not None else 5.0
+    s_roe = _bounded_linear_score(roe, 0, 0.50) if roe is not None else 5.0  # ROE 0-50%
+    s_margin = _bounded_linear_score(margin, 0, 0.45) if margin is not None else 5.0
     quality_score = round(s_roe * 0.6 + s_margin * 0.4, 1)
     
     # ── 3. 成长因子 (营收增速+盈利增速) ──
     rev_g = factor_data.get("revenue_growth")
     earn_g = factor_data.get("earnings_growth")
-    s_rev = _percentile_score(rev_g, -0.1, 0.80) if rev_g is not None else 5.0
-    s_earn = _percentile_score(earn_g, -0.2, 1.50) if earn_g is not None else 5.0
+    s_rev = _bounded_linear_score(rev_g, -0.1, 0.80) if rev_g is not None else 5.0
+    s_earn = _bounded_linear_score(earn_g, -0.2, 1.50) if earn_g is not None else 5.0
     growth_score = round(s_rev * 0.4 + s_earn * 0.6, 1)
     
     # ── 4. 低波因子 (波动率低=高分) ──
@@ -185,7 +202,7 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
         daily_ret = close.pct_change().dropna()
         vol = float(daily_ret.tail(20).std() * np.sqrt(252) * 100)
         # 美股波动率参考: 15-70%
-        lowvol_score = round(_percentile_score(vol, 15, 70, reverse=True), 1)
+        lowvol_score = round(_bounded_linear_score(vol, 15, 70, reverse=True), 1)
     else:
         lowvol_score = 5.0
     
@@ -193,7 +210,7 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
     div_yield = factor_data.get("dividend_yield")
     if div_yield is not None:
         div_pct = div_yield * 100 if div_yield < 1 else div_yield  # 转百分比
-        dividend_score = round(_percentile_score(div_pct, 0, 6), 1)
+        dividend_score = round(_bounded_linear_score(div_pct, 0, 6), 1)
     else:
         dividend_score = 5.0
     
@@ -204,7 +221,7 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
         ret_60d = float((close.iloc[-1] / close.iloc[-60] - 1) * 100) if len(close) >= 60 else 0
         # 混合动量
         momentum_raw = ret_20d * 0.6 + ret_60d * 0.4
-        momentum_score = round(_percentile_score(momentum_raw, -25, 50), 1)
+        momentum_score = round(_bounded_linear_score(momentum_raw, -25, 50), 1)
     else:
         momentum_score = 5.0
     

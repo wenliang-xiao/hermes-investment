@@ -20,20 +20,50 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import time
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-# ─── 限流控制 ───
+logger = logging.getLogger(__name__)
+
 _LAST_CALL = 0
-_MIN_INTERVAL = 0.4  # 秒
+_MIN_INTERVAL = 0.4
 
 def _rate_limit():
-    """API调用限流保护"""
     global _LAST_CALL
     elapsed = time.time() - _LAST_CALL
     if elapsed < _MIN_INTERVAL:
         time.sleep(_MIN_INTERVAL - elapsed)
     _LAST_CALL = time.time()
+
+def _fetch_with_retry(fn, max_attempts: int = 3, delay: float = 0.8):
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if attempt < max_attempts - 1:
+                time.sleep(delay * (2 ** attempt))
+    raise last_err
+
+COMMODITY_SANITY = {
+    "黄金":   (1000, 4500),
+    "原油":   (20,   150),
+    "铜":     (2.0,  8.0),
+    "白银":   (10,   80),
+    "天然气": (1.0,  20),
+    "豆粕/农产品": (0.15, 0.80),
+}
+
+def _validate_commodity_price(name: str, price: float) -> Optional[float]:
+    if price is None:
+        return None
+    r = COMMODITY_SANITY.get(name)
+    if r and not (r[0] <= price <= r[1]):
+        logger.warning("[价格异常] %s=%.4f 超出合理区间%s，丢弃", name, price, r)
+        return None
+    return price
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -41,9 +71,8 @@ def _rate_limit():
 # ═══════════════════════════════════════════════════════════════
 
 def _get_price_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
-    """获取OHLCV历史数据"""
     _rate_limit()
-    try:
+    def _fetch():
         t = yf.Ticker(symbol)
         df = t.history(period=period)
         if df.empty:
@@ -51,18 +80,27 @@ def _get_price_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
         return df
+    try:
+        df = _fetch_with_retry(_fetch, max_attempts=3, delay=0.8)
+        if not df.empty and "date" in df.columns:
+            last_date = pd.to_datetime(df["date"].iloc[-1])
+            if (datetime.now() - last_date.replace(tzinfo=None)).days > 5:
+                logger.warning("[数据过期] %s 最新数据日期 %s，可能不是交易日最新值", symbol, last_date.date())
+        return df if df is not None else pd.DataFrame()
     except Exception as e:
-        print(f"  [scanner] {symbol} 数据获取失败: {e}")
+        logger.warning("[数据获取失败] %s: %s", symbol, e)
         return pd.DataFrame()
 
 def _get_current_price(symbol: str) -> Optional[float]:
-    """获取最新价格"""
     _rate_limit()
-    try:
+    def _fetch():
         t = yf.Ticker(symbol)
         info = t.fast_info
         return info.get("lastPrice") or info.get("regularMarketPrice")
-    except:
+    try:
+        return _fetch_with_retry(_fetch, max_attempts=3, delay=0.8)
+    except Exception as e:
+        logger.warning("[价格获取失败] %s: %s", symbol, e)
         return None
 
 def _get_info(symbol: str) -> dict:
@@ -141,7 +179,7 @@ def _compute_rsi(close: pd.Series, period: int = 14) -> Optional[float]:
     rsi = 100 - (100 / (1 + rs))
     return round(float(rsi.iloc[-1]), 1) if not rsi.empty else None
 
-def _percentile_score(value, lo, hi, reverse=False) -> float:
+def _bounded_linear_score(value, lo, hi, reverse=False) -> float:
     """将值映射到1-10分（与yf_data_layer保持一致）"""
     if value is None or hi <= lo:
         return 5.0
@@ -581,15 +619,15 @@ def scan_all_etfs(macro_data: dict = None, top_n: int = 5) -> dict:
     for r in all_results:
         # 动量得分（越高越好）
         ret20 = r.get("ret_20d") or 0
-        mom_score = _percentile_score(ret20, ret_lo, ret_hi, reverse=False)
+        mom_score = _bounded_linear_score(ret20, ret_lo, ret_hi, reverse=False)
         
         # 低波得分（波动率越低越好）
         vol = r.get("volatility_20d") or 30
-        vol_score = _percentile_score(vol, vol_lo, vol_hi, reverse=True)
+        vol_score = _bounded_linear_score(vol, vol_lo, vol_hi, reverse=True)
         
         # 低费率得分（费率越低越好）
         er = r.get("expense_ratio") or 0.5
-        er_score = _percentile_score(er, er_lo, er_hi, reverse=True)
+        er_score = _bounded_linear_score(er, er_lo, er_hi, reverse=True)
         
         # 三维综合得分
         # 权重：动量40% + 低波30% + 低费率30%
@@ -868,28 +906,40 @@ def _bridgewater_bond_hint(curve_shape: str, macro_data: dict) -> str:
 # 商品观测池（优先用ETF，价格更准；期货代码作为fallback）
 COMMODITY_UNIVERSE = {
     "黄金": {
-        "primary": "GLD", "fallback": "GC=F",
-        "name": "黄金", "type": "贵金属", "unit": "美元/盎司", "lds_view": "央行购金+地缘对冲",
+        "primary": "GC=F", "fallback": "GLD",
+        "name": "黄金", "type": "贵金属", "unit": "USD/oz",
+        "lds_view": "央行购金+地缘对冲",
+        "price_scale": 1.0,
     },
     "原油": {
-        "primary": "USO", "fallback": "CL=F",
-        "name": "WTI原油", "type": "能源", "unit": "美元/桶", "lds_view": "周期波动+地缘供给",
+        "primary": "CL=F", "fallback": "USO",
+        "name": "WTI原油", "type": "能源", "unit": "USD/bbl",
+        "lds_view": "周期波动+地缘供给",
+        "price_scale": 1.0,
     },
     "铜": {
-        "primary": "COPX", "fallback": "HG=F",
-        "name": "铜", "type": "工业金属", "unit": "美元/磅", "lds_view": "全球经济晴雨表",
+        "primary": "HG=F", "fallback": "COPX",
+        "name": "铜", "type": "工业金属", "unit": "USD/lb",
+        "lds_view": "全球经济晴雨表",
+        "price_scale": 1.0,
     },
-    "豆粕": {
+    "豆粕/农产品": {
         "primary": "DBA", "fallback": "ZM=F",
-        "name": "豆粕/农产品", "type": "农产品", "unit": "美元/短吨", "lds_view": "通胀周期+天气供给",
+        "name": "豆粕/农产品", "type": "农产品", "unit": "USD/share(ETF)",
+        "lds_view": "通胀周期+天气供给",
+        "price_scale": 1.0,
     },
     "白银": {
-        "primary": "SLV", "fallback": "SI=F",
-        "name": "白银", "type": "贵金属", "unit": "美元/盎司", "lds_view": "工业+贵金属双重属性",
+        "primary": "SI=F", "fallback": "SLV",
+        "name": "白银", "type": "贵金属", "unit": "USD/oz",
+        "lds_view": "工业+贵金属双重属性",
+        "price_scale": 1.0,
     },
     "天然气": {
-        "primary": "UNG", "fallback": "NG=F",
-        "name": "天然气", "type": "能源", "unit": "美元/MMBTU", "lds_view": "季节性+地缘",
+        "primary": "NG=F", "fallback": "UNG",
+        "name": "天然气", "type": "能源", "unit": "USD/MMBtu",
+        "lds_view": "季节性+地缘",
+        "price_scale": 1.0,
     },
 }
 
@@ -937,16 +987,21 @@ def scan_commodities(macro_data: dict = None) -> dict:
         
         if not df.empty and "close" in df.columns:
             close = df["close"]
-            item["price"] = round(float(close.iloc[-1]), 2)
-            
+            raw_price = float(close.iloc[-1])
+            validated_price = _validate_commodity_price(cfg["name"], raw_price)
+            if validated_price is None:
+                item["note"] = f"⚠️ 价格异常({raw_price:.2f})，已丢弃"
+                results.append(item)
+                continue
+            item["price"] = round(validated_price, 2)
+
             rets = _compute_returns(close)
             item["ret_5d"] = rets.get("ret_5d")
             item["ret_20d"] = rets.get("ret_20d")
-            
+
             item["rsi_14"] = _compute_rsi(close, 14)
             item["volatility_20d"] = _compute_volatility(close, 20)
-            
-            # 信号判断
+
             if item["ret_20d"] is not None:
                 if item["ret_20d"] > 5:
                     item["signal"] = "🟢 强势"
@@ -956,14 +1011,14 @@ def scan_commodities(macro_data: dict = None) -> dict:
                     item["signal"] = "🟠 偏弱"
                 else:
                     item["signal"] = "🔴 弱势"
-            
+
             if item["rsi_14"]:
                 if item["rsi_14"] > 70:
                     item["note"] += "超买 "
                 elif item["rsi_14"] < 30:
                     item["note"] += "超卖 "
         else:
-            item["note"] = "数据不可用"
+            item["note"] = "⚠️ 数据获取失败"
         
         results.append(item)
     
@@ -1137,14 +1192,21 @@ def scan_fx(macro_data: dict = None) -> dict:
         
         if not df.empty and "close" in df.columns:
             close = df["close"]
-            item["price"] = round(float(close.iloc[-1]), 4)
-            
+            raw_price = round(float(close.iloc[-1]), 4)
+
+            if key == "EURUSD" and not (0.8 <= raw_price <= 1.6):
+                logger.warning("[汇率异常] EURUSD=%.4f，可能是倒置或错误ticker，丢弃", raw_price)
+                item["note"] = f"⚠️ EUR/USD价格异常({raw_price})，请检查ticker"
+                results.append(item)
+                continue
+
+            item["price"] = raw_price
+
             rets = _compute_returns(close)
             item["ret_5d"] = rets.get("ret_5d")
             item["ret_20d"] = rets.get("ret_20d")
             item["volatility_20d"] = _compute_volatility(close, 20)
-            
-            # 信号判断
+
             if item["ret_20d"] is not None:
                 if abs(item["ret_20d"]) < 1:
                     item["signal"] = "🟡 窄幅震荡"
@@ -1152,14 +1214,13 @@ def scan_fx(macro_data: dict = None) -> dict:
                     item["signal"] = f"🔺 +{item['ret_20d']}%"
                 else:
                     item["signal"] = f"🔻 {item['ret_20d']}%"
-            
-            # 记录USDCNY和USDCNH
+
             if key == "USDCNY":
                 usdcny_price = item["price"]
             if key == "USDCNH":
                 usdcnh_price = item["price"]
         else:
-            item["note"] = "数据不可用"
+            item["note"] = "⚠️ 数据获取失败"
         
         results.append(item)
     

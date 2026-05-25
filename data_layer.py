@@ -370,3 +370,93 @@ def get_concept_hotmap() -> pd.DataFrame:
     except:
         pass
     return pd.DataFrame()
+
+
+# ═══════════════════════════════════════════
+# 7. 北向资金信号（AKShare，LDS双门第三门）
+# ═══════════════════════════════════════════
+
+_northbound_cache = None
+_northbound_cache_time = 0
+_NORTHBOUND_TTL = 3600
+
+def get_northbound_flow() -> dict:
+    """
+    获取北向资金（沪股通+深股通）日度净流入数据
+    返回今日净流入、5日累计、20日累计及信号判断
+    数据源：AKShare stock_em_hsgt_north_net_flow_in_em
+    """
+    from . import config as _cfg
+    global _northbound_cache, _northbound_cache_time
+
+    if _northbound_cache and (time.time() - _northbound_cache_time) < _NORTHBOUND_TTL:
+        return _northbound_cache
+
+    result = {
+        "today_net": None,
+        "5d_cumulative": None,
+        "20d_cumulative": None,
+        "signal": "⚪ 数据不可用",
+        "confirmation": "⚪ 未知",
+        "data_ok": False,
+        "note": "",
+    }
+
+    try:
+        import akshare as ak
+
+        sh = ak.stock_em_hsgt_north_net_flow_in_em(symbol="沪股通")
+        sz = ak.stock_em_hsgt_north_net_flow_in_em(symbol="深股通")
+
+        if sh.empty or sz.empty:
+            result["note"] = "AKShare返回空数据"
+            return result
+
+        col = sh.columns[1]
+        today_sh = float(sh.iloc[-1][col]) / 1e8
+        today_sz = float(sz.iloc[-1][col]) / 1e8
+        today_net = round(today_sh + today_sz, 2)
+
+        flow_5d = round(
+            sh[col].tail(5).astype(float).sum() / 1e8 +
+            sz[col].tail(5).astype(float).sum() / 1e8,
+            2
+        )
+        flow_20d = round(
+            sh[col].tail(20).astype(float).sum() / 1e8 +
+            sz[col].tail(20).astype(float).sum() / 1e8,
+            2
+        )
+
+        cfg = _cfg.NORTHBOUND_CONFIG
+        if today_net >= cfg["strong_inflow_daily"]:
+            signal = "🟢 强力流入"
+        elif today_net >= cfg["mild_inflow_daily"]:
+            signal = "🟡 温和流入"
+        elif today_net <= cfg["outflow_daily"]:
+            signal = "🔴 明显流出"
+        else:
+            signal = "⚪ 中性"
+
+        if flow_5d >= cfg["strong_5d_cumulative"]:
+            confirmation = "✅ 5日趋势性流入，确认买入信号"
+        elif flow_5d <= cfg["weak_5d_cumulative"]:
+            confirmation = "❌ 5日趋势性流出，谨慎"
+        else:
+            confirmation = "⚪ 5日无明显趋势"
+
+        result.update({
+            "today_net": today_net,
+            "5d_cumulative": flow_5d,
+            "20d_cumulative": flow_20d,
+            "signal": signal,
+            "confirmation": confirmation,
+            "data_ok": True,
+        })
+
+    except Exception as e:
+        result["note"] = f"AKShare获取失败: {str(e)[:80]}"
+
+    _northbound_cache = result
+    _northbound_cache_time = time.time()
+    return result

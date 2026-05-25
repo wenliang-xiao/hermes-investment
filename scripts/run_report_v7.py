@@ -6,9 +6,12 @@ import sys, time, json, os, urllib.request
 sys.path.insert(0, '/home/admin/.hermes')
 import investment_system.report_v6 as rpt
 from investment_system.full_asset_scanner import (
-    track_lds_portfolio, scan_all_etfs, scan_bonds, scan_commodities, 
+    scan_all_etfs, scan_bonds, scan_commodities,
     scan_fx, determine_bridgewater_quadrant
 )
+from investment_system.fund_tracker import track_lds_portfolio_v2, scan_all_etf_groups
+from investment_system.universe_builder import build_daily_scan_plan
+from investment_system.multi_asset_engine import run_daily_multi_asset_scan
 from investment_system.news_engine import get_news_with_impact
 
 LF = '/tmp/report_v7_log.txt'
@@ -21,10 +24,22 @@ log("=== 日报 v7 START ===")
 
 try:
     scanner = rpt.FactorScanner()
-    scanner.MAX_SCAN = 15
-    macro = rpt.MacroEngine().refresh()
-    macro['favored_sectors'] = ['AI算力', '半导体', '科技']
+    macro_engine = rpt.MacroEngine()
+    macro = macro_engine.refresh()
+    macro['favored_sectors'] = ['AI算力', '半导体', '科技', '国产替代']
     macro['avoided_sectors'] = []
+
+    # 构建每日动态扫描计划（研究池+买入池+脱钩池）
+    try:
+        scan_plan = build_daily_scan_plan()
+        scanner.MAX_SCAN = min(len(scan_plan.get('buy_universe_codes', [])), 120)
+        log(f"扫描计划: 研究池{len(scan_plan['research_universe'])}只 "
+            f"买入池{len(scan_plan['buy_universe_codes'])}只 "
+            f"脱钩池{len(scan_plan['decoupling_candidates'])}只")
+    except Exception as e:
+        scan_plan = {}
+        scanner.MAX_SCAN = 50
+        log(f"扫描计划构建失败(使用默认): {e}")
 
     w = rpt.FeishuWriter()
     doc_id = w.create_doc(f"{rpt.SAN_YUAN_NAME}·日报 v7 {time.strftime('%Y/%m/%d')}")
@@ -60,31 +75,74 @@ try:
     log("Bridgewater done")
 
     # ═══ 三、LDS 全天候组合 ═══
-    lds = track_lds_portfolio()
-    port = lds.get('portfolio', {})
+    lds = track_lds_portfolio_v2(version="A")
+    dq = lds.get('data_quality', {})
     w.write(doc_id, [
         ('divider', ''),
         ('h2', '三、🏛️ LDS 全天候 ETF 组合'),
         ('quote', '非择时·月度再平衡·4类低相关资产对冲 — 桥水风险平价思想'),
-        ('bold', f"今日: {port.get('daily_return', '?')} | YTD: {port.get('ytd_return', '?')}"),
+        ('bold', f"今日: {lds.get('portfolio_ret_1d', '?')} | YTD: {lds.get('portfolio_ytd', '?')}"),
     ])
     for comp in lds.get('components', []):
-        w.write(doc_id, [('bullet', f"{comp['name']}({comp['symbol']}): {comp.get('weight',0)*100:.0f}%权重 | 今日{comp.get('daily_pct', '?')}% | YTD{comp.get('ytd_pct', '?')}%")])
+        ret1d = comp.get('ret_1d')
+        ytd   = comp.get('ytd')
+        badge = comp.get('data_badge', '')
+        w.write(doc_id, [('bullet',
+            f"{comp['name']}({comp.get('code','?')}): {comp.get('weight',0)*100:.0f}%权重 | "
+            f"今日{f'{ret1d:+.2f}%' if ret1d is not None else '?'} | "
+            f"YTD{f'{ytd:+.2f}%' if ytd is not None else '?'} | {badge}"
+        )])
+    rebalance_note = lds.get('rebalance_note', '')
+    need = lds.get('need_rebalance', False)
     w.write(doc_id, [
-        ('bold', f"再平衡信号: {port.get('rebalance_signal', '?')}"),
-        ('text', lds.get('valuation_note', '')),
+        ('bold', f"再平衡信号: {'⚠️ ' + rebalance_note if need else '✅ ' + rebalance_note}"),
+        ('text', f"数据质量: {dq.get('badge', '')}"),
         ('text', rpt.FeishuWriter.ref(w, '二、资产配置·LDS全天候ETF')),
     ])
     log("LDS portfolio done")
 
-    # ═══ 四、ETF 全景 ═══
+    # ═══ 四、多资产配置引擎（风险调整收益最大化）═══
+    try:
+        regime_for_engine = macro.get('regime', 'default')
+        ma_report = run_daily_multi_asset_scan(regime=regime_for_engine)
+        w.write(doc_id, [
+            ('divider', ''),
+            ('h2', '四、🎯 多资产配置建议（风险平价 × 宏观匹配）'),
+            ('quote', f"宏观象限: {ma_report.get('regime','?')} → {ma_report.get('bw_quadrant','?')} | 评分资产: {ma_report.get('total_scored','?')}只"),
+            ('bold', ma_report.get('summary', '')),
+        ])
+        by_class = ma_report.get('by_class', {})
+        for cls, assets in by_class.items():
+            if not assets:
+                continue
+            cls_lines = []
+            for a in assets[:2]:
+                ret20 = f"{a['ret_20d']:+.1f}%" if a.get('ret_20d') is not None else "?%"
+                sharpe = f"夏普≈{a['sharpe']:.2f}" if a.get('sharpe') is not None else ""
+                cls_lines.append(
+                    f"{a['signal']} {a['name']}({a['id']}): "
+                    f"评分{a['score']:.2f} | 20日{ret20} | {sharpe} | "
+                    f"建议仓位{a.get('weight_pct','?')}%"
+                )
+            w.write(doc_id, [('bullet', f"【{cls}】 " + " / ".join(cls_lines))])
+        avoid = ma_report.get('avoid_list', [])
+        if avoid:
+            avoid_str = "、".join(f"{a['name']}({a['id']})" for a in avoid[:3])
+            w.write(doc_id, [('bullet', f"🔴 当前回避：{avoid_str}")])
+        w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '二、资产配置·LDS全天候ETF'))])
+        log(f"MultiAsset engine done: {ma_report.get('total_scored',0)} assets scored")
+    except Exception as e:
+        log(f"MultiAsset engine failed: {e}")
+        w.write(doc_id, [('bullet', f"多资产引擎暂时不可用: {e}")])
+
+    # ═══ 四B、ETF 全景三维排序（保留）═══
     etfs = scan_all_etfs()
     w.write(doc_id, [
         ('divider', ''),
-        ('h2', '四、📦 ETF 动量-风险-费率 三维排序'),
+        ('h2', '四B、📦 ETF 动量-风险-费率 三维排序'),
     ])
     for etf in etfs.get('top5', [])[:5]:
-        w.write(doc_id, [('bullet', f"{etf['name']}({etf['symbol']}): 综合{etf['composite_score']} | 动量{etf.get('momentum_score','?')} | 波动率倒数{etf.get('vol_score','?')} | 费率{etf.get('fee_score','?')}")])
+        w.write(doc_id, [('bullet', f"{etf['name']}({etf['symbol']}): 综合{etf.get('_composite','?')} | 动量{etf.get('ret_20d','?')}%")])
     w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '二、资产配置·LDS全天候ETF'))])
     log("ETF done")
 

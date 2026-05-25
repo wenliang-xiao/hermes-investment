@@ -32,8 +32,8 @@ class FactorScanner:
     # 每个因子输出 1-10 分，反映该因子在全市场的百分位
     # ═══════════════════════════════════════════
 
-    def _percentile_score(self, value, reference_range) -> float:
-        """将值映射到1-10分（排序分位法）
+    def _bounded_linear_score(self, value, reference_range) -> float:
+        """将值映射到1-10分（固定区间线性插值，非真实截面百分位）
         reference_range: (min_val, max_val) 参考范围
         """
         if value is None or reference_range is None:
@@ -41,7 +41,6 @@ class FactorScanner:
         lo, hi = reference_range
         if hi <= lo:
             return 5.0
-        # 线性映射，截断在 1-10
         score = 1 + 9 * (value - lo) / (hi - lo)
         return max(1, min(10, score))
 
@@ -54,9 +53,9 @@ class FactorScanner:
         rev = min(abs(fin.get("营业收入同比增长率", 0) or 0), 100)
         ocps = min(abs(fin.get("每股经营现金流", 0) or 0), 10)
 
-        s_roe = self._percentile_score(roe, (0, 30))
-        s_rev = self._percentile_score(rev, (0, 50))  # 营收增速作为质量佐证
-        s_oc = self._percentile_score(ocps, (0, 5))
+        s_roe = self._bounded_linear_score(roe, (0, 30))
+        s_rev = self._bounded_linear_score(rev, (0, 50))  # 营收增速作为质量佐证
+        s_oc = self._bounded_linear_score(ocps, (0, 5))
 
         # ROE权重最高，营收增速辅助，现金流保底
         return round(s_roe * 0.5 + s_rev * 0.25 + s_oc * 0.25, 1)
@@ -71,11 +70,11 @@ class FactorScanner:
         pb = abs(pb) if pb and pb > 0 else None
 
         # A股典型PE: 10-40, PB: 0.8-5
-        s_pe = self._percentile_score(pe, (10, 40)) if pe else 5.0
+        s_pe = self._bounded_linear_score(pe, (10, 40)) if pe else 5.0
         # 反向：PE越低越有价值
         s_pe = 10 - s_pe + 1
 
-        s_pb = self._percentile_score(pb, (0.8, 5)) if pb else 5.0
+        s_pb = self._bounded_linear_score(pb, (0.8, 5)) if pb else 5.0
         s_pb = 10 - s_pb + 1  # PB越低越好
 
         return round(s_pe * 0.6 + s_pb * 0.4, 1)
@@ -85,8 +84,8 @@ class FactorScanner:
         rev = abs(fin.get("营业收入同比增长率", 0) or 0)
         profit = abs(fin.get("净利润同比增长率", 0) or 0)
 
-        s_rev = self._percentile_score(rev, (0, 60))
-        s_profit = self._percentile_score(profit, (0, 80))
+        s_rev = self._bounded_linear_score(rev, (0, 60))
+        s_profit = self._bounded_linear_score(profit, (0, 80))
 
         return round(s_rev * 0.4 + s_profit * 0.6, 1)
 
@@ -98,14 +97,14 @@ class FactorScanner:
         if len(daily_ret) < 10:
             return 5.0
         vol = daily_ret.tail(20).std() * np.sqrt(252) * 100  # 年化波动率%
-        s_vol = self._percentile_score(vol, (15, 60))
+        s_vol = self._bounded_linear_score(vol, (15, 60))
         s_vol = 10 - s_vol + 1  # 波动率越低越好
         return round(s_vol, 1)
 
     def calc_dividend_score(self, fin: dict) -> float:
         """红利因子：股息率（A股典型 0-5%）"""
         div = abs(fin.get("股息率", 0) or 0)
-        return round(self._percentile_score(div, (0, 5)), 1)
+        return round(self._bounded_linear_score(div, (0, 5)), 1)
 
     def calc_momentum_score(self, close_series: pd.Series) -> float:
         """动量因子（Vibe Trading多时间框架）：20日+60日+120日组合"""
@@ -118,9 +117,9 @@ class FactorScanner:
         ret_120d = (close_series.iloc[-1] / close_series.iloc[-121] - 1) * 100 if len(close_series) >= 121 else 0
 
         # 分别评分后加权（Vibe：短期40%+中期35%+长期25%）
-        s20 = self._percentile_score(ret_20d, (-20, 30))
-        s60 = self._percentile_score(ret_60d, (-30, 50))
-        s120 = self._percentile_score(ret_120d, (-40, 80))
+        s20 = self._bounded_linear_score(ret_20d, (-20, 30))
+        s60 = self._bounded_linear_score(ret_60d, (-30, 50))
+        s120 = self._bounded_linear_score(ret_120d, (-40, 80))
 
         return round(s20 * 0.4 + s60 * 0.35 + s120 * 0.25, 1)
 
@@ -151,15 +150,17 @@ class FactorScanner:
             result["rsi"] = round(rsi, 1)
             result["rsi_signal"] = "🔴超买" if rsi > 70 else ("🟢超卖" if rsi < 30 else "⚪中性")
 
-        # MACD
-        if len(close) > 26:
+        # MACD（标准：DIF=EMA12-EMA26，DEA=EMA9(DIF)，柱=DIF-DEA）
+        if len(close) > 35:
             s = pd.Series(close)
-            ema12 = s.ewm(span=12).mean().iloc[-1]
-            ema26 = s.ewm(span=26).mean().iloc[-1]
-            macd_val = ema12 - ema26
-            macd_signal = s.ewm(span=9).mean().iloc[-1] - s.ewm(span=26).mean().iloc[-1]
-            result["macd"] = round(macd_val, 2)
-            result["macd_signal"] = "🟢金叉" if macd_val > macd_signal else "🔴死叉"
+            ema12 = s.ewm(span=12, adjust=False).mean()
+            ema26 = s.ewm(span=26, adjust=False).mean()
+            macd_line = ema12 - ema26                          # DIF
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()  # DEA=EMA9(DIF)
+            hist = macd_line - signal_line                     # 柱
+            result["macd"] = round(float(macd_line.iloc[-1]), 4)
+            result["macd_hist"] = round(float(hist.iloc[-1]), 4)
+            result["macd_signal"] = "🟢金叉" if hist.iloc[-1] > 0 else "🔴死叉"
 
         # 均线偏离
         price = close[-1]
