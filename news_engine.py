@@ -737,39 +737,57 @@ def _format_impact_brief(impacts: List[Dict]) -> str:
 # 第4部分：LLM总结
 # ═══════════════════════════════════════════════════════════════
 
+def _get_hermes_llm_config() -> tuple:
+    """从 Hermes config.yaml 读取 LLM 配置（当前使用的 API）"""
+    try:
+        import yaml
+        config_path = os.path.expanduser("~/.hermes/config.yaml")
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f)
+            model_cfg = cfg.get("model", {})
+            base_url = model_cfg.get("base_url", "")
+            api_key = model_cfg.get("api_key", "")
+            model = model_cfg.get("default", "")
+            if base_url and api_key and model:
+                return base_url, api_key, model
+    except Exception:
+        pass
+    return "", "", ""
+
+
 def _get_llm_api_key() -> Optional[str]:
-    """获取LLM API密钥（优先ARK，其次OPENAI）"""
+    """获取LLM API密钥（优先ARK，其次OPENAI，最后Hermes自身配置）"""
     for key_name in ["ARK_API_KEY", "OPENAI_API_KEY"]:
         key = os.environ.get(key_name, "")
         if key:
             return key
-    return None
+    _, hermes_key, _ = _get_hermes_llm_config()
+    return hermes_key or None
 
 
 def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
     """
     调用LLM API生成总结。
-    支持两种API端点：
-      - ARK_API_KEY → 火山方舟（豆包等）
-      - OPENAI_API_KEY → OpenAI兼容接口
+    优先级：ARK_API_KEY > OPENAI_API_KEY > Hermes自身LLM配置
     """
-    api_key = _get_llm_api_key()
-    if not api_key:
-        return None
-    
-    # 判断API类型：ARK需 model 非占位符，否则回退OpenAI
     ark_model = os.environ.get("ARK_MODEL", "")
     if os.environ.get("ARK_API_KEY") and ark_model and "xxxxx" not in ark_model:
-        # 火山方舟 Ark API
         api_url = os.environ.get("ARK_API_BASE", "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
         model = ark_model
+        api_key = os.environ.get("ARK_API_KEY")
     elif os.environ.get("OPENAI_API_KEY"):
-        # OpenAI 兼容接口（ARK不可用时回退）
         api_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1/chat/completions")
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         api_key = os.environ.get("OPENAI_API_KEY")
     else:
-        return None
+        # 回退到 Hermes 自身使用的 LLM
+        hermes_url, hermes_key, hermes_model = _get_hermes_llm_config()
+        if not hermes_key:
+            return None
+        api_url = hermes_url + "/chat/completions"
+        model = hermes_model
+        api_key = hermes_key
     auth_header = {"Authorization": f"Bearer {api_key}"}
     
     messages = []
