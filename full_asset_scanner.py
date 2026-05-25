@@ -48,12 +48,20 @@ def _fetch_with_retry(fn, max_attempts: int = 3, delay: float = 0.8):
     raise last_err
 
 COMMODITY_SANITY = {
-    "黄金":   (2000, 5000),
-    "原油":   (40,   130),
-    "铜":     (2.0,  8.0),
-    "白银":   (10,   80),
-    "天然气": (1.0,  20),
+    "黄金":   (2200, 5500),   # 宽松区间：覆盖地缘极端+央行购金狂热
+    "原油":   (40,   120),    # 覆盖供需冲击
+    "铜":     (2.5,  7.0),    # 铜价区间
+    "白银":   (18,   90),     # 白银：贵金属+工业双重属性
+    "天然气": (1.5,  20),
     "豆粕/农产品": (0.15, 0.80),
+}
+
+# ETF→现货价格折算系数（用于当期货价格不通过校验时的回退）
+ETF_SPOT_SCALE = {
+    "GLD": 10.53,    # GLD ÷ 0.09495 oz/share → 现货USD/oz
+    "SLV": 1.0,      # SLV ≈ 1 oz/share
+    "USO": 0.685,    # USO追踪前月WTI，历史比率≈0.685
+    "COPX": 0.67,    # COPX追踪铜矿股，折算系数约0.67
 }
 
 def _validate_commodity_price(name: str, price: float) -> Optional[float]:
@@ -980,21 +988,41 @@ def scan_commodities(macro_data: dict = None) -> dict:
             "note": "",
         }
         
-        # 尝试主代码→fallback
+        # ── 尝试主代码 → fallback（带校验回退）──
         df = _get_price_data(cfg["primary"], period="6mo")
         if df.empty:
             df = _get_price_data(cfg["fallback"], period="6mo")
             if not df.empty:
                 item["source_symbol"] = cfg["fallback"]
+                item["_using_fallback"] = True
         else:
             item["source_symbol"] = cfg["primary"]
+            item["_using_fallback"] = False
         
         if not df.empty and "close" in df.columns:
             close = df["close"]
             raw_price = float(close.iloc[-1])
+            
+            # 阶段1：主源价格校验
             validated_price = _validate_commodity_price(cfg["name"], raw_price)
+            
+            # 阶段2：主源不通过 → 尝试ETF回退+折算
+            if validated_price is None and not item.get("_using_fallback"):
+                logger.info("[回退ETF] %s 主源价格%.2f不通过校验，尝试ETF回退", cfg["name"], raw_price)
+                fb_df = _get_price_data(cfg["fallback"], period="6mo")
+                if not fb_df.empty and "close" in fb_df.columns:
+                    fb_raw = float(fb_df["close"].iloc[-1])
+                    # 应用ETF→现货折算系数
+                    scale = ETF_SPOT_SCALE.get(cfg["fallback"], 1.0)
+                    fb_scaled = fb_raw * scale
+                    validated_price = _validate_commodity_price(cfg["name"], fb_scaled)
+                    if validated_price is not None:
+                        item["source_symbol"] = cfg["fallback"]
+                        item["note"] += f"ETF折算({cfg['fallback']} ${fb_raw:.1f}×{scale:.1f}) "
+                        logger.info("[ETF折算] %s %s $%.1f→$%.1f 通过", cfg["name"], cfg["fallback"], fb_raw, fb_scaled)
+            
             if validated_price is None:
-                item["note"] = f"⚠️ 价格异常({raw_price:.2f})，已丢弃"
+                item["note"] += f"⚠️价格异常({raw_price:.2f})已丢弃 "
                 results.append(item)
                 continue
             item["price"] = round(validated_price, 2)
