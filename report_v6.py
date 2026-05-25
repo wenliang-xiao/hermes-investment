@@ -186,6 +186,50 @@ def build_gate_section(w, doc_id, macro):
         else:
             w.write(doc_id, [("quote", f"CPI={cpi}% → 过热 → LDS减仓防御")])
     
+    # 债券/黄金主动信号
+    w.write(doc_id, [("h3", "💡 债券·黄金主动信号")])
+    try:
+        md = macro.get("macro_data", {})
+        cpi_val = md.get("cpi")
+        us10y_val = None
+        cn10y_val = None
+        try:
+            from investment_system.yf_data_layer import get_current_price
+            us10y_raw = get_current_price("^TNX")
+            if isinstance(us10y_raw, (int, float)) and 0 < us10y_raw < 15:
+                us10y_val = round(float(us10y_raw), 2)
+            cn10y_val = 2.80
+        except Exception:
+            pass
+
+        if us10y_val and cpi_val is not None:
+            real_rate = round(us10y_val - cpi_val, 2)
+            if real_rate > 2.0:
+                gold_signal = f"🔴 实际利率{real_rate:.1f}% 偏高 → 黄金承压，关注回调买入机会"
+                tlt_signal = f"🟢 实际利率高位 → TLT/长债有配置价值（等待利率见顶）"
+            elif real_rate > 0.5:
+                gold_signal = f"🟡 实际利率{real_rate:.1f}% 中性 → 黄金中性，央行购金支撑底部"
+                tlt_signal = f"🟡 债券中性 → 维持底仓即可"
+            else:
+                gold_signal = f"🟢 实际利率{real_rate:.1f}% 偏低/负值 → 黄金强驱动，增配信号"
+                tlt_signal = f"🟢 低实际利率 → 长债/黄金均受益，象限4核心配置"
+            w.write(doc_id, [("bullet", f"美债实际利率 = 名义{us10y_val:.2f}% - CPI{cpi_val:.1f}% = {real_rate:.2f}%")])
+            w.write(doc_id, [("bullet", gold_signal)])
+            w.write(doc_id, [("bullet", tlt_signal)])
+
+        if us10y_val and cn10y_val:
+            spread = round(cn10y_val - us10y_val, 2)
+            if spread < -150:
+                spread_signal = f"🔴 中美利差{spread*100:.0f}bp → 极度倒挂，人民币贬值压力大，外资流出A股"
+            elif spread < -50:
+                spread_signal = f"🟡 中美利差{spread*100:.0f}bp → 倒挂，关注汇率压力"
+            else:
+                spread_signal = f"🟢 中美利差{spread*100:.0f}bp → 正常，A股承压减轻"
+            w.write(doc_id, [("bullet", f"中美利差 = CN10Y{cn10y_val:.2f}% - US10Y{us10y_val:.2f}% = {spread:.2f}%")])
+            w.write(doc_id, [("bullet", spread_signal)])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"⚠️ 利率信号获取失败: {str(e)[:40]}")])
+
     # 国运线
     w.write(doc_id, [("h3", "国运线（上证20年趋势线）")])
     guoyun = macro.get("guoyun_line", {})
@@ -1094,10 +1138,8 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
         price = p.get("price", 0)
         price_str = f"¥{price:.2f}" if price else ""
 
-        # LDS四条标准检验（来自原则文档：30-200亿市值 + ROE>15% + 增速>20% + 机构持仓<30%）
         roe_num = roe_raw if isinstance(roe_raw, (int, float)) else None
         rev_num = p.get("rev_growth") if isinstance(p.get("rev_growth"), (int, float)) else None
-        mkt_cap = p.get("price", 0) * 1e8
 
         lds_checks = []
         if roe_num is not None:
@@ -1106,9 +1148,28 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
             lds_checks.append("✅增速" if rev_num >= 20 else "⚠️增速低")
         lds_tag = " [" + " ".join(lds_checks) + "]" if lds_checks else ""
 
+        pe_pct = p.get("pe_percentile")
+        pe_level = p.get("pe_level", "")
+        pe_pct_str = f" {pe_level}({pe_pct:.0f}%分位)" if pe_pct is not None else ""
+
+        vol_sig = p.get("vol_signal", "")
+        vol_str = f" | {vol_sig}" if vol_sig and vol_sig != "➖量能平稳" else ""
+
+        roe_trend = p.get("roe_trend")
+        roe_trend_str = ""
+        if roe_trend is not None:
+            if roe_trend > 2:
+                roe_trend_str = " ROE↑趋升"
+            elif roe_trend < -2:
+                roe_trend_str = " ROE↓趋降"
+
+        fcf = p.get("fcf_亿")
+        fcf_str = f" FCF{fcf:+.1f}亿" if fcf is not None else ""
+
         w.write(doc_id, [("bullet",
             f"{name}({code}) {price_str} {chg_arrow}{chg:+.2f}%: "
-            f"评分{score:.1f} | PE {pe_str} | ROE {roe_str}{rev_str}{lds_tag}{chain_tag}{kelly_str}"
+            f"评分{score:.1f} | PE {pe_str}{pe_pct_str} | ROE {roe_str}{roe_trend_str}{rev_str}{fcf_str}"
+            f"{lds_tag}{vol_str}{chain_tag}{kelly_str}"
         )])
     
     if exclude_sectors:
@@ -1300,6 +1361,79 @@ def _build_hk_channel(w, doc_id):
         
         w.write(doc_id, [("bullet", f"{name}({symbol}): 评分 {score:.1f} | PE {pe_str}{discount_str}{tag_str}{kelly_str} | {mkt_str}")])
 
+def _calc_tech_signal(closes: list) -> dict:
+    if not closes or len(closes) < 5:
+        return {}
+    import numpy as np
+    c = np.array([float(x) for x in closes if x])
+    if len(c) < 5:
+        return {}
+    signal = {}
+    signal["price"] = round(float(c[-1]), 2)
+    signal["chg"] = round((c[-1] / c[-2] - 1) * 100, 2) if len(c) >= 2 else 0
+
+    if len(c) >= 14:
+        diff = np.diff(c[-15:])
+        gains = np.where(diff > 0, diff, 0)
+        losses = np.where(diff < 0, -diff, 0)
+        avg_g = np.mean(gains) if np.mean(gains) > 0 else 1e-10
+        avg_l = np.mean(losses) if np.mean(losses) > 0 else 1e-10
+        rsi = 100 - 100 / (1 + avg_g / avg_l)
+        signal["rsi"] = round(float(rsi), 1)
+        if rsi > 70:
+            signal["rsi_signal"] = "⚠️超买"
+        elif rsi < 30:
+            signal["rsi_signal"] = "💡超卖"
+        else:
+            signal["rsi_signal"] = "✅健康"
+
+    if len(c) >= 20:
+        ma20 = float(np.mean(c[-20:]))
+        signal["ma20_dev"] = round((c[-1] / ma20 - 1) * 100, 1)
+        signal["above_ma20"] = c[-1] > ma20
+
+    if len(c) >= 60:
+        ma60 = float(np.mean(c[-60:]))
+        signal["ma60_dev"] = round((c[-1] / ma60 - 1) * 100, 1)
+        signal["above_ma60"] = c[-1] > ma60
+
+    if len(c) >= 35:
+        s = list(c)
+        from statistics import mean
+        ema12 = s[-1]
+        ema26 = s[-1]
+        for v in s[-35:]:
+            ema12 = ema12 * (1 - 2/13) + v * (2/13)
+            ema26 = ema26 * (1 - 2/27) + v * (2/27)
+        macd = ema12 - ema26
+        signal["macd_positive"] = macd > 0
+
+    score = 5.0
+    if signal.get("above_ma20"):
+        score += 1.0
+    if signal.get("above_ma60"):
+        score += 1.5
+    if signal.get("macd_positive"):
+        score += 1.0
+    rsi_val = signal.get("rsi", 50)
+    if 40 <= rsi_val <= 65:
+        score += 1.5
+    elif rsi_val > 70:
+        score -= 1.0
+    signal["tech_score"] = round(min(10, max(1, score)), 1)
+
+    badges = []
+    if signal.get("above_ma60") and signal.get("macd_positive"):
+        badges.append("🟢趋势向上")
+    elif not signal.get("above_ma20"):
+        badges.append("🔴均线下方")
+    if signal.get("rsi_signal"):
+        badges.append(signal["rsi_signal"])
+    signal["badges"] = " ".join(badges) if badges else "⚪中性"
+
+    return signal
+
+
 def _fetch_watchlist_prices(codes: list) -> dict:
     prices = {}
     a_codes = [c for c in codes if c.isdigit() and len(c) == 6]
@@ -1310,11 +1444,11 @@ def _fetch_watchlist_prices(codes: list) -> dict:
             import baostock as bs
             lg = bs.login()
             if lg.error_code == "0":
-                for code in a_codes[:20]:
+                for code in a_codes[:30]:
                     sym = f"sh.{code}" if code.startswith(("5", "6")) else f"sz.{code}"
                     rs = bs.query_history_k_data_plus(
                         sym, "date,close,pctChg",
-                        start_date=(datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
+                        start_date=(datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
                         end_date=datetime.now().strftime("%Y-%m-%d"),
                         frequency="d",
                     )
@@ -1322,14 +1456,15 @@ def _fetch_watchlist_prices(codes: list) -> dict:
                     while rs.next():
                         rows.append(rs.get_row_data())
                     if rows:
-                        r = rows[-1]
-                        try:
-                            prices[code] = {
-                                "price": float(r[1]) if r[1] else None,
-                                "chg": float(r[2]) if r[2] else None,
-                            }
-                        except (ValueError, IndexError):
-                            pass
+                        closes = [r[1] for r in rows if r[1]]
+                        tech = _calc_tech_signal(closes)
+                        if tech:
+                            r = rows[-1]
+                            try:
+                                tech["chg"] = float(r[2]) if r[2] else tech.get("chg", 0)
+                                prices[code] = tech
+                            except (ValueError, IndexError):
+                                pass
                 bs.logout()
         except Exception:
             pass
@@ -1381,15 +1516,33 @@ def _build_watchlist_section(w, doc_id):
                 price = pd_info.get("price")
                 chg = pd_info.get("chg")
 
-                price_str = f"¥{price:.2f}" if price else "—"
+                price = pd_info.get("price")
+                chg = pd_info.get("chg")
+                tech_score = pd_info.get("tech_score")
+                badges = pd_info.get("badges", "")
+                rsi = pd_info.get("rsi")
+                ma60_dev = pd_info.get("ma60_dev")
+
+                price_str = f"¥{price:.2f}" if isinstance(price, (int, float)) else "—"
                 if chg is not None:
                     arrow = "🔺" if chg > 0 else ("🔻" if chg < 0 else "➖")
                     chg_str = f" {arrow}{chg:+.2f}%"
                 else:
                     chg_str = ""
 
+                signal_parts = []
+                if tech_score is not None:
+                    signal_parts.append(f"技术{tech_score:.0f}分")
+                if rsi is not None:
+                    signal_parts.append(f"RSI{rsi:.0f}")
+                if ma60_dev is not None:
+                    signal_parts.append(f"偏MA60{ma60_dev:+.1f}%")
+                if badges:
+                    signal_parts.append(badges)
+                signal_str = f" | {' '.join(signal_parts)}" if signal_parts else ""
+
                 w.write(doc_id, [("bullet",
-                    f"{name}({code}) {price_str}{chg_str} [{chain}]: {focus}"
+                    f"{name}({code}) {price_str}{chg_str}{signal_str} [{chain}]: {focus}"
                 )])
     except Exception as e:
         w.write(doc_id, [("bullet", f"⚠️ 观察池加载失败: {str(e)[:60]}")])
@@ -1435,6 +1588,47 @@ def _build_opportunity_themes_section(w, doc_id):
         w.write(doc_id, [("bullet", f"⚠️ 挖掘主题加载失败: {str(e)[:40]}")])
 
 
+def _build_state_fund_section(w, doc_id):
+    """国家队资金追踪：社保/汇金/中证金融持仓方向"""
+    try:
+        import akshare as ak
+        w.write(doc_id, [("h3", "🏛️ 国家队资金信号")])
+        w.write(doc_id, [("quote",
+            "国家队（社保/汇金/中证金融）=A股最大逆向买手；重仓方向=政策背书+安全边际。"
+            "季报滞后45天，但方向价值极高。"
+        )])
+
+        try:
+            sector_flow = ak.stock_sector_fund_flow_rank(indicator="5日", sector_type="行业资金流")
+            if not sector_flow.empty:
+                top5 = sector_flow.head(5)
+                w.write(doc_id, [("bold", "近5日行业资金净流入 Top5（国家队惯用板块确认）")])
+                for _, row in top5.iterrows():
+                    name = str(row.iloc[0]) if len(row) > 0 else "?"
+                    flow = str(row.iloc[1]) if len(row) > 1 else "?"
+                    w.write(doc_id, [("bullet", f"{name}: {flow}")])
+        except Exception:
+            w.write(doc_id, [("bullet", "⚠️ 行业资金流数据暂不可用")])
+
+        w.write(doc_id, [("bold", "国家队惯用重仓方向（基于历史季报规律）")])
+        STATE_FUND_FAVORITES = [
+            ("大型银行（招商/工商/建设）", "高股息+低估值，托底核心", "600036/601398/601939"),
+            ("公用事业（长江电力/华能）", "稳定分红，防御核心仓", "600900/600011"),
+            ("央企高股息（中石化/神华）", "过热期配置+稳定分红", "600028/601088"),
+            ("A股宽基ETF（510300/510050）", "直接购买ETF托底大盘", "510300/510050"),
+            ("半导体设备（北方华创/中微）", "政策战略资产，大基金三期重点", "688041/688012"),
+        ]
+        for name, logic, codes in STATE_FUND_FAVORITES:
+            w.write(doc_id, [("bullet", f"【{name}】{logic} | 关注: {codes}")])
+
+        w.write(doc_id, [("bullet",
+            "📌 AKShare追踪接口: ak.stock_institute_hold_detail_em(stock='600036', quarter='20241')"
+            " → 查询特定股票的机构持仓季报"
+        )])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"⚠️ 国家队信号加载失败: {str(e)[:50]}")])
+
+
 def build_discovery_section(w, doc_id, scanner, macro):
     w.write(doc_id, [("divider", ""), ("h2", "十、🔍 多因子新票发现")])
 
@@ -1451,6 +1645,7 @@ def build_discovery_section(w, doc_id, scanner, macro):
 
     _build_watchlist_section(w, doc_id)
     _build_opportunity_themes_section(w, doc_id)
+    _build_state_fund_section(w, doc_id)
 
     w.write(doc_id, [("text", w.ref("三、多因子引擎")), ("text", w.ref("四、找票执行·产业链定位"))])
 

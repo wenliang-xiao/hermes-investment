@@ -12,7 +12,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from . import config
-from .data_layer import get_stock_daily, get_financial_report
+from .data_layer import (get_stock_daily, get_financial_report,
+                         get_financial_history, calc_pe_percentile, get_volume_signal)
 
 
 class FactorScanner:
@@ -234,6 +235,35 @@ class FactorScanner:
             rev_growth = fin.get("营业收入同比增长率")
             profit_growth = fin.get("净利润同比增长率")
 
+            # PE 历史百分位（价值投资核心信号）
+            pe_pct_info = {}
+            if pe_val and pe_val > 0:
+                try:
+                    pe_pct_info = calc_pe_percentile(symbol, float(pe_val), years=5)
+                except Exception:
+                    pass
+
+            # 成交量放量/缩量信号
+            vol_signal = {}
+            try:
+                vol_signal = get_volume_signal(symbol)
+            except Exception:
+                pass
+
+            # ROE 趋势 + FCF（最近4季）
+            roe_trend = None
+            latest_fcf = None
+            try:
+                fin_hist = get_financial_history(symbol, quarters=4)
+                if len(fin_hist) >= 2:
+                    roes = [h["roe"] for h in fin_hist if h.get("roe") is not None]
+                    if len(roes) >= 2:
+                        roe_trend = round(roes[0] - roes[-1], 1)
+                if fin_hist and fin_hist[0].get("fcf") is not None:
+                    latest_fcf = fin_hist[0]["fcf"]
+            except Exception:
+                pass
+
             return {
                 "symbol": symbol,
                 "score": round(total_score, 2),
@@ -249,6 +279,12 @@ class FactorScanner:
                 "roe": round(float(roe_val), 1) if roe_val is not None else None,
                 "rev_growth": round(float(rev_growth), 1) if rev_growth is not None else None,
                 "profit_growth": round(float(profit_growth), 1) if profit_growth is not None else None,
+                "pe_percentile": pe_pct_info.get("percentile"),
+                "pe_level": pe_pct_info.get("level", ""),
+                "vol_signal": vol_signal.get("signal", ""),
+                "vol_ratio": vol_signal.get("ratio"),
+                "roe_trend": roe_trend,
+                "fcf_亿": latest_fcf,
             }
         except Exception as e:
             return {"symbol": symbol, "score": 0, "error": str(e)[:100]}

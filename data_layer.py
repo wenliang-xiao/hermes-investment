@@ -70,8 +70,38 @@ def get_stock_codes() -> list:
 # ═══════════════════════════════════════════
 # 2. 个股日线行情（baostock）
 # ═══════════════════════════════════════════
+def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
+    """baostock不可达时的AKShare回退（无PE/PB，降级运行）"""
+    try:
+        import akshare as ak
+        end_d = datetime.now().strftime("%Y%m%d")
+        start_d = (datetime.now() - timedelta(days=days + 10)).strftime("%Y%m%d")
+        df = ak.stock_zh_a_hist(
+            symbol=symbol.zfill(6),
+            period="daily",
+            start_date=start_d,
+            end_date=end_d,
+            adjust="qfq",
+        )
+        if df is None or df.empty:
+            return pd.DataFrame()
+        col_map = {
+            "日期": "date", "开盘": "open", "收盘": "close",
+            "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
+        }
+        df = df.rename(columns=col_map)
+        df["date"] = pd.to_datetime(df["date"])
+        df["pe"] = None
+        df["pb"] = None
+        df["symbol"] = symbol
+        return df[["date", "open", "high", "low", "close", "volume", "amount", "pe", "pb", "symbol"]]
+    except Exception as e:
+        print(f"[data] {symbol} AKShare回退失败: {e}")
+        return pd.DataFrame()
+
+
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据，含PE/PB"""
+    """获取个股日线数据（含PE/PB）。baostock主源，AKShare降级回退。"""
     _bs_login()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
@@ -83,7 +113,7 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
             start_date=start, end_date=end,
             frequency="d", adjustflag="2")
         if rs.error_code != "0":
-            return pd.DataFrame()
+            raise RuntimeError(f"baostock error_code={rs.error_code}")
 
         rows = []
         while rs.next():
@@ -97,17 +127,17 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
                     "pe": float(r[7]) if r[7] and r[7] != "" else None,
                     "pb": float(r[8]) if r[8] and r[8] != "" else None,
                 })
-            except:
+            except Exception:
                 continue
 
         if not rows:
-            return pd.DataFrame()
+            raise RuntimeError("baostock returned empty rows")
         df = pd.DataFrame(rows)
         df["symbol"] = symbol
         return df
     except Exception as e:
-        print(f"[data] {symbol} 行情错误: {e}")
-        return pd.DataFrame()
+        print(f"[data] {symbol} baostock失败({e})，切AKShare回退")
+        return _get_stock_daily_akshare(symbol, days)
 
 
 # ═══════════════════════════════════════════
@@ -176,6 +206,168 @@ def get_financial_report(symbol: str) -> dict:
                 continue
 
     return result
+
+
+def get_financial_history(symbol: str, quarters: int = 8) -> list:
+    """
+    获取多季度财务历史：ROE趋势 + FCF 计算所需数据
+    返回按时间倒序的季度列表，用于计算 ROE 趋势和 FCF
+    """
+    _bs_login()
+    bs_code = _bs_code(symbol)
+    history = []
+    current_year = datetime.now().year
+
+    for year_off in range(0, 3):
+        year = current_year - year_off
+        for quarter in [4, 3, 2, 1]:
+            if len(history) >= quarters:
+                break
+            try:
+                roe_val = None
+                rs_d = bs.query_dupont_data(code=bs_code, year=year, quarter=quarter)
+                if rs_d.error_code == "0":
+                    while rs_d.next():
+                        r = rs_d.get_row_data()
+                        try:
+                            roe_raw = r[5] if len(r) > 5 else ""
+                            if roe_raw and str(roe_raw).strip():
+                                roe_val = float(roe_raw) * 100
+                        except Exception:
+                            pass
+
+                ocf = capex = None
+                rs_cf = bs.query_cash_flow_data(code=bs_code, year=year, quarter=quarter)
+                if rs_cf.error_code == "0":
+                    fields = rs_cf.fields
+                    while rs_cf.next():
+                        r = rs_cf.get_row_data()
+                        try:
+                            row = dict(zip(fields, r))
+                            ocf_raw = row.get("netCashFlowsFromOperatingActivities") or \
+                                      row.get("netCashFlowsOperating", "")
+                            inv_raw = row.get("cashFlowsFromInvestingActivities", "")
+                            if ocf_raw and str(ocf_raw).strip():
+                                ocf = float(ocf_raw)
+                            if inv_raw and str(inv_raw).strip():
+                                capex = float(inv_raw)
+                        except Exception:
+                            pass
+
+                fcf = None
+                if ocf is not None and capex is not None:
+                    fcf = round(ocf + capex, 2)
+
+                if roe_val is not None or fcf is not None:
+                    history.append({
+                        "year": year, "quarter": quarter,
+                        "period": f"{year}Q{quarter}",
+                        "roe": round(roe_val, 2) if roe_val is not None else None,
+                        "ocf": round(ocf / 1e8, 2) if ocf is not None else None,
+                        "fcf": round(fcf / 1e8, 2) if fcf is not None else None,
+                    })
+            except Exception:
+                continue
+        if len(history) >= quarters:
+            break
+
+    return history
+
+
+def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
+    """
+    获取个股 5 年 PE-TTM 历史序列，用于计算历史百分位。
+    返回 pd.Series，index=date，values=pe
+    """
+    _bs_login()
+    start = (datetime.now() - timedelta(days=years * 365 + 30)).strftime("%Y-%m-%d")
+    end = datetime.now().strftime("%Y-%m-%d")
+    try:
+        rs = bs.query_history_k_data_plus(
+            _bs_code(symbol),
+            "date,peTTM",
+            start_date=start, end_date=end,
+            frequency="w", adjustflag="3",
+        )
+        if rs.error_code != "0":
+            return pd.Series(dtype=float)
+        rows = []
+        while rs.next():
+            r = rs.get_row_data()
+            try:
+                if r[1] and str(r[1]).strip():
+                    pe = float(r[1])
+                    if 0 < pe < 2000:
+                        rows.append((r[0], pe))
+            except Exception:
+                continue
+        if not rows:
+            return pd.Series(dtype=float)
+        s = pd.Series(dict(rows))
+        s.index = pd.to_datetime(s.index)
+        return s.dropna()
+    except Exception as e:
+        print(f"[data] {symbol} PE历史获取失败: {e}")
+        return pd.Series(dtype=float)
+
+
+def calc_pe_percentile(symbol: str, current_pe: float, years: int = 5) -> dict:
+    """
+    计算当前 PE 在历史中的百分位。
+    返回 {"pe": float, "percentile": float, "level": str, "history_len": int}
+    """
+    hist = get_pe_history(symbol, years)
+    if hist.empty or current_pe <= 0:
+        return {"pe": current_pe, "percentile": None, "level": "数据不足", "history_len": 0}
+    pct = float((hist < current_pe).sum() / len(hist) * 100)
+    if pct <= 20:
+        level = "🟢历史低位(<20%分位)"
+    elif pct <= 40:
+        level = "🟡偏低(20-40%分位)"
+    elif pct <= 60:
+        level = "⚪中性(40-60%分位)"
+    elif pct <= 80:
+        level = "🟠偏高(60-80%分位)"
+    else:
+        level = "🔴历史高位(>80%分位)"
+    return {
+        "pe": round(current_pe, 1),
+        "percentile": round(pct, 1),
+        "level": level,
+        "history_len": len(hist),
+    }
+
+
+def get_volume_signal(symbol: str, window: int = 20) -> dict:
+    """
+    成交量放量/缩量分析：
+    返回 {"ratio": float, "signal": str, "vol_20d_avg": float}
+    """
+    try:
+        df = get_stock_daily(symbol, days=60)
+        if df.empty or len(df) < window + 2:
+            return {}
+        vols = df["volume"].dropna()
+        if len(vols) < window + 1:
+            return {}
+        ma = float(vols.iloc[-window - 1:-1].mean())
+        curr = float(vols.iloc[-1])
+        if ma <= 0:
+            return {}
+        ratio = round(curr / ma, 2)
+        if ratio >= 2.0:
+            signal = "🔥大幅放量(≥2倍)"
+        elif ratio >= 1.5:
+            signal = "📈温和放量(1.5-2倍)"
+        elif ratio <= 0.5:
+            signal = "❄️明显缩量(<0.5倍)"
+        elif ratio <= 0.7:
+            signal = "📉轻微缩量(0.5-0.7倍)"
+        else:
+            signal = "➖量能平稳"
+        return {"ratio": ratio, "signal": signal, "vol_20d_avg": round(ma / 1e6, 1)}
+    except Exception:
+        return {}
 
 
 # ═══════════════════════════════════════════
@@ -393,7 +585,7 @@ def get_northbound_flow() -> dict:
     """
     获取北向资金（沪股通+深股通）日度净流入数据
     返回今日净流入、5日累计、20日累计及信号判断
-    数据源：AKShare stock_em_hsgt_north_net_flow_in_em
+    数据源：AKShare stock_hsgt_hist_em（旧接口stock_em_hsgt_north_net_flow_in_em已于2024年移除）
     """
     from . import config as _cfg
     global _northbound_cache, _northbound_cache_time
@@ -413,33 +605,45 @@ def get_northbound_flow() -> dict:
 
     try:
         import akshare as ak
+        from datetime import date as _date
 
-        fetch_fn = getattr(ak, "stock_em_hsgt_north_net_flow_in_em",
-                          getattr(ak, "stock_em_hsgt_north_cash_flow", None))
-        if fetch_fn is None:
-            raise AttributeError("AKShare北向资金函数不可用，请升级akshare")
-        sh = fetch_fn(symbol="沪股通")
-        sz = fetch_fn(symbol="深股通")
+        # 2024-08-19起沪深交易所停止披露每日北向资金数据，改为月度汇总
+        # 使用 stock_hsgt_hist_em 获取历史净流入（旧接口已全部移除）
+        DATA_STOP_DATE = "2024-08-19"
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if today_str >= DATA_STOP_DATE:
+            result["note"] = (
+                f"⚠️ 交易所已于{DATA_STOP_DATE}停止披露每日北向资金数据，"
+                "改为月度汇总。当前数据为最后可用历史值，不代表今日实际情况。"
+            )
 
-        if sh.empty or sz.empty:
-            result["note"] = "AKShare返回空数据"
+        hist_fn = getattr(ak, "stock_hsgt_hist_em", None)
+        if hist_fn is None:
+            raise AttributeError("AKShare stock_hsgt_hist_em 不存在，请升级akshare>=1.14")
+
+        df_hist = hist_fn(symbol="北向资金")
+        if df_hist is None or df_hist.empty:
+            result["note"] = "stock_hsgt_hist_em 返回空数据"
             return result
 
-        col = sh.columns[1]
-        today_sh = float(sh.iloc[-1][col]) / 1e8
-        today_sz = float(sz.iloc[-1][col]) / 1e8
-        today_net = round(today_sh + today_sz, 2)
+        date_col = df_hist.columns[0]
+        flow_col = next(
+            (c for c in df_hist.columns if "净买" in str(c) or "净流" in str(c) or "流入" in str(c)),
+            df_hist.columns[1]
+        )
 
-        flow_5d = round(
-            sh[col].tail(5).astype(float).sum() / 1e8 +
-            sz[col].tail(5).astype(float).sum() / 1e8,
-            2
-        )
-        flow_20d = round(
-            sh[col].tail(20).astype(float).sum() / 1e8 +
-            sz[col].tail(20).astype(float).sum() / 1e8,
-            2
-        )
+        df_hist[flow_col] = pd.to_numeric(df_hist[flow_col], errors="coerce")
+        df_hist = df_hist.dropna(subset=[flow_col]).tail(25)
+
+        today_net = round(float(df_hist[flow_col].iloc[-1]), 2)
+        flow_5d = round(float(df_hist[flow_col].tail(5).sum()), 2)
+        flow_20d = round(float(df_hist[flow_col].tail(20).sum()), 2)
+
+        # 以下字段替代原沪深股通分拆（因为历史函数已移除，合计即可）
+        sh_mock = df_hist[[flow_col]].copy()
+        sz_mock = sh_mock.copy()
+        sh_mock.columns = ["value"]; sz_mock.columns = ["value"]
+        sz_mock["value"] = 0  # 历史接口只有合计，split已无意义
 
         cfg = _cfg.NORTHBOUND_CONFIG
         if today_net >= cfg["strong_inflow_daily"]:

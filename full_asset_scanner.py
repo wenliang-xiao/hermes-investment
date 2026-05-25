@@ -916,6 +916,14 @@ def _bridgewater_bond_hint(curve_shape: str, macro_data: dict) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 # 商品观测池（优先用ETF，价格更准；期货代码作为fallback）
+_COMMODITY_ALT_TICKERS = {
+    "黄金":    ["GC=F", "MGC=F"],
+    "WTI原油": ["CL=F", "QM=F"],
+    "铜":      ["HG=F"],
+    "白银":    ["SI=F", "SIL=F"],
+    "天然气":  ["NG=F"],
+}
+
 COMMODITY_UNIVERSE = {
     "黄金": {
         "primary": "GC=F", "fallback": "GLD",
@@ -1006,20 +1014,22 @@ def scan_commodities(macro_data: dict = None) -> dict:
             # 阶段1：主源价格校验
             validated_price = _validate_commodity_price(cfg["name"], raw_price)
             
-            # 阶段2：主源不通过 → 尝试ETF回退+折算
+            # 阶段2：主源不通过时，fallback只用于动量/RSI计算，价格显示⚠️
             if validated_price is None and not item.get("_using_fallback"):
-                logger.info("[回退ETF] %s 主源价格%.2f不通过校验，尝试ETF回退", cfg["name"], raw_price)
-                fb_df = _get_price_data(cfg["fallback"], period="6mo")
-                if not fb_df.empty and "close" in fb_df.columns:
-                    fb_raw = float(fb_df["close"].iloc[-1])
-                    # 应用ETF→现货折算系数
-                    scale = ETF_SPOT_SCALE.get(cfg["fallback"], 1.0)
-                    fb_scaled = fb_raw * scale
-                    validated_price = _validate_commodity_price(cfg["name"], fb_scaled)
-                    if validated_price is not None:
-                        item["source_symbol"] = cfg["fallback"]
-                        item["note"] += f"ETF折算({cfg['fallback']} ${fb_raw:.1f}×{scale:.1f}) "
-                        logger.info("[ETF折算] %s %s $%.1f→$%.1f 通过", cfg["name"], cfg["fallback"], fb_raw, fb_scaled)
+                logger.warning("[价格异常] %s 主源%s=%.2f不通过校验，尝试期货替代ticker",
+                               cfg["name"], cfg["primary"], raw_price)
+                alt_tickers = _COMMODITY_ALT_TICKERS.get(cfg["name"], [])
+                for alt in alt_tickers:
+                    alt_df = _get_price_data(alt, period="5d")
+                    if not alt_df.empty and "close" in alt_df.columns:
+                        alt_price = float(alt_df["close"].iloc[-1])
+                        alt_validated = _validate_commodity_price(cfg["name"], alt_price)
+                        if alt_validated is not None:
+                            validated_price = alt_validated
+                            item["source_symbol"] = alt
+                            item["note"] += f"[替代ticker:{alt}] "
+                            logger.info("[ticker替代] %s 使用%s=%.2f", cfg["name"], alt, alt_price)
+                            break
             
             if validated_price is None:
                 item["note"] += f"⚠️价格异常({raw_price:.2f})已丢弃 "
