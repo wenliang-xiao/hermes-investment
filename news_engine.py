@@ -50,8 +50,41 @@ UA = (
 )
 
 # 每条源的抓取上限和全局上限
-MAX_PER_SOURCE = 10
-MAX_TOTAL = 20
+MAX_PER_SOURCE = 15       # 每源最多15条
+MAX_TOTAL = 60            # 全局原始上限（过滤前）
+MAX_FINAL = 40            # 过滤去重后最终返回数量（覆盖7天）
+
+# 新闻时间窗口（天）
+NEWS_WINDOW_DAYS = 7      # 只保留7天内的新闻
+
+# 投资相关性关键词白名单（必须命中至少1个才算有效新闻）
+_RELEVANCE_KEYWORDS = {
+    "zh": [
+        "股", "市值", "A股", "港股", "美股", "基金", "ETF", "债券", "汇率",
+        "利率", "通胀", "CPI", "PMI", "GDP", "央行", "美联储",
+        "芯片", "半导体", "AI", "人工智能", "算力", "机器人", "光模块",
+        "新能源", "储能", "电力", "光伏", "风电", "锂电",
+        "黄金", "原油", "铜", "贵金属", "大宗商品",
+        "制裁", "出口管制", "关税", "脱钩", "国产替代", "信创",
+        "减速器", "伺服", "HBM", "存储", "CoWoS",
+        "美元", "人民币", "日元", "欧元", "美债",
+        "上涨", "下跌", "涨停", "跌停", "突破", "创新高", "新低",
+        "财报", "业绩", "营收", "利润", "订单", "产能", "扩产",
+        "IPO", "增发", "回购", "分红",
+    ],
+    "en": [
+        "stock", "market", "shares", "equity", "fund", "etf", "bond", "yield",
+        "fed", "rate", "inflation", "gdp", "central bank",
+        "chip", "semiconductor", "ai", "nvidia", "tsmc", "gpu", "hbm",
+        "robot", "humanoid", "optical", "laser",
+        "energy", "solar", "battery", "lithium", "power",
+        "gold", "oil", "copper", "commodity",
+        "sanction", "tariff", "export control", "decoupling",
+        "earnings", "revenue", "profit", "ipo", "acquisition",
+        "dollar", "yuan", "yen", "euro",
+        "rally", "selloff", "surge", "plunge", "breakout",
+    ],
+}
 
 # ═══════════════════════════════════════════════════════════════
 # Google News RSS 搜索源配置
@@ -59,67 +92,64 @@ MAX_TOTAL = 20
 
 RSS_SOURCES = [
     {
-        "name": "全球财经",
-        "url": "https://news.google.com/rss/search?q=global+finance+stock+market&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "全球宏观",
-        "weight": 1.0,
+        "name": "A股政策监管",
+        "url": "https://news.google.com/rss/search?q=证监会+上交所+深交所+A股+新规+政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "政策监管", "weight": 1.5, "max": 12,
     },
     {
-        "name": "中美脱钩",
-        "url": "https://news.google.com/rss/search?q=US+China+tariff+decoupling+semiconductor+export+controls&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "地缘政治",
-        "weight": 1.3,
+        "name": "国产替代半导体",
+        "url": "https://news.google.com/rss/search?q=国产替代+半导体设备+自主可控+信创+芯片+光刻&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "国产替代", "weight": 1.4, "max": 12,
     },
     {
-        "name": "AI芯片机器人",
-        "url": "https://news.google.com/rss/search?q=AI+chip+semiconductor+NVIDIA+TSMC+robot+humanoid&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "科技产业",
-        "weight": 1.2,
-    },
-    {
-        "name": "中文财经",
-        "url": "https://news.google.com/rss/search?q=中国+A股+经济+政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "lang": "zh",
-        "default_category": "中国市场",
-        "weight": 1.0,
-    },
-    {
-        "name": "国产替代",
-        "url": "https://news.google.com/rss/search?q=国产替代+半导体设备+自主可控+信创+人形机器人&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "lang": "zh",
-        "default_category": "国产替代",
-        "weight": 1.4,
-    },
-    {
-        "name": "东方财富资讯",
-        "url": "https://feed.eastmoney.com/toutiaolm.xml",
-        "lang": "zh",
-        "default_category": "A股市场",
-        "weight": 1.1,
+        "name": "中美脱钩制裁",
+        "url": "https://news.google.com/rss/search?q=US+China+tariff+sanction+semiconductor+export+controls+decoupling&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "地缘政治", "weight": 1.4, "max": 12,
     },
     {
         "name": "证券时报",
-        "url": "https://news.google.com/rss/search?q=site:stcn.com&hl=zh-CN&gl=CN",
-        "lang": "zh",
-        "default_category": "政策监管",
-        "weight": 1.3,
+        "url": "https://news.google.com/rss/search?q=site:stcn.com+股票+行业+业绩&hl=zh-CN&gl=CN",
+        "lang": "zh", "default_category": "政策监管", "weight": 1.3, "max": 10,
     },
     {
-        "name": "A股政策监管",
-        "url": "https://news.google.com/rss/search?q=证监会+上交所+深交所+A股政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "lang": "zh",
-        "default_category": "政策监管",
-        "weight": 1.5,
+        "name": "AI芯片光模块",
+        "url": "https://news.google.com/rss/search?q=NVIDIA+TSMC+AI+chip+optical+module+800G+CoWoS&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "科技产业", "weight": 1.3, "max": 12,
     },
     {
-        "name": "存储HBM",
-        "url": "https://news.google.com/rss/search?q=HBM+DRAM+NAND+存储芯片+长鑫+兆易创新&hl=zh-CN&gl=CN",
-        "lang": "zh",
-        "default_category": "科技产业",
-        "weight": 1.2,
+        "name": "机器人新能源",
+        "url": "https://news.google.com/rss/search?q=humanoid+robot+Optimus+减速器+伺服电机+人形机器人&hl=zh-CN&gl=CN",
+        "lang": "zh", "default_category": "科技产业", "weight": 1.3, "max": 10,
+    },
+    {
+        "name": "东方财富A股",
+        "url": "https://feed.eastmoney.com/toutiaolm.xml",
+        "lang": "zh", "default_category": "A股市场", "weight": 1.2, "max": 15,
+    },
+    {
+        "name": "存储HBM电力",
+        "url": "https://news.google.com/rss/search?q=HBM+memory+storage+data+center+power+electricity+AI&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "科技产业", "weight": 1.2, "max": 10,
+    },
+    {
+        "name": "中文财经宏观",
+        "url": "https://news.google.com/rss/search?q=中国+经济+宏观+利率+CPI+PMI+货币政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "中国市场", "weight": 1.1, "max": 10,
+    },
+    {
+        "name": "全球宏观市场",
+        "url": "https://news.google.com/rss/search?q=fed+rate+inflation+stock+market+earnings+GDP&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "全球宏观", "weight": 1.0, "max": 10,
+    },
+    {
+        "name": "港股大宗商品",
+        "url": "https://news.google.com/rss/search?q=港股+恒生+黄金+原油+铜+大宗商品+汇率&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "全球宏观", "weight": 1.0, "max": 10,
+    },
+    {
+        "name": "美股科技财报",
+        "url": "https://news.google.com/rss/search?q=earnings+revenue+guidance+NVDA+MSFT+GOOGL+META+AAPL&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "美股", "weight": 1.1, "max": 10,
     },
 ]
 
@@ -322,12 +352,11 @@ def _fetch_rss(url: str, timeout: int = 15) -> Optional[str]:
         return None
 
 
-def _parse_rss_items(xml_text: str, source_name: str = "") -> List[Dict]:
-    """解析RSS XML，提取新闻条目"""
+def _parse_rss_items(xml_text: str, source_name: str = "", max_items: int = MAX_PER_SOURCE) -> List[Dict]:
     items = []
     try:
         root = ET.fromstring(xml_text)
-        for item in root.findall(".//item")[:MAX_PER_SOURCE]:
+        for item in root.findall(".//item")[:max_items]:
             title = _xml_text(item, "title")
             link = _xml_text(item, "link")
             pub_date = _xml_text(item, "pubDate")
@@ -378,21 +407,22 @@ def _clean_title(title: str) -> str:
 
 
 def _fetch_google_news_rss() -> List[Dict]:
-    """抓取所有Google News RSS源"""
     all_items = []
     for src in RSS_SOURCES:
         print(f"  [RSS] 抓取: {src['name']}...")
         xml_text = _fetch_rss(src["url"])
         if xml_text:
-            items = _parse_rss_items(xml_text, src["name"])
+            src_max = src.get("max", MAX_PER_SOURCE)
+            items = _parse_rss_items(xml_text, src["name"], max_items=src_max)
             for item in items:
                 item["category"] = src["default_category"]
                 item["lang"] = src["lang"]
+                item["source_weight"] = src.get("weight", 1.0)
             all_items.extend(items)
             print(f"    → {len(items)} 条")
         else:
             print(f"    → 0 条（获取失败）")
-        time.sleep(0.3)  # 礼貌间隔
+        time.sleep(0.3)
     return all_items
 
 
@@ -893,64 +923,79 @@ def _build_keyword_summary(news_list: List[Dict]) -> str:
 # 第5部分：主导出函数
 # ═══════════════════════════════════════════════════════════════
 
+def _is_relevant(item: Dict) -> bool:
+    lang = item.get("lang", "zh")
+    text = (item.get("title", "") + " " + item.get("description", "")).lower()
+    keywords = _RELEVANCE_KEYWORDS.get(lang, _RELEVANCE_KEYWORDS["zh"])
+    return any(kw in text for kw in keywords)
+
+
+def _is_within_window(item: Dict, days: int = NEWS_WINDOW_DAYS) -> bool:
+    pub = item.get("pub_date", "")
+    if not pub:
+        return True
+    cutoff = datetime.now().timestamp() - days * 86400
+    for fmt in [
+        "%a, %d %b %Y %H:%M:%S %Z",
+        "%a, %d %b %Y %H:%M:%S +0000",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ]:
+        try:
+            ts = datetime.strptime(pub.strip(), fmt).timestamp()
+            return ts >= cutoff
+        except ValueError:
+            continue
+    return True
+
+
 def fetch_news(
     sources: Optional[List[str]] = None,
-    max_total: int = MAX_TOTAL,
+    max_total: int = MAX_FINAL,
+    window_days: int = NEWS_WINDOW_DAYS,
 ) -> List[Dict]:
-    """
-    多源新闻抓取主函数。
-    
-    Args:
-        sources: 指定数据源列表，可选: 'google', 'xueqiu', 'caixin'
-                 默认全部启用
-        max_total: 最终返回的最大新闻数量
-    
-    Returns:
-        去重排序后的新闻列表，每条包含:
-        - title, link, pub_date, description
-        - source, source_name, category, lang
-        - impacts (链影响标注，需调用 classify_impact)
-    """
     if sources is None:
         sources = ["google", "xueqiu", "caixin"]
-    
+
     all_items = []
-    
-    # 1. Google News RSS
+
     if "google" in sources:
         print("[新闻引擎] 抓取 Google News RSS...")
         items = _fetch_google_news_rss()
         all_items.extend(items)
         print(f"  Google RSS 合计: {len(items)} 条")
-    
-    # 2. 雪球热帖
+
     if "xueqiu" in sources:
         print("[新闻引擎] 抓取雪球热帖...")
         items = _fetch_xueqiu_hot()
         all_items.extend(items)
-    
-    # 3. 财新RSS
+
     if "caixin" in sources:
         print("[新闻引擎] 抓取财新RSS...")
         items = _fetch_caixin_rss()
         all_items.extend(items)
-    
+
     print(f"[新闻引擎] 原始抓取: {len(all_items)} 条")
-    
-    # 去重
+
+    before_time = len(all_items)
+    all_items = [x for x in all_items if _is_within_window(x, window_days)]
+    print(f"[新闻引擎] 时间窗口({window_days}天)过滤: {before_time} → {len(all_items)} 条")
+
+    before_rel = len(all_items)
+    all_items = [x for x in all_items if _is_relevant(x)]
+    print(f"[新闻引擎] 投资相关性过滤: {before_rel} → {len(all_items)} 条")
+
     all_items = _deduplicate(all_items, threshold=0.5)
     print(f"[新闻引擎] 去重后: {len(all_items)} 条")
-    
-    # 排序
+
     all_items = _sort_by_time_and_hotness(all_items)
-    
-    # 截断
+
     result = all_items[:max_total]
     print(f"[新闻引擎] 最终返回: {len(result)} 条")
-    
-    # 保存缓存
+
     _save_cache(result)
-    
     return result
 
 

@@ -95,8 +95,12 @@ def _get_current_price(symbol: str) -> Optional[float]:
     _rate_limit()
     def _fetch():
         t = yf.Ticker(symbol)
+        hist = t.history(period="5d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
         info = t.fast_info
-        return info.get("lastPrice") or info.get("regularMarketPrice")
+        p = info.get("lastPrice") or info.get("regularMarketPrice")
+        return float(p) if p else None
     try:
         return _fetch_with_retry(_fetch, max_attempts=3, delay=0.8)
     except Exception as e:

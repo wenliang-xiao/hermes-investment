@@ -59,8 +59,12 @@ def get_current_price(symbol: str) -> Optional[float]:
     _rate_limit()
     def _fetch():
         t = yf.Ticker(symbol)
+        hist = t.history(period="5d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
         info = t.fast_info
-        return info.get("lastPrice") or info.get("regularMarketPrice")
+        p = info.get("lastPrice") or info.get("regularMarketPrice")
+        return float(p) if p else None
     try:
         return _fetch_with_retry(_fetch)
     except Exception as e:
@@ -403,8 +407,33 @@ def scan_commodities_fx_bonds() -> dict:
 # 6. 快速概览（日报开篇用）
 # ═══════════════════════════════════════════
 
+_SNAPSHOT_SANITY = {
+    "GC=F":     (1800, 3800),   # 黄金 USD/oz，2024-2025合理范围
+    "CL=F":     (20,   100),    # WTI原油 USD/bbl
+    "HG=F":     (2.0,  6.5),    # 铜 USD/lb
+    "SI=F":     (15,   45),     # 白银 USD/oz
+    "NG=F":     (1.0,  8.0),    # 天然气 USD/MMBtu
+    "^TNX":     (0.1,  8.0),    # 美债10Y收益率 %
+    "^TYX":     (0.1,  8.0),    # 美债30Y收益率 %
+    "^VIX":     (5,    80),     # VIX恐慌指数
+    "CNY=X":    (6.0,  7.8),    # USD/CNY 在岸
+    "EURUSD=X": (0.9,  1.4),    # EUR/USD 正向
+}
+
+def _validated_price(sym: str, price) -> Optional[float]:
+    if price is None:
+        return None
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    bounds = _SNAPSHOT_SANITY.get(sym)
+    if bounds and not (bounds[0] <= p <= bounds[1]):
+        logger.warning("[快照价格异常] %s=%.4f 超出%s，丢弃", sym, p, bounds)
+        return None
+    return p
+
 def get_global_market_snapshot() -> dict:
-    """获取全球市场快照（~20次API调用）"""
     snap = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "indices": {},
@@ -413,47 +442,50 @@ def get_global_market_snapshot() -> dict:
         "bonds": {},
         "sentiment": {},
     }
-    
-    # 关键指数
+
     for sym, name in [("^GSPC", "标普500"), ("^IXIC", "纳斯达克"), ("^DJI", "道指"),
-                       ("^HSI", "恒生"), ("^N225", "日经")]:
+                      ("^HSI", "恒生"), ("^N225", "日经")]:
         try:
             price = get_current_price(sym)
-            snap["indices"][name] = price
-        except:
-            pass
-    
-    # 关键商品
-    for sym in ["GC=F", "CL=F", "HG=F"]:
+            if price is not None:
+                snap["indices"][name] = {"price": round(float(price), 2), "change_pct": None}
+        except Exception as e:
+            logger.debug("[快照] 指数 %s 失败: %s", sym, e)
+
+    for sym, name in [("GC=F", "黄金"), ("CL=F", "WTI原油"), ("HG=F", "铜")]:
         try:
-            price = get_current_price(sym)
-            snap["commodities"][sym] = price
-        except:
-            pass
-    
-    # 汇率
-    for sym in ["CNY=X", "DXY"]:
+            raw = get_current_price(sym)
+            p = _validated_price(sym, raw)
+            snap["commodities"][name] = p
+        except Exception as e:
+            logger.debug("[快照] 商品 %s 失败: %s", sym, e)
+
+    for sym, name in [("CNY=X", "USD/CNY"), ("EURUSD=X", "EUR/USD"), ("JPY=X", "USD/JPY")]:
         try:
-            price = get_current_price(sym)
-            snap["fx"][sym] = price
-        except:
-            pass
-    
-    # 利率
-    for sym in ["^TNX", "^TYX"]:
+            raw = get_current_price(sym)
+            p = _validated_price(sym, raw)
+            if sym == "EURUSD=X" and p is not None and not (0.8 <= p <= 1.6):
+                logger.warning("[快照] EUR/USD=%.4f 方向可能倒置，丢弃", p)
+                p = None
+            snap["fx"][name] = p
+        except Exception as e:
+            logger.debug("[快照] 汇率 %s 失败: %s", sym, e)
+
+    for sym, name in [("^TNX", "美债10Y"), ("^TYX", "美债30Y")]:
         try:
-            price = get_current_price(sym)
-            snap["bonds"][sym] = price
-        except:
-            pass
-    
-    # VIX
+            raw = get_current_price(sym)
+            p = _validated_price(sym, raw)
+            snap["bonds"][name] = p
+        except Exception as e:
+            logger.debug("[快照] 债券 %s 失败: %s", sym, e)
+
     try:
-        vix = get_current_price("^VIX")
-        snap["sentiment"]["VIX"] = vix
-    except:
-        pass
-    
+        raw = get_current_price("^VIX")
+        p = _validated_price("^VIX", raw)
+        snap["sentiment"]["VIX"] = p
+    except Exception as e:
+        logger.debug("[快照] VIX 失败: %s", e)
+
     return snap
 
 if __name__ == "__main__":

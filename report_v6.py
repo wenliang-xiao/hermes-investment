@@ -214,21 +214,41 @@ def build_market_snapshot(w, doc_id):
 
     w.write(doc_id, [("divider", ""), ("h2", "一、🌐 全球市场全景")])
 
-    # ── 核心指数（保留原逻辑，但失败时用 ⚠️ 而非 ?）──
     w.write(doc_id, [("h3", "核心指数")])
     try:
         snap = get_global_market_snapshot()
-        if snap.get("indices"):
-            for idx_name in ["S&P 500", "NASDAQ", "上证综指", "恒生指数", "日经225"]:
-                d = snap["indices"].get(idx_name, {})
-                if d:
-                    chg = d.get("change_pct", 0) or 0
-                    arrow = "🔺" if chg > 0 else "🔻" if chg < 0 else "➖"
-                    w.write(doc_id, [("bullet", f"{arrow} {idx_name}: {d.get('price','⚠️ 暂无')} ({chg:+.2f}%)")])
-        else:
-            w.write(doc_id, [("bullet", "⚠️ 指数数据延迟")])
+        indices = snap.get("indices", {})
+        for idx_name in ["标普500", "纳斯达克", "恒生", "日经"]:
+            d = indices.get(idx_name)
+            if d:
+                price = d.get("price") if isinstance(d, dict) else d
+                chg = d.get("change_pct") if isinstance(d, dict) else None
+                price_str = f"{price:,.0f}" if price else "⚠️"
+                chg_str = f" ({chg:+.2f}%)" if chg is not None else ""
+                w.write(doc_id, [("bullet", f"{idx_name}: {price_str}{chg_str}")])
+        comms_snap = snap.get("commodities", {})
+        if comms_snap:
+            parts = []
+            for name, p in comms_snap.items():
+                if p is not None:
+                    parts.append(f"{name}: ${p:.1f}")
+            if parts:
+                w.write(doc_id, [("bullet", " | ".join(parts))])
+        fx_snap = snap.get("fx", {})
+        if fx_snap:
+            fx_parts = []
+            for name, p in fx_snap.items():
+                if p is not None:
+                    fx_parts.append(f"{name}: {p:.4f}")
+            if fx_parts:
+                w.write(doc_id, [("bullet", " | ".join(fx_parts))])
+        bonds_snap = snap.get("bonds", {})
+        if bonds_snap:
+            b_parts = [f"{n}: {v:.2f}%" for n, v in bonds_snap.items() if v is not None]
+            if b_parts:
+                w.write(doc_id, [("bullet", " | ".join(b_parts))])
     except Exception as e:
-        w.write(doc_id, [("bullet", f"⚠️ 指数获取失败: {str(e)[:30]}")])
+        w.write(doc_id, [("bullet", f"⚠️ 市场快照失败: {str(e)[:40]}")])
 
     # ── 大宗商品（统一用 full_asset_scanner，有价格校验）──
     w.write(doc_id, [("h3", "大宗商品")])
@@ -258,6 +278,39 @@ def build_market_snapshot(w, doc_id):
             w.write(doc_id, [("bullet", f"{name}: {price_str}{warning}")])
     else:
         w.write(doc_id, [("bullet", "⚠️ 汇率数据延迟")])
+
+    # ── VIX 恐慌指数 + 北向资金（情绪信号）──
+    w.write(doc_id, [("h3", "市场情绪信号")])
+    try:
+        snap = get_global_market_snapshot()
+        vix = snap.get("sentiment", {}).get("VIX")
+        if vix is not None:
+            if vix > 30:
+                vix_signal = f"🔴 {vix:.1f} 极度恐慌"
+            elif vix > 20:
+                vix_signal = f"🟡 {vix:.1f} 市场不安"
+            else:
+                vix_signal = f"🟢 {vix:.1f} 市场平稳"
+            w.write(doc_id, [("bullet", f"VIX恐慌指数: {vix_signal}")])
+        else:
+            w.write(doc_id, [("bullet", "VIX: ⚠️ 数据不可用")])
+    except Exception:
+        w.write(doc_id, [("bullet", "VIX: ⚠️ 获取失败")])
+
+    try:
+        from .data_layer import get_northbound_flow
+        nb = get_northbound_flow()
+        if nb.get("data_ok"):
+            today_net = nb.get("today_net", 0)
+            cumul_5d = nb.get("5d_cumulative", 0)
+            signal = nb.get("signal", "⚪")
+            w.write(doc_id, [("bullet",
+                f"北向资金: {signal} 今日{today_net:+.1f}亿 | 5日累计{cumul_5d:+.1f}亿 | {nb.get('confirmation','')}"
+            )])
+        else:
+            w.write(doc_id, [("bullet", f"北向资金: ⚠️ {nb.get('note','数据不可用')}")])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"北向资金: ⚠️ {str(e)[:30]}")])
 
     w.write(doc_id, [("text", w.ref("十六、全球经济格局")), ("text", w.ref("十七、产业链详细分析"))])
 
@@ -1219,21 +1272,94 @@ def _build_hk_channel(w, doc_id):
         
         w.write(doc_id, [("bullet", f"{name}({symbol}): 评分 {score:.1f} | PE {pe_str}{discount_str}{tag_str}{kelly_str} | {mkt_str}")])
 
+def _build_watchlist_section(w, doc_id):
+    try:
+        from . import config as _cfg
+        watchlist = getattr(_cfg, "WATCHLIST", {})
+        if not watchlist:
+            return
+        w.write(doc_id, [("h3", "📋 核心观察池（面基/LDS框架选定）")])
+        tiers = {"核心": [], "关注": [], "底仓": [], "追踪": []}
+        for code, info in watchlist.items():
+            t = info.get("tier", "关注")
+            tiers.setdefault(t, []).append((code, info))
+
+        tier_icons = {"核心": "⭐", "底仓": "🏛️", "关注": "👁️", "追踪": "📡"}
+        for tier_name in ["核心", "底仓", "关注", "追踪"]:
+            items = tiers.get(tier_name, [])
+            if not items:
+                continue
+            lines = []
+            for code, info in items[:8]:
+                name = info.get("name", code)
+                chain = info.get("chain", "")
+                focus = info.get("focus", "")[:50]
+                lines.append(f"{name}({code}) [{chain}]: {focus}")
+            icon = tier_icons.get(tier_name, "")
+            w.write(doc_id, [("bold", f"{icon} {tier_name}标的")])
+            for line in lines:
+                w.write(doc_id, [("bullet", line)])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"⚠️ 观察池加载失败: {str(e)[:40]}")])
+
+
+def _build_opportunity_themes_section(w, doc_id):
+    try:
+        from . import config as _cfg
+        themes = getattr(_cfg, "OPPORTUNITY_THEMES", {})
+        if not themes:
+            return
+        w.write(doc_id, [("h3", "💡 链趋势挖掘方向（基于产业瓶颈逻辑）")])
+        w.write(doc_id, [("quote", "挖掘逻辑：找产业链上的瓶颈环节 → 瓶颈被解决时利润最大 → 中小市值优先（LDS翻倍逻辑）")])
+
+        for theme_name, theme in themes.items():
+            logic = theme.get("logic", "")[:100]
+            bottleneck = theme.get("bottleneck", "")[:80]
+            catalysts = theme.get("key_catalysts", [])
+            a_stocks = theme.get("a_stocks_focus", [])
+            us_stocks = theme.get("us_stocks_focus", [])
+            perez = theme.get("perez_stage", "")
+
+            cat_str = " | ".join(catalysts[:2]) if catalysts else ""
+            a_str = " / ".join(a_stocks[:4]) if a_stocks else "暂无A股纯正标的"
+            us_str = " / ".join(us_stocks[:3]) if us_stocks else ""
+
+            lines = [
+                f"📍 逻辑: {logic}",
+                f"🔴 瓶颈: {bottleneck}",
+            ]
+            if perez:
+                lines.append(f"📊 Perez阶段: {perez}")
+            lines.append(f"🇨🇳 A股关注: {a_str}")
+            if us_str:
+                lines.append(f"🇺🇸 美股关注: {us_str}")
+            if cat_str:
+                lines.append(f"⚡ 近期催化剂: {cat_str}")
+
+            w.write(doc_id, [("bold", f"▶ {theme_name}")])
+            for line in lines:
+                w.write(doc_id, [("bullet", line)])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"⚠️ 挖掘主题加载失败: {str(e)[:40]}")])
+
+
 def build_discovery_section(w, doc_id, scanner, macro):
     w.write(doc_id, [("divider", ""), ("h2", "五、🔍 多因子新票发现")])
 
-    # 扩张期过滤防御板块（白酒/红利/公用事业/消费必需品不符合进攻逻辑）
     regime = macro.get('regime', '')
     exclude_sectors = []
     if regime == '扩张期':
         exclude_sectors = ['白酒', '红利', '公用事业', '消费必需品', '新能源']
-        w.write(doc_id, [("quote", f"⚡ 扩张期逻辑：聚焦科技/半导体/AI/国产替代/高端制造，已自动过滤白酒/红利/公用/消费必需品/新能源等防御品种")])
-    
+        w.write(doc_id, [("quote", "⚡ 扩张期逻辑：聚焦科技/半导体/AI/国产替代/高端制造，已自动过滤防御品种")])
+
     _build_a_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
     _build_a_smallmid_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
     _build_us_channel(w, doc_id)
     _build_hk_channel(w, doc_id)
-    
+
+    _build_watchlist_section(w, doc_id)
+    _build_opportunity_themes_section(w, doc_id)
+
     w.write(doc_id, [("text", w.ref("三、多因子引擎")), ("text", w.ref("四、找票执行·产业链定位"))])
 
 # ═══════════════════════════════════

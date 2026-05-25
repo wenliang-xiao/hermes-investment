@@ -122,20 +122,25 @@ try:
             ('quote', f"宏观象限: {ma_report.get('regime','?')} → {ma_report.get('bw_quadrant','?')} | 评分资产: {ma_report.get('total_scored','?')}只"),
             ('bold', ma_report.get('summary', '')),
         ])
-        by_class = ma_report.get('by_class', {})
-        for cls, assets in by_class.items():
-            if not assets:
-                continue
-            cls_lines = []
-            for a in assets[:2]:
-                ret20 = f"{a['ret_20d']:+.1f}%" if a.get('ret_20d') is not None else "?%"
-                sharpe = f"夏普≈{a['sharpe']:.2f}" if a.get('sharpe') is not None else ""
-                cls_lines.append(
-                    f"{a['signal']} {a['name']}({a['id']}): "
-                    f"评分{a['score']:.2f} | 20日{ret20} | {sharpe} | "
-                    f"建议仓位{a.get('weight_pct','?')}%"
-                )
-            w.write(doc_id, [('bullet', f"【{cls}】 " + " / ".join(cls_lines))])
+        total_scored = ma_report.get('total_scored', 0)
+        if total_scored == 0:
+            w.write(doc_id, [('bullet', '⚠️ 多资产评分数据不可用（yfinance数据获取失败），请检查网络连接')])
+        else:
+            by_class = ma_report.get('by_class', {})
+            for cls, assets in by_class.items():
+                if not assets:
+                    continue
+                cls_lines = []
+                for a in assets[:2]:
+                    ret20 = f"{a['ret_20d']:+.1f}%" if a.get('ret_20d') is not None else "?%"
+                    sharpe = f"夏普≈{a['sharpe']:.2f}" if a.get('sharpe') is not None else ""
+                    score_val = a.get('score', 0)
+                    cls_lines.append(
+                        f"{a.get('signal','⚪')} {a['name']}({a['id']}): "
+                        f"评分{score_val:.2f} | 20日{ret20} | {sharpe} | "
+                        f"建议仓位{a.get('weight_pct','?')}%"
+                    )
+                w.write(doc_id, [('bullet', f"【{cls}】 " + " / ".join(cls_lines))])
         avoid = ma_report.get('avoid_list', [])
         if avoid:
             avoid_str = "、".join(f"{a['name']}({a['id']})" for a in avoid[:3])

@@ -351,7 +351,7 @@ class MultiAssetEngine:
 
         return self.scores
 
-    def recommend(self, top_per_class: int = 2, min_score: float = 0.45) -> dict:
+    def recommend(self, top_per_class: int = 2, min_score: float = 0.30) -> dict:
         """
         生成配置建议
 
