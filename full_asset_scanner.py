@@ -48,7 +48,7 @@ def _fetch_with_retry(fn, max_attempts: int = 3, delay: float = 0.8):
     raise last_err
 
 COMMODITY_SANITY = {
-    "黄金":   (1000, 4500),
+    "黄金":   (2000, 5000),
     "原油":   (40,   130),
     "铜":     (2.0,  8.0),
     "白银":   (10,   80),

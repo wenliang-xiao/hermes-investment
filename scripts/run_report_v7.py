@@ -26,8 +26,16 @@ try:
     scanner = rpt.FactorScanner()
     macro_engine = rpt.MacroEngine()
     macro = macro_engine.refresh()
-    macro['favored_sectors'] = ['AI算力', '半导体', '科技', '国产替代']
-    macro['avoided_sectors'] = []
+    macro['favored_sectors'] = macro.get('favored_sectors', [])  # 从 macro_engine 继承
+    macro['avoided_sectors'] = macro.get('avoided_sectors', [])
+
+    # 动态获取 macro regime 对应的板块偏好
+    from investment_system import config as cfg_sys
+    regime = macro.get('regime', 'default')
+    rotation = cfg_sys.MACRO_SECTOR_ROTATION.get(regime, cfg_sys.MACRO_SECTOR_ROTATION['default'])
+    macro['favored_sectors'] = rotation['favored']
+    macro['avoided_sectors'] = rotation.get('unfavored', [])
+    macro['lds_note'] = rotation.get('lds_note', '')
 
     # 构建每日动态扫描计划（研究池+买入池+脱钩池）
     try:
@@ -201,6 +209,15 @@ try:
     log("Market snapshot done")
 
     # ═══ 九、10链深度分析 ═══
+    # 双门状态检查：决定产业链分析口径
+    gate_status = macro.get('gate_status', {})
+    macro_gate = gate_status.get('macro_gate', 'open')
+    trend_gate = gate_status.get('trend_gate', 'open')
+    both_closed = (macro_gate == 'closed' and trend_gate == 'closed')
+    if both_closed:
+        macro['chain_mode'] = 'observation'  # 双门关闭→观察模式
+    else:
+        macro['chain_mode'] = 'active'  # 至少一门开→活跃分析
     rpt.build_chain_section(w, doc_id, scanner, macro)
     log("Chain section done")
 

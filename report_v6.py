@@ -37,7 +37,7 @@ from investment_system.macro_engine import MacroEngine
 
 from investment_system.yf_data_layer import (
     get_global_market_snapshot, score_stock, get_current_price,
-    scan_us_stocks, scan_hk_stocks, scan_us_etfs, scan_commodities_fx_bonds,
+    scan_us_stocks, scan_hk_stocks, scan_us_etfs,
     get_factor_data
 )
 from investment_system.global_universe import (
@@ -204,39 +204,61 @@ def build_gate_section(w, doc_id, macro):
 # 板块 1: 全球市场全景
 # ═══════════════════════════════════
 def build_market_snapshot(w, doc_id):
+    """一、全球市场全景 — 统一使用 full_asset_scanner 数据源（有价格校验）"""
+    from investment_system.full_asset_scanner import (
+        scan_commodities as _fas_comm, scan_fx as _fas_fx, scan_bonds as _fas_bonds
+    )
+    fas_comm = _fas_comm()
+    fas_fx = _fas_fx()
+    fas_bonds = _fas_bonds()
+
     w.write(doc_id, [("divider", ""), ("h2", "一、🌐 全球市场全景")])
-    
-    snap = get_global_market_snapshot()
-    if not snap.get("indices"):
-        w.write(doc_id, [("text", "⚠️ 无法获取全球市场数据")])
-        return
-    
-    # 指数
+
+    # ── 核心指数（保留原逻辑，但失败时用 ⚠️ 而非 ?）──
     w.write(doc_id, [("h3", "核心指数")])
-    for idx_name in ["S&P 500", "NASDAQ", "上证综指", "恒生指数", "日经225"]:
-        d = snap["indices"].get(idx_name, {})
-        if d:
-            chg = d.get("change_pct", 0) or 0
-            arrow = "🔺" if chg > 0 else "🔻" if chg < 0 else "➖"
-            w.write(doc_id, [("bullet", f"{arrow} {idx_name}: {d.get('price','?')} ({chg:+.2f}%)")])
-    
-    # 大宗商品
+    try:
+        snap = get_global_market_snapshot()
+        if snap.get("indices"):
+            for idx_name in ["S&P 500", "NASDAQ", "上证综指", "恒生指数", "日经225"]:
+                d = snap["indices"].get(idx_name, {})
+                if d:
+                    chg = d.get("change_pct", 0) or 0
+                    arrow = "🔺" if chg > 0 else "🔻" if chg < 0 else "➖"
+                    w.write(doc_id, [("bullet", f"{arrow} {idx_name}: {d.get('price','⚠️ 暂无')} ({chg:+.2f}%)")])
+        else:
+            w.write(doc_id, [("bullet", "⚠️ 指数数据延迟")])
+    except Exception as e:
+        w.write(doc_id, [("bullet", f"⚠️ 指数获取失败: {str(e)[:30]}")])
+
+    # ── 大宗商品（统一用 full_asset_scanner，有价格校验）──
     w.write(doc_id, [("h3", "大宗商品")])
-    comm_data = scan_commodities_fx_bonds()
-    for item in comm_data.get("commodities", [])[:6]:
-        name = item.get("name", item.get("symbol", "?"))
-        price = item.get("price")
-        chg = item.get("change_pct", 0) or 0
-        arrow = "🔺" if chg > 0 else "🔻"
-        w.write(doc_id, [("bullet", f"{arrow} {name}: {price} ({chg:+.2f}%)")])
-    
-    # 汇率
+    comms = fas_comm.get('commodities', [])
+    if comms:
+        for c in comms[:6]:
+            price = c.get('price')
+            ret20 = c.get('ret_20d')
+            price_str = f"${price:.0f}" if price is not None else "⚠️ 暂无"
+            ret_str = f"({ret20:+.1f}%)" if ret20 is not None else ""
+            note = c.get('note', '')
+            warning = f" [{note}]" if note and '⚠' in note else ""
+            w.write(doc_id, [("bullet", f"{c['name']}: {price_str} {ret_str}{warning}")])
+    else:
+        w.write(doc_id, [("bullet", "⚠️ 商品数据延迟")])
+
+    # ── 汇率（统一用 full_asset_scanner）──
     w.write(doc_id, [("h3", "主要汇率")])
-    for item in comm_data.get("fx", [])[:5]:
-        name = item.get("name", item.get("symbol", "?"))
-        price = item.get("price")
-        w.write(doc_id, [("bullet", f"{name}: {price}")])
-    
+    fx_pairs = fas_fx.get('fx_pairs', [])
+    if fx_pairs:
+        for p in fx_pairs[:5]:
+            name = p.get('name', p.get('key', '?'))
+            price = p.get('price')
+            note = p.get('note', '')
+            price_str = f"{price:.4f}" if price is not None else "⚠️ 暂无"
+            warning = f" [{note}]" if note else ""
+            w.write(doc_id, [("bullet", f"{name}: {price_str}{warning}")])
+    else:
+        w.write(doc_id, [("bullet", "⚠️ 汇率数据延迟")])
+
     w.write(doc_id, [("text", w.ref("十六、全球经济格局")), ("text", w.ref("十七、产业链详细分析"))])
 
 # ═══════════════════════════════════
@@ -708,7 +730,12 @@ def build_chain_section(w, doc_id, scanner, macro):
       5. 条件触发链标⚡，通缩环境下注明不满足条件
     """
     w.write(doc_id, [("divider", ""), ("h2", "四、🔗 产业链 10 链深度分析")])
-    w.write(doc_id, [("quote", "E7 董艺婷：不是买好公司，是买利润率最高的环节。E94 Perez：盯住技术漫化阶段。E155 五层蛋糕：Capex→HALO→用户→应用→设备。")])
+
+    chain_mode = macro.get('chain_mode', 'active')
+    if chain_mode == 'observation':
+        w.write(doc_id, [("quote", "🔒 双门关闭：宏观门×趋势门均未开启。当前处于等待信号、观察阶段，静待入场条件触发。")])
+    else:
+        w.write(doc_id, [("quote", "E7 董艺婷：不是买好公司，是买利润率最高的环节。E94 Perez：盯住技术漫化阶段。E155 五层蛋糕：Capex→HALO→用户→应用→设备。")])
 
     from investment_system.concept_engine import ConceptEngine, ChainSnapshot, StockSnapshot
     engine = ConceptEngine()
@@ -771,7 +798,7 @@ def build_chain_section(w, doc_id, scanner, macro):
     w.write(doc_id, [("h3", "🔵 核心8链 · 深度分析")])
 
     for cfg in core_chains:
-        _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regime, engine, is_cond=False)
+        _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regime, engine, is_cond=False, chain_mode=chain_mode)
 
     # ═══════════════════════════════════
     # 阶段2: 条件触发2链
@@ -783,7 +810,7 @@ def build_chain_section(w, doc_id, scanner, macro):
 
     for cfg in cond_chains:
         _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regime, engine,
-                                     is_cond=True, is_active=analyze_cond_chains)
+                                     is_cond=True, is_active=analyze_cond_chains, chain_mode=chain_mode)
 
     w.write(doc_id, [
         ("divider", ""),
@@ -794,13 +821,14 @@ def build_chain_section(w, doc_id, scanner, macro):
 
 
 def _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regime, engine,
-                                  is_cond=False, is_active=True):
+                                  is_cond=False, is_active=True, chain_mode='active'):
     """
     构建单条链的完整5段式分析（含链内多因子扫描）
     
     参数:
       is_cond: 是否为条件触发链
       is_active: 条件链是否激活（不激活时仅输出框架）
+      chain_mode: 'active' → 正常分析; 'observation' → 双门关闭观察模式
     """
     chain_name = cfg["name"]
     fav_tag = "⭐" if chain_name in str(favored) else ""
@@ -822,7 +850,10 @@ def _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regim
     status_tag = ""
     if is_cond and not is_active:
         status_tag = " 🔒（条件不满足，仅框架展示）"
-    blocks.append(("h3", f"{fav_tag} {chain_name}{cond_tag}{status_tag} — 为什么现在有翻倍机会？"))
+    if chain_mode == 'observation':
+        blocks.append(("h3", f"{fav_tag} {chain_name}{cond_tag}{status_tag} — 等待信号，观察阶段"))
+    else:
+        blocks.append(("h3", f"{fav_tag} {chain_name}{cond_tag}{status_tag} — 为什么现在有翻倍机会？"))
 
     # ═══════════════════════════════════
     # ★ 链内多因子扫描（NEW）
@@ -946,8 +977,10 @@ def _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regim
 # 板块 5: 多因子新票发现（A/HK/US三市场独立通道+中小市值）
 # ═══════════════════════════════════
 
-def _build_a_channel(w, doc_id, scanner):
+def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
     """A股 Top Picks — 独立因子通道（质量+估值+动量+LDS板块偏好）"""
+    if exclude_sectors is None:
+        exclude_sectors = []
     w.write(doc_id, [("h3", "🇨🇳 A股 Top Picks（质量+估值+动量+LDS板块偏好）")])
     try:
         a_picks = scanner.scan_market(top_n=50)
@@ -965,7 +998,11 @@ def _build_a_channel(w, doc_id, scanner):
     from investment_system.concept_engine import get_engine
     engine = get_engine()
     
-    for p in a_picks[:8]:
+    filtered_count = 0
+    shown_count = 0
+    for p in a_picks:
+        if shown_count >= 8:
+            break
         name = p.get("name", p.get("symbol", "?"))
         code = p.get("code", p.get("symbol", "?"))
         score = p.get("score", 0)
@@ -974,6 +1011,13 @@ def _build_a_channel(w, doc_id, scanner):
         roe_str = f"{roe_raw*100:.0f}%" if isinstance(roe_raw, (int, float)) and abs(roe_raw) < 10 else (
             f"{roe_raw:.1f}%" if isinstance(roe_raw, (int, float)) else "?")
         sector = p.get("sector", "?")
+        
+        # 扩张期过滤防御板块
+        if exclude_sectors and any(ds in str(sector) for ds in exclude_sectors):
+            filtered_count += 1
+            continue
+        
+        shown_count += 1
         chain_tag = f" | 链: {sector}" if sector and sector != "?" else ""
         
         # Kelly仓位建议
@@ -985,9 +1029,14 @@ def _build_a_channel(w, doc_id, scanner):
             pass
         
         w.write(doc_id, [("bullet", f"{name}({code}): 评分 {score:.1f} | PE {pe} | ROE {roe_str}{chain_tag}{kelly_str}")])
+    
+    if exclude_sectors:
+        w.write(doc_id, [("text", f"⚡ 已过滤 {filtered_count} 只防御板块标的（{'/'.join(exclude_sectors)}），聚焦进攻逻辑")])
 
-def _build_a_smallmid_channel(w, doc_id, scanner):
+def _build_a_smallmid_channel(w, doc_id, scanner, exclude_sectors=None):
     """A股 中小市值 Top 5（市值<$30B独立通道）"""
+    if exclude_sectors is None:
+        exclude_sectors = []
     w.write(doc_id, [("h3", "🇨🇳 A股 中小市值 Top 5（市值<$30B独立通道）")])
     try:
         all_picks = scanner.scan_market(top_n=80)
@@ -1037,6 +1086,11 @@ def _build_a_smallmid_channel(w, doc_id, scanner):
         mkt_cap = p.get("_est_mkt_cap")
         mkt_str = f"{mkt_cap:.0f}亿" if mkt_cap and isinstance(mkt_cap, (int, float)) and mkt_cap != 999 else "?"
         sector = p.get("sector", "?")
+        
+        # 扩张期过滤防御板块
+        if exclude_sectors and any(ds in str(sector) for ds in exclude_sectors):
+            continue
+        
         chain_tag = f" | 链: {sector}" if sector and sector != "?" else ""
         
         w.write(doc_id, [("bullet", f"{name}({code}): 评分 {score:.1f} | 市值≈{mkt_str} | PE {pe}{chain_tag}")])
@@ -1167,9 +1221,16 @@ def _build_hk_channel(w, doc_id):
 
 def build_discovery_section(w, doc_id, scanner, macro):
     w.write(doc_id, [("divider", ""), ("h2", "五、🔍 多因子新票发现")])
+
+    # 扩张期过滤防御板块（白酒/红利/公用事业/消费必需品不符合进攻逻辑）
+    regime = macro.get('regime', '')
+    exclude_sectors = []
+    if regime == '扩张期':
+        exclude_sectors = ['白酒', '红利', '公用事业', '消费必需品', '新能源']
+        w.write(doc_id, [("quote", f"⚡ 扩张期逻辑：聚焦科技/半导体/AI/国产替代/高端制造，已自动过滤白酒/红利/公用/消费必需品/新能源等防御品种")])
     
-    _build_a_channel(w, doc_id, scanner)
-    _build_a_smallmid_channel(w, doc_id, scanner)
+    _build_a_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
+    _build_a_smallmid_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
     _build_us_channel(w, doc_id)
     _build_hk_channel(w, doc_id)
     
