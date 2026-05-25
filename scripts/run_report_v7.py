@@ -193,7 +193,17 @@ try:
         ('h2', '六、🛢️ 大宗商品'),
     ])
     for c in comms.get('commodities', [])[:6]:
-        w.write(doc_id, [('bullet', f"{c['name']}: ${c.get('price','?')} | 20日{c.get('ret_20d','?')}% | RSI{c.get('rsi_14','?')} | {c.get('signal','?')}")])
+        price = c.get('price')
+        ret20 = c.get('ret_20d')
+        rsi = c.get('rsi_14')
+        note = c.get('note', '')
+        price_str = f"${price:.2f}" if isinstance(price, (int, float)) else "⚠️ 数据异常"
+        ret_str = f"{ret20:.2f}%" if isinstance(ret20, (int, float)) else "?"
+        rsi_str = f"{rsi:.1f}" if isinstance(rsi, (int, float)) else "?"
+        warn = f" [{note}]" if note and '⚠' in note else ""
+        w.write(doc_id, [('bullet',
+            f"{c['name']}: {price_str} | 20日{ret_str} | RSI{rsi_str} | {c.get('signal','?')}{warn}"
+        )])
     w.write(doc_id, [('text', rpt.FeishuWriter.ref(w, '十六、全球经济格局'))])
     log("Commodities done")
 
@@ -218,10 +228,10 @@ try:
 
     # ═══ 九、10链深度分析 ═══
     # 双门状态检查：决定产业链分析口径
-    gate_status = macro.get('gate_status', {})
-    macro_gate = gate_status.get('macro_gate', 'open')
-    trend_gate = gate_status.get('trend_gate', 'open')
-    both_closed = (macro_gate == 'closed' and trend_gate == 'closed')
+    _dg = macro.get('dual_gate', {})
+    _action = _dg.get('action', '')
+    both_closed = _action in ('观望为主', '空仓等待', '减仓观望', '左侧试探') or \
+                  (_dg.get('macro_gate') in ('红灯', '黄灯') and _dg.get('trend_gate') in ('红灯', '黄灯'))
     if both_closed:
         macro['chain_mode'] = 'observation'  # 双门关闭→观察模式
     else:

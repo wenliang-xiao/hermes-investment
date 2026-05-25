@@ -414,8 +414,12 @@ def get_northbound_flow() -> dict:
     try:
         import akshare as ak
 
-        sh = ak.stock_em_hsgt_north_net_flow_in_em(symbol="沪股通")
-        sz = ak.stock_em_hsgt_north_net_flow_in_em(symbol="深股通")
+        fetch_fn = getattr(ak, "stock_em_hsgt_north_net_flow_in_em",
+                          getattr(ak, "stock_em_hsgt_north_cash_flow", None))
+        if fetch_fn is None:
+            raise AttributeError("AKShare北向资金函数不可用，请升级akshare")
+        sh = fetch_fn(symbol="沪股通")
+        sz = fetch_fn(symbol="深股通")
 
         if sh.empty or sz.empty:
             result["note"] = "AKShare返回空数据"

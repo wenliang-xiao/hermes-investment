@@ -1665,9 +1665,11 @@ def build_tracking_section(w, doc_id, scanner, macro):
 def build_action_section(w, doc_id, macro):
     regime = macro.get("regime", "?")
     dual_gate = macro.get("dual_gate", {})
+    dual_action = dual_gate.get("action", "")
     macro_gate = dual_gate.get("macro_gate", "")
     trend_gate = dual_gate.get("trend_gate", "")
-    dual_closed = (macro_gate == "红灯" and trend_gate == "红灯")
+    dual_closed = dual_action in ("观望为主", "空仓等待", "减仓观望", "左侧试探") or \
+                  (macro_gate in ("红灯", "黄灯") and trend_gate in ("红灯", "黄灯"))
     bw_q = macro.get("bw_quadrant", "")
     credit_src = macro.get("credit_signal_source", "")
 
