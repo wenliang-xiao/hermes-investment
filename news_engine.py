@@ -635,6 +635,36 @@ def _sort_by_time_and_hotness(items: List[Dict]) -> List[Dict]:
 # 第3部分：链影响标注
 # ═══════════════════════════════════════════════════════════════
 
+# ── 通用中文情绪词（回退检测，当链专用方向词未命中时使用）──
+_BULLISH_WORDS = [
+    "利好", "突破", "大涨", "飙升", "创新高", "超预期", "增长", "加速",
+    "扩产", "缺货", "供不应求", "政策支持", "补贴", "放水", "降息",
+    "核准", "通过认证", "获批", "中标", "订单大增", "需求暴增",
+    "业绩预增", "业绩超预期", "盈利上调", "上调评级", "增持",
+    "涨停", "拉升", "回暖", "复苏", "拐点", "底部",
+]
+_BEARISH_WORDS = [
+    "利空", "暴跌", "大跌", "崩盘", "新低", "低于预期", "下滑", "放缓",
+    "过剩", "降价", "抛售", "制裁", "管制", "调查", "处罚", "罚款",
+    "贸易战", "脱钩", "封锁", "断供", "加税", "加息", "收紧",
+    "暴雷", "违约", "亏损", "预亏", "下调评级", "减持",
+    "跌停", "退潮", "衰退", "滞胀", "风险",
+]
+
+
+def _detect_general_sentiment(text: str) -> int:
+    """通用中文情绪检测：1=偏多, -1=偏空, 0=中性。
+    当链专用关键词未命中时作为回退信号。"""
+    text_lower = text.lower()
+    bullish_hits = sum(1 for w in _BULLISH_WORDS if w in text_lower)
+    bearish_hits = sum(1 for w in _BEARISH_WORDS if w in text_lower)
+    if bullish_hits > bearish_hits:
+        return 1
+    elif bearish_hits > bullish_hits:
+        return -1
+    return 0
+
+
 def classify_impact(news_list: List[Dict]) -> List[Dict]:
     """
     为每条新闻标注影响的产业链及方向。
@@ -665,6 +695,14 @@ def classify_impact(news_list: List[Dict]) -> List[Dict]:
                 if down_kw.lower() in text:
                     direction = "↓利空"
                     break
+            
+            # 通用回退：若链关键词匹配但方向未定，用通用中文情绪词推断
+            if direction == "→中性":
+                _signal = _detect_general_sentiment(text)
+                if _signal == 1:
+                    direction = "↑利好"
+                elif _signal == -1:
+                    direction = "↓利空"
             
             impacts.append({
                 "chain": chain_name,

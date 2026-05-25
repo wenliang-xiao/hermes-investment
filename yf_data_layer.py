@@ -277,6 +277,13 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
         "market_cap": factor_data.get("market_cap"),
         "pct_52w": pct_52w,
         "analyst_mean": factor_data.get("analyst_mean"),
+        # ── Nick四问所需字段 ──
+        "earnings_growth": factor_data.get("earnings_growth"),
+        "50d_avg": factor_data.get("50d_avg"),
+        "200d_avg": factor_data.get("200d_avg"),
+        "target_mean": factor_data.get("target_mean"),
+        "short_ratio": factor_data.get("short_ratio"),
+        "beta": factor_data.get("beta"),
         "chain": chain_info.get("chain", "") if chain_info else "",
         "chain_pos": chain_info.get("chain_pos", "") if chain_info else "",
     }
