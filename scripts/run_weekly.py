@@ -282,6 +282,8 @@ try:
         log(f"链摘要写入失败: {e}")
 
     log(f"URL: https://bytedance.feishu.cn/docx/{doc_id}")
+    print(f"✅ 面基三源融合周报 已生成")
+    print(f"📄 飞书文档: https://bytedance.feishu.cn/docx/{doc_id}")
 
 except Exception as e:
     log(f"FATAL: {e}")

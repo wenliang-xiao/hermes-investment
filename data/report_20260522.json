@@ -1,0 +1,87 @@
+{
+  "time": "2026-05-22T20:44:12.157654",
+  "scan_type": "small_mid",
+  "macro": {
+    "time": "2026-05-22 20:41",
+    "quadrant": "宽货币·紧信用",
+    "regime": "复苏期",
+    "trend_temp": "平",
+    "trend_action": "中性操作，控制仓位",
+    "strategy_switch": "on",
+    "strategy_reason": "CPI数据不足，按默认执行",
+    "factor_weights": {
+      "质量": 0.23,
+      "价值": 0.18,
+      "成长": 0.2,
+      "低波": 0.12,
+      "红利": 0.15,
+      "动量": 0.12
+    },
+    "suggested_position": 0.7,
+    "macro_data": {},
+    "market": {}
+  },
+  "results": [
+    {
+      "symbol": "000002",
+      "name": "万科A",
+      "score": 5.86,
+      "price": 3.46
+    },
+    {
+      "symbol": "600030",
+      "name": "中信证券",
+      "score": 5.8,
+      "price": 25.87
+    },
+    {
+      "symbol": "600383",
+      "name": "金地集团",
+      "score": 5.43,
+      "price": 2.69
+    },
+    {
+      "symbol": "300750",
+      "name": "宁德时代",
+      "score": 5.39,
+      "price": 411.16
+    },
+    {
+      "symbol": "603288",
+      "name": "海天味业",
+      "score": 5.18,
+      "price": 35.29
+    },
+    {
+      "symbol": "600741",
+      "name": "华域汽车",
+      "score": 5.05,
+      "price": 17.04
+    },
+    {
+      "symbol": "601166",
+      "name": "兴业银行",
+      "score": 5.04,
+      "price": 17.46
+    },
+    {
+      "symbol": "600016",
+      "name": "民生银行",
+      "score": 4.93,
+      "price": 3.52
+    },
+    {
+      "symbol": "600036",
+      "name": "招商银行",
+      "score": 4.92,
+      "price": 37.02
+    },
+    {
+      "symbol": "601318",
+      "name": "中国平安",
+      "score": 4.92,
+      "price": 53.68
+    }
+  ],
+  "doc_url": "https://bytedance.feishu.cn/docx/IyDwddABroAgd4xIttucG4icnMc"
+}

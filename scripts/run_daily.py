@@ -315,6 +315,8 @@ try:
     log("Action done")
 
     log(f"URL: https://bytedance.feishu.cn/docx/{doc_id}")
+    print(f"✅ 面基三源融合日报 {session} 已生成")
+    print(f"📄 飞书文档: https://bytedance.feishu.cn/docx/{doc_id}")
 
 except Exception as e:
     log(f"FATAL: {e}")

@@ -1,0 +1,280 @@
+{
+  "timestamp": "2026-05-23T11:18:26.525788",
+  "fx": {
+    "source": "chinamoney",
+    "timestamp": "2026-05-23T11:18:27.106473",
+    "USD/CNY": {
+      "price": 6.8373,
+      "change_bp": 24.0
+    },
+    "EUR/CNY": {
+      "price": 7.9193,
+      "change_bp": 43.0
+    },
+    "100JPY/CNY": {
+      "price": 4.2933,
+      "change_bp": 24.0
+    },
+    "HKD/CNY": {
+      "price": 0.87261,
+      "change_bp": 0.6
+    },
+    "GBP/CNY": {
+      "price": 9.1571,
+      "change_bp": 17.0
+    },
+    "AUD/CNY": {
+      "price": 4.8735,
+      "change_bp": 23.0
+    },
+    "NZD/CNY": {
+      "price": 4.0057,
+      "change_bp": 94.0
+    },
+    "SGD/CNY": {
+      "price": 5.3355,
+      "change_bp": 6.0
+    },
+    "CHF/CNY": {
+      "price": 8.6709,
+      "change_bp": 101.0
+    },
+    "CAD/CNY": {
+      "price": 4.9468,
+      "change_bp": 77.0
+    },
+    "CNY/KRW": {
+      "price": 221.31,
+      "change_bp": 139.0
+    },
+    "CNY/THB": {
+      "price": 4.7902,
+      "change_bp": 32.0
+    }
+  },
+  "bonds": {
+    "source": "yahoo",
+    "US10Y": {
+      "price": 4.558,
+      "name": "美国10年期国债",
+      "risk_sense": "全球利率锚",
+      "change_pct": -1.41
+    },
+    "CN10Y": {
+      "price": 2.8,
+      "name": "中国10年期国债",
+      "risk_sense": "国内利率锚",
+      "change_pct": null
+    }
+  },
+  "indices": {
+    "source": "yahoo",
+    "^HSI": {
+      "price": 25606.03,
+      "name": "恒生指数",
+      "market": "HK",
+      "prev_close": 25962.73,
+      "change_pct": -1.37
+    },
+    "^GSPC": {
+      "price": 7473.47,
+      "name": "标普500",
+      "market": "US",
+      "prev_close": 7408.5,
+      "change_pct": 0.88
+    },
+    "^IXIC": {
+      "price": 26343.97,
+      "name": "纳斯达克",
+      "market": "US",
+      "prev_close": 26225.14,
+      "change_pct": 0.45
+    },
+    "000300.SS": {
+      "price": 4845.0957,
+      "name": "沪深300",
+      "market": "CN",
+      "prev_close": 4833.52,
+      "change_pct": 0.24
+    },
+    "000001.SS": {
+      "price": 4112.9,
+      "name": "上证指数",
+      "market": "CN",
+      "prev_close": 4131.528,
+      "change_pct": -0.45
+    }
+  },
+  "hk_stocks": {
+    "0700.HK": {
+      "name": "腾讯控股",
+      "sector": "互联网",
+      "price": 441.4,
+      "prev_close": 456.4,
+      "change_pct": -3.29
+    },
+    "9988.HK": {
+      "name": "阿里巴巴",
+      "sector": "互联网",
+      "price": 127.0,
+      "prev_close": 132.3,
+      "change_pct": -4.01
+    },
+    "3690.HK": {
+      "name": "美团",
+      "sector": "互联网",
+      "price": 81.35,
+      "prev_close": 82.7,
+      "change_pct": -1.63
+    },
+    "9999.HK": {
+      "name": "网易",
+      "sector": "互联网",
+      "price": 181.5,
+      "prev_close": 179.0,
+      "change_pct": 1.4
+    },
+    "1810.HK": {
+      "name": "小米集团",
+      "sector": "消费电子",
+      "price": 30.0,
+      "prev_close": 30.7,
+      "change_pct": -2.28
+    }
+  },
+  "us_stocks": {
+    "BABA": {
+      "name": "阿里巴巴",
+      "sector": "电商",
+      "price": 130.0,
+      "prev_close": 132.59,
+      "change_pct": -1.95
+    },
+    "JD": {
+      "name": "京东",
+      "sector": "电商",
+      "price": 30.52,
+      "prev_close": 32.01,
+      "change_pct": -4.65
+    },
+    "BIDU": {
+      "name": "百度",
+      "sector": "AI",
+      "price": 127.79,
+      "prev_close": 135.33,
+      "change_pct": -5.57
+    },
+    "NIO": {
+      "name": "蔚来",
+      "sector": "新能源车",
+      "price": 5.2,
+      "prev_close": 6.1,
+      "change_pct": -14.75
+    },
+    "LI": {
+      "name": "理想汽车",
+      "sector": "新能源车",
+      "price": 15.89,
+      "prev_close": 18.51,
+      "change_pct": -14.15
+    },
+    "XPEV": {
+      "name": "小鹏汽车",
+      "sector": "新能源车",
+      "price": 15.59,
+      "prev_close": 15.62,
+      "change_pct": -0.19
+    }
+  },
+  "commodities": {
+    "source": "yahoo",
+    "GC=F": {
+      "name": "黄金",
+      "unit": "美元/盎司",
+      "sector": "贵金属",
+      "price": 4510.5,
+      "prev_close": 4552.5,
+      "change_pct": -0.92
+    },
+    "SI=F": {
+      "name": "白银",
+      "unit": "美元/盎司",
+      "sector": "贵金属",
+      "price": 75.92,
+      "prev_close": 77.07,
+      "change_pct": -1.5
+    },
+    "HG=F": {
+      "name": "铜",
+      "unit": "美元/磅",
+      "sector": "工业金属",
+      "price": 6.38,
+      "prev_close": 6.27,
+      "change_pct": 1.72
+    },
+    "CL=F": {
+      "name": "原油(WTI)",
+      "unit": "美元/桶",
+      "sector": "能源",
+      "price": 97.0,
+      "prev_close": 108.66,
+      "change_pct": -10.73
+    },
+    "NG=F": {
+      "name": "天然气",
+      "unit": "美元/百万BTU",
+      "sector": "能源",
+      "price": 3.03,
+      "prev_close": 3.02,
+      "change_pct": 0.33
+    },
+    "ZC=F": {
+      "name": "玉米",
+      "unit": "美元/蒲式耳",
+      "sector": "农产品",
+      "price": 463.8,
+      "prev_close": 477.0,
+      "change_pct": -2.78
+    },
+    "ZW=F": {
+      "name": "小麦",
+      "unit": "美元/蒲式耳",
+      "sector": "农产品",
+      "price": 647.0,
+      "prev_close": 664.5,
+      "change_pct": -2.63
+    },
+    "ZS=F": {
+      "name": "大豆",
+      "unit": "美元/蒲式耳",
+      "sector": "农产品",
+      "price": 1197.2,
+      "prev_close": 1213.0,
+      "change_pct": -1.3
+    },
+    "ZM=F": {
+      "name": "豆粕",
+      "unit": "美元/短吨",
+      "sector": "农产品",
+      "price": 332.0,
+      "prev_close": 334.5,
+      "change_pct": -0.75
+    },
+    "ZL=F": {
+      "name": "豆油",
+      "unit": "美元/磅",
+      "sector": "农产品",
+      "price": 73.95,
+      "prev_close": 75.63,
+      "change_pct": -2.22
+    },
+    "CT=F": {
+      "name": "棉花",
+      "unit": "美元/磅",
+      "sector": "农产品",
+      "price": 77.7,
+      "prev_close": 83.7,
+      "change_pct": -7.17
+    }
+  }
+}
