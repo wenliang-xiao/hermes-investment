@@ -1,9 +1,9 @@
 """
 Data Layer — 统一数据获取
-优先级：JQData（主，需配置账号）→ baostock（备）→ AKShare（兜底）
+优先级：Tushare Pro（主力）→ baostock（免费安全网）→ AKShare（宏观月度兜底）
 
-配置 JQData：在环境变量中设置 JQDATA_USER / JQDATA_PASS
-或在 config.py 中添加 JQDATA_USER = "手机号", JQDATA_PASS = "密码"
+配置 Tushare：在 config.py 中设置 TUSHARE_TOKEN
+或设置同名环境变量
 """
 import baostock as bs
 import pandas as pd

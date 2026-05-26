@@ -7,15 +7,9 @@ from pathlib import Path
 
 BASE = Path("/home/admin/.hermes/investment_system")
 DATA_DIR = BASE / "data"
-try:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-except (PermissionError, OSError):
-    pass
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-JQDATA_USER = ""
-JQDATA_PASS = ""
-
-# ─── Tushare Pro（宏观/社融/北向/PE历史5年，补充JQData）───
+# ─── Tushare Pro（主力数据源：行情/PE历史5年/财务/社融/宏观）───
 # 注册：tushare.pro → 个人中心 → 接口TOKEN
 # 120积分（注册即送）可用大部分接口；2000积分解锁北向资金历史
 # 也可通过环境变量 TUSHARE_TOKEN 设置（优先）

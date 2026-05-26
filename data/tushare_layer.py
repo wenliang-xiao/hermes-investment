@@ -1,6 +1,6 @@
 """
 Tushare Pro 数据层
-优先级：Tushare Pro（宏观/社融/北向最权威）→ JQData（行情/财务）→ baostock（备用）
+优先级：Tushare Pro（主力数据源）
 
 配置 Token：
   config.py: TUSHARE_TOKEN = "your_token"
@@ -103,7 +103,7 @@ def get_stock_daily_ts(symbol: str, days: int = 365) -> pd.DataFrame:
 def get_pe_history_ts(symbol: str, years: int = 5) -> pd.Series:
     """
     获取个股历史 PE-TTM（最多5年），用于百分位计算。
-    Tushare daily_basic 返回完整历史PE，远比 JQData 试用账号更长。
+    Tushare daily_basic 返回完整历史PE。
     返回 pd.Series，index=date，values=pe
     """
     pro = _ts_init()
