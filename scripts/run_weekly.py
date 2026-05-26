@@ -14,7 +14,7 @@ from investment_system.output.full_asset_scanner import (
     scan_all_etfs, scan_bonds, scan_commodities,
     scan_fx, determine_bridgewater_quadrant
 )
-from investment_system.analysis.fund_tracker import track_lds_portfolio_v2, scan_all_etf_groups
+from investment_system.output.fund_tracker import track_lds_portfolio_v2, scan_all_etf_groups
 from investment_system.analysis.universe_builder import build_daily_scan_plan
 from investment_system.analysis.multi_asset_engine import run_daily_multi_asset_scan
 from investment_system.analysis.news_engine import get_news_with_impact

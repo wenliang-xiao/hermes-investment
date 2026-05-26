@@ -15,7 +15,7 @@ import investment_system.output.report_v6 as rpt
 from investment_system.output.full_asset_scanner import (
     scan_commodities, scan_fx, scan_bonds, determine_bridgewater_quadrant
 )
-from investment_system.analysis.fund_tracker import track_lds_portfolio_v2
+from investment_system.output.fund_tracker import track_lds_portfolio_v2
 from investment_system.analysis.news_engine import get_news_with_impact
 from investment_system.data.yf_data_layer import get_global_market_snapshot
 from investment_system.data.data_layer import get_northbound_flow
