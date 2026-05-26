@@ -767,49 +767,57 @@ def _get_llm_api_key() -> Optional[str]:
 
 
 def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
-    """
-    调用LLM API生成总结。
-    优先级：ARK_API_KEY > OPENAI_API_KEY > Hermes自身LLM配置
-    """
+    ark_key = os.environ.get("ARK_API_KEY", "")
     ark_model = os.environ.get("ARK_MODEL", "")
-    if os.environ.get("ARK_API_KEY") and ark_model and "xxxxx" not in ark_model:
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+
+    if ark_key and ark_model:
         api_url = os.environ.get("ARK_API_BASE", "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
         model = ark_model
-        api_key = os.environ.get("ARK_API_KEY")
-    elif os.environ.get("OPENAI_API_KEY"):
+        api_key = ark_key
+    elif openai_key:
         api_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1/chat/completions")
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = openai_key
     else:
-        # 回退到 Hermes 自身使用的 LLM
         hermes_url, hermes_key, hermes_model = _get_hermes_llm_config()
         if not hermes_key:
+            print("  [LLM] 无可用API密钥（ARK_API_KEY/OPENAI_API_KEY/Hermes均未配置）")
             return None
         api_url = hermes_url + "/chat/completions"
         model = hermes_model
         api_key = hermes_key
-    auth_header = {"Authorization": f"Bearer {api_key}"}
-    
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-    
+
+    default_system = (
+        "你是一名专业投资研究助理，专注于A股/港股/美股市场分析。"
+        "你的输出将用于辅助投资决策，请提供客观、具体、可操作的分析。"
+        "严格按照用户要求的格式输出，不要添加免责声明。"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt or default_system},
+        {"role": "user", "content": prompt},
+    ]
+
     payload = json.dumps({
         "model": model,
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 1500,
+        "max_tokens": 2000,
     }).encode("utf-8")
-    
+
     try:
-        headers = {"Content-Type": "application/json", **auth_header}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         req = urllib.request.Request(api_url, data=payload, headers=headers)
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
-            return result["choices"][0]["message"]["content"]
+            content = result["choices"][0]["message"]["content"]
+            if not content or not content.strip():
+                print(f"  [LLM] 模型返回空内容 (model={model})")
+                return None
+            print(f"  [LLM] 成功 (model={model}, chars={len(content)})")
+            return content
     except Exception as e:
-        print(f"  [LLM] API调用失败: {e}")
+        print(f"  [LLM] 调用失败 (model={model}): {e}")
         return None
 
 
