@@ -1939,8 +1939,8 @@ def build_news_section(w, doc_id):
 # ═══════════════════════════════════
 # 板块 7: 重点票追踪
 # ═══════════════════════════════════
-def build_tracking_section(w, doc_id, scanner, macro):
-    w.write(doc_id, [("divider", ""), ("h2", "七、👀 重点票追踪")])
+def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
+    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、👀 重点票追踪")])
     try:
         from investment_system.output.shadow_account import get_shadow_summary, check_stops
         summary = get_shadow_summary()
@@ -1983,7 +1983,7 @@ def build_tracking_section(w, doc_id, scanner, macro):
 # ═══════════════════════════════════
 # 板块 8: 调仓建议
 # ═══════════════════════════════════
-def build_action_section(w, doc_id, macro):
+def build_action_section(w, doc_id, macro, section_prefix="八"):
     regime = macro.get("regime", "?")
     dual_gate = macro.get("dual_gate", {})
     dual_action = dual_gate.get("action", "")
@@ -2011,7 +2011,7 @@ def build_action_section(w, doc_id, macro):
     bw_key = bw_q[:2] if bw_q else ""
     bw_hint = bw_asset_hint.get(bw_key, "")
 
-    w.write(doc_id, [("divider", ""), ("h2", "八、⚖️ 调仓建议")])
+    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、⚖️ 调仓建议")])
 
     w.write(doc_id, [("h3", "宏观基调")])
     w.write(doc_id, [("bullet", f"当前象限: {regime} → 偏好: {favor}")])

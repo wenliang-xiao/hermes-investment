@@ -415,16 +415,16 @@ def scan_commodities_fx_bonds() -> dict:
 # ═══════════════════════════════════════════
 
 _SNAPSHOT_SANITY = {
-    "GC=F":     (1800, 3800),   # 黄金 USD/oz，2024-2025合理范围
-    "CL=F":     (20,   100),    # WTI原油 USD/bbl
-    "HG=F":     (2.0,  6.5),    # 铜 USD/lb
-    "SI=F":     (15,   45),     # 白银 USD/oz
-    "NG=F":     (1.0,  8.0),    # 天然气 USD/MMBtu
+    "GC=F":     (2000, 5500),   # 黄金 USD/oz（央行购金+地缘驱动，2025年已破4500）
+    "CL=F":     (30,   130),    # WTI原油 USD/bbl
+    "HG=F":     (2.5,  7.0),    # 铜 USD/lb
+    "SI=F":     (15,   100),    # 白银 USD/oz（工业+贵金属双属性，弹性大）
+    "NG=F":     (1.0,  10.0),   # 天然气 USD/MMBtu
     "^TNX":     (0.1,  8.0),    # 美债10Y收益率 %
     "^TYX":     (0.1,  8.0),    # 美债30Y收益率 %
     "^VIX":     (5,    80),     # VIX恐慌指数
-    "CNY=X":    (6.0,  7.8),    # USD/CNY 在岸
-    "EURUSD=X": (0.9,  1.4),    # EUR/USD 正向
+    "CNY=X":    (6.0,  7.5),    # USD/CNY 在岸（人民币升值趋势）
+    "EURUSD=X": (0.9,  1.5),    # EUR/USD 正向
 }
 
 def _validated_price(sym: str, price) -> Optional[float]:

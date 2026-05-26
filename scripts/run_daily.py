@@ -161,7 +161,7 @@ try:
     log("Panel done")
 
     # ─── 板块2：持仓风控 ───
-    rpt.build_tracking_section(w, doc_id, scanner=None, macro=macro)
+    rpt.build_tracking_section(w, doc_id, scanner=None, macro=macro, section_prefix="二")
     log("Tracking done")
 
     # ─── 板块3：观察池今日信号 ───
@@ -310,8 +310,8 @@ try:
         pass
     log("News done")
 
-    # ─── 调仓建议 ───
-    rpt.build_action_section(w, doc_id, macro)
+    # ─── 板块6：调仓建议 ───
+    rpt.build_action_section(w, doc_id, macro, section_prefix="六")
     log("Action done")
 
     log(f"URL: https://bytedance.feishu.cn/docx/{doc_id}")
