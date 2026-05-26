@@ -144,14 +144,12 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
     index_ma = _get_index_ma_series(start, end)
 
     for i, date in enumerate(dates):
-        date_str = date.strftime("%Y-%m-%d")
-
         cpi = _get_latest_known_value(cpi_history, date)
         if cpi is None:
             macro_gate_closed = False
-        elif cpi < 1.0 or cpi > 3.0:
+        elif cpi < 1.0:
             macro_gate_closed = True
-        elif cpi >= 2.0:
+        elif cpi > 3.0:
             macro_gate_closed = True
         else:
             macro_gate_closed = False
@@ -159,9 +157,7 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
         dev = index_ma.get(date, None)
         if dev is None:
             trend_gate_closed = False
-        elif dev < -0.05:
-            trend_gate_closed = True
-        elif dev < 0.05:
+        elif dev <= -0.05:
             trend_gate_closed = True
         else:
             trend_gate_closed = False
@@ -244,24 +240,85 @@ def _get_latest_known_value(data_dict: Dict[str, float], date) -> Optional[float
     return None
 
 
+def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict[str, List[dict]]:
+    """
+    从baostock拉取历史财务数据（季度ROE+营收增速）。
+    加45天报告滞后，避免前视偏差。
+    返回格式：{symbol: [{report_date, available_date, roe, rev_growth}]}
+    """
+    result = {}
+    try:
+        import baostock as bs
+        bs.login()
+        for sym in symbols:
+            code = f"sh.{sym}" if sym.startswith(("5", "6")) else f"sz.{sym}"
+            records = []
+            for year in range(int(start[:4]) - 1, int(end[:4]) + 1):
+                for quarter in [1, 2, 3, 4]:
+                    try:
+                        rs = bs.query_growth_data(code=code, year=year, quarter=quarter)
+                        if rs.error_code != "0":
+                            continue
+                        while rs.next():
+                            r = rs.get_row_data()
+                            try:
+                                report_date_str = f"{year}-{quarter * 3:02d}-30"
+                                available_date = (
+                                    datetime.strptime(report_date_str, "%Y-%m-%d") + timedelta(days=45)
+                                ).strftime("%Y-%m-%d")
+                                roe = float(r[3]) * 100 if r[3] and r[3].strip() else None
+                                rev_growth = float(r[4]) * 100 if r[4] and r[4].strip() else None
+                                if roe is not None:
+                                    records.append({
+                                        "available_date": available_date,
+                                        "roe": roe,
+                                        "rev_growth": rev_growth or 0.0,
+                                    })
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+            if records:
+                result[sym] = sorted(records, key=lambda x: x["available_date"])
+        bs.logout()
+    except Exception as e:
+        print(f"[score_history] 财务数据拉取失败: {e}")
+    return result
+
+
+def _get_latest_fundamental(fund_hist: List[dict], date) -> dict:
+    date_str = date.strftime("%Y-%m-%d")
+    known = [r for r in fund_hist if r["available_date"] <= date_str]
+    return known[-1] if known else {}
+
+
 def build_historical_scores_from_prices(
     symbols: List[str],
     price_data: Dict[str, pd.DataFrame],
     start: str,
     end: str,
-    rebalance_freq: str = "W-FRI"
+    rebalance_freq: str = "W-FRI",
+    use_fundamentals: bool = True,
 ) -> Dict[str, Dict[str, float]]:
     """
-    从历史价格数据重建因子分快照（D-lite方案）。
+    从历史价格+基本面数据重建因子分快照（D-lite+方案）。
     
-    用于2018-2024历史期回测，比纯模拟动量分可信得多：
-      - 动量因子：20日+60日+120日收益率加权（与live系统一致）
-      - 低波因子：90日年化波动率倒数
-      - 技术因子：RSI + MA位置
+    因子构成（与 factor_scanner 对齐）：
+      - 质量（ROE）：权重 25% — 需要baostock历史财务，45天滞后
+      - 成长（营收增速）：权重 15% — 同上
+      - 动量（20/60/120日）：权重 25%
+      - 低波（90日波动率倒数）：权重 20%
+      - 技术（RSI+MA）：权重 15%
     
-    Oracle注意：这仍然不包含基本面因子的历史数据（ROE等需要点时PIT）。
-    用于验证策略框架合理性是足够的，但不能用于精确归因。
+    Oracle注意：PE历史百分位仍缺失（需Tushare，可后续增加）。
+    比纯动量分可信得多，基本面因子有时间滞后保护，无前视偏差。
     """
+    fundamental_data: Dict[str, List[dict]] = {}
+    if use_fundamentals:
+        print("[score_history] 拉取历史财务数据（ROE+营收增速，含45天滞后）...")
+        fundamental_data = _fetch_fundamental_history(symbols, start, end)
+        print(f"[score_history] 财务数据覆盖: {len(fundamental_data)}/{len(symbols)} 只")
+
     all_scores = {}
     rebalance_dates = pd.date_range(start, end, freq=rebalance_freq)
 
@@ -281,12 +338,12 @@ def build_historical_scores_from_prices(
             ret_20 = (close[-1] / close[-21] - 1) * 100 if len(close) >= 21 else 0
             ret_60 = (close[-1] / close[-61] - 1) * 100 if len(close) >= 61 else 0
             ret_120 = (close[-1] / close[-121] - 1) * 100 if len(close) >= 121 else 0
-            momentum = (ret_20 * 0.4 + ret_60 * 0.35 + ret_120 * 0.25)
-            s_momentum = max(1, min(10, 5 + momentum / 8))
+            momentum_raw = ret_20 * 0.4 + ret_60 * 0.35 + ret_120 * 0.25
+            s_momentum = max(1, min(10, 5 + momentum_raw / 8))
 
             if len(close) >= 60:
-                returns = np.diff(close[-61:]) / close[-61:-1]
-                vol = float(np.std(returns) * np.sqrt(252) * 100)
+                returns_arr = np.diff(close[-61:]) / close[-61:-1]
+                vol = float(np.std(returns_arr) * np.sqrt(252) * 100)
                 s_lowvol = max(1, min(10, 10 - (vol - 15) / 4))
             else:
                 s_lowvol = 5.0
@@ -298,7 +355,7 @@ def build_historical_scores_from_prices(
                 losses = np.mean(np.maximum(-diffs, 0))
                 if losses > 0:
                     rsi = 100 - 100 / (1 + gains / losses)
-            ma60 = np.mean(close[-60:]) if len(close) >= 60 else close[-1]
+            ma60 = float(np.mean(close[-60:])) if len(close) >= 60 else float(close[-1])
             ma60_dev = (close[-1] - ma60) / ma60 * 100
             s_tech = 5.0
             if 30 < rsi < 70:
@@ -307,10 +364,25 @@ def build_historical_scores_from_prices(
                 s_tech += 1.5
             if ma60_dev > 0:
                 s_tech += 0.5
+            s_tech = max(1, min(10, s_tech))
 
-            score = s_momentum * 0.5 + s_lowvol * 0.3 + s_tech * 0.2
-            score = round(max(1, min(10, score)), 2)
-            day_scores[sym] = score
+            s_quality = 5.0
+            s_growth = 5.0
+            if sym in fundamental_data:
+                fd = _get_latest_fundamental(fundamental_data[sym], date)
+                if fd:
+                    roe = fd.get("roe", 0) or 0
+                    rev = fd.get("rev_growth", 0) or 0
+                    s_quality = max(1, min(10, 1 + 9 * min(abs(roe), 40) / 40))
+                    s_growth = max(1, min(10, 1 + 9 * min(abs(rev), 60) / 60))
+
+            if use_fundamentals and sym in fundamental_data:
+                score = (s_quality * 0.25 + s_growth * 0.15 +
+                         s_momentum * 0.25 + s_lowvol * 0.20 + s_tech * 0.15)
+            else:
+                score = s_momentum * 0.50 + s_lowvol * 0.30 + s_tech * 0.20
+
+            day_scores[sym] = round(max(1, min(10, score)), 2)
 
         if day_scores:
             all_scores[date_str] = day_scores
