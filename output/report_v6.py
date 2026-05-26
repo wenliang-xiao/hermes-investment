@@ -1523,11 +1523,13 @@ def _calc_tech_signal(closes: list) -> dict:
 
     if len(c) >= 20:
         ma20 = float(np.mean(c[-20:]))
+        signal["ma20"] = round(ma20, 2)
         signal["ma20_dev"] = round((c[-1] / ma20 - 1) * 100, 1)
         signal["above_ma20"] = c[-1] > ma20
 
     if len(c) >= 60:
         ma60 = float(np.mean(c[-60:]))
+        signal["ma60"] = round(ma60, 2)
         signal["ma60_dev"] = round((c[-1] / ma60 - 1) * 100, 1)
         signal["above_ma60"] = c[-1] > ma60
 

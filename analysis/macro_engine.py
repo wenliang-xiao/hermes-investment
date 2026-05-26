@@ -87,7 +87,7 @@ class MacroEngine:
         # 社融增速 > 10% 且趋势向上 = 宽信用；< 8% 且趋势向下 = 紧信用
         sf_growth = md.get("social_financing_growth")
         m2g = md.get("m2_growth", 7.2) or 7.2
-        if sf_growth is not None:
+        if sf_growth is not None and abs(sf_growth) <= 100:
             loose_credit = "宽信用" if sf_growth > 9.0 else "紧信用"
             self._credit_signal_source = f"社融增速{sf_growth:.1f}%"
         else:

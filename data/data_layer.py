@@ -515,13 +515,18 @@ def get_macro_data() -> dict:
             result["m2"] = float(m2_row.iloc[1])
         except: pass
 
-        # 社融增速（面基/LDS核心信用指标，优先于M2）
         try:
             sf = ak.macro_china_shrzgm()
             if not sf.empty:
                 sf_row = sf.dropna().iloc[-1]
-                result["social_financing_growth"] = float(sf_row.iloc[2])
-                result["social_financing_date"] = str(sf_row.iloc[0])
+                sf_val = float(sf_row.iloc[2])
+                sf_date = str(sf_row.iloc[0])
+                if abs(sf_val) <= 100:
+                    result["social_financing_growth"] = sf_val
+                    result["social_financing_date"] = sf_date
+                else:
+                    result["social_financing_growth_abs_亿"] = sf_val
+                    result["social_financing_date"] = sf_date
         except: pass
             
     except ImportError:
