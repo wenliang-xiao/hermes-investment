@@ -1,0 +1,32 @@
+[
+  {
+    "strategy": "多因子选股",
+    "period": "2018-01-01 ~ 2024-12-31",
+    "annual_return": "18.79%",
+    "max_drawdown": "-34.60%",
+    "sharpe": "0.62",
+    "calmar": "0.54",
+    "win_rate_vs_benchmark": "59.0%",
+    "total_trades": 2486
+  },
+  {
+    "strategy": "LDS全天候ETF",
+    "period": "2018-01-01 ~ 2024-12-31",
+    "annual_return": "10.46%",
+    "max_drawdown": "-15.20%",
+    "sharpe": "0.74",
+    "calmar": "0.69",
+    "win_rate_vs_benchmark": "63.9%",
+    "total_trades": 0
+  },
+  {
+    "strategy": "多因子选股+双门控制",
+    "period": "2018-01-01 ~ 2024-12-31",
+    "annual_return": "18.97%",
+    "max_drawdown": "-29.43%",
+    "sharpe": "0.63",
+    "calmar": "0.64",
+    "win_rate_vs_benchmark": "61.4%",
+    "total_trades": 2437
+  }
+]

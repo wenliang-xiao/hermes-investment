@@ -26,11 +26,11 @@ import pandas as pd
 
 
 try:
-    from investment_system.config import DATA_DIR
-    SCORE_DIR = DATA_DIR / "factor_scores"
+    from investment_system.config import BASE
+    SCORE_DIR = BASE / ".hermes" / "factor_scores"
 except Exception:
     import pathlib
-    SCORE_DIR = pathlib.Path("/home/admin/.hermes/investment_system/data/factor_scores")
+    SCORE_DIR = pathlib.Path("/home/admin/.hermes/investment_system/.hermes/factor_scores")
 
 MACRO_HISTORY_FILE = SCORE_DIR.parent / "macro_gate_history.json"
 
@@ -172,6 +172,9 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
 
 def _get_historical_cpi(start: str, end: str) -> Dict[str, float]:
     """获取历史CPI数据（带发布日期延迟）。"""
+    import socket as _sock
+    _sock.setdefaulttimeout(10)  # AKShare防挂死
+
     try:
         import akshare as ak
         df = ak.macro_china_cpi_monthly()
@@ -188,10 +191,12 @@ def _get_historical_cpi(start: str, end: str) -> Dict[str, float]:
                         cpi_dict[release_date] = float(cpi_val)
                     except Exception:
                         pass
-            return cpi_dict
+            if cpi_dict:
+                return cpi_dict
     except Exception:
         pass
 
+    # 硬编码fallback：2018-2024各季CPI，日期已含45天报告滞后
     known_cpi = {
         "2018-01-01": 1.5, "2018-04-01": 2.1, "2018-07-01": 2.0, "2018-10-01": 2.5,
         "2019-01-01": 1.7, "2019-04-01": 2.5, "2019-07-01": 2.8, "2019-10-01": 3.8,
