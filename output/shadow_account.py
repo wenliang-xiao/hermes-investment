@@ -4,7 +4,7 @@ Shadow Account（Vibe-Trading概念）
 """
 import json, os
 from datetime import datetime
-from . import config
+from investment_system import config
 
 SHADOW_FILE = config.DATA_DIR / "shadow_account.json"
 

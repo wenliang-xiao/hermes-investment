@@ -644,6 +644,128 @@ _CHAIN_CONFIGS = [
         "dcf_tv": "TSLA核心争议：汽车业务(PE 50x) vs Robotaxi/机器人(期权价值)。比亚迪PE 18x更合理",
         "mianji_refs": "E7/E84(链定位=整车+电池), E124(DCF+期权价值分离), E42(周期逆向=渗透率怀疑时买入)",
     },
+
+    # ═══ 核心链11: 半导体国产替代（设备+材料+EDA）═══
+    {
+        "name": "半导体国产替代", "key_players": "北方华创→中微公司→中芯国际",
+        "lead_ticker": "688041", "support_tickers": ["688012", "688981"],
+        "all_tickers": ["688041", "688012", "688981", "688328", "688536", "688120"],
+        "is_conditional": False,
+        "hist_doubling_pe": 25, "prev_doubling": "北方华创 2020→2022: ¥50→¥380, 历时24月",
+        "supply": "大基金三期2024年募资3440亿；设备国产化率从15%→35%；28nm+成熟制程全线铺开",
+        "demand": "国内晶圆厂持续扩产（中芯南京/华虹无锡）；信创采购政策DDL→2027年央企完成替代",
+        "gap_pct": 65, "gap_direction": "扩大中（出口管制倒逼国产替代加速，设备每年新增需求>300亿）",
+        "catalysts": ["大基金三期设备招标落地", "国产EDA突破28nm制程", "中芯国际月产能突破10万片", "美国扩大出口管制范围"],
+        "assumption_hold": ["大基金三期持续投入", "国产设备良率达到客户采购标准", "晶圆厂扩产节奏不放缓"],
+        "assumption_break": "如果中美半导体谈判达成协议→国产替代紧迫性下降；国产设备良率长期无法达标→客户不采购",
+        "perez_stage": "synergy(协同期)—国产化率加速提升阶段", "profit_pool": "expanding—设备厂利润率40-55%是链上最厚，国产替代提供额外溢价",
+        "dcf_tv": "北方华创PE 35-50x含国产替代溢价；中微PE 40x；用渗透率×TAM估算潜在收入>历史估值",
+        "mianji_refs": "E131(逆全球化=国产替代最大驱动), E7/E84(链定位=设备是利润最厚环节), E136(逆潮受益)",
+        "a_profit_pool": [
+            {"code": "688041", "name": "北方华创", "env": "CVD/刻蚀设备(毛利率45%+)", "roe_ref": 20, "why": "大基金三期最大受益，在手订单可见度18个月"},
+            {"code": "688012", "name": "中微公司",  "env": "刻蚀设备(毛利率45-55%)",  "roe_ref": 22, "why": "刻蚀设备龙头，台积电CoWoS扩产=确定性订单"},
+            {"code": "688328", "name": "华海清科", "env": "CMP设备(毛利率40%+)",    "roe_ref": 18, "why": "国内CMP唯一规模化，稀缺性高"},
+            {"code": "688099", "name": "华大九天", "env": "EDA软件(毛利率60%+)",    "roe_ref": 15, "why": "国产EDA龙头，2027信创DDL政策支撑"},
+        ],
+        "a_avoid": "晶圆代工整厂（毛利率<20%）：中芯是行业贝塔，不是利润最厚环节",
+    },
+
+    # ═══ 核心链12: 医药创新（创新药+CXO+器械国产替代）═══
+    {
+        "name": "医药创新", "key_players": "恒瑞医药→药明康德→迈瑞医疗",
+        "lead_ticker": "603259", "support_tickers": [],
+        "all_tickers": ["603259", "300760", "300347"],
+        "is_conditional": False,
+        "hist_doubling_pe": 30, "prev_doubling": "药明康德 2019→2021: ¥60→¥170, CXO爆量+新冠订单, 历时24月",
+        "supply": "全球CXO产能集中中国（成本优势40%+）；中国创新药管线数量全球第二；器械国产化率<30%",
+        "demand": "GLP-1减肥药全球渗透率<5%→25%；中国创新药出海BD交易额2025年>1350亿美元；老龄化驱动医疗器械需求",
+        "gap_pct": 15, "gap_direction": "扩大中（AI制药+GLP-1新适应症+器械国产替代三线驱动）",
+        "catalysts": ["药明康德CXO订单增速转正确认", "恒瑞/百济FDA关键三期数据", "国产高端器械医保招标", "GLP-1国内获批"],
+        "assumption_hold": ["中美CXO不脱钩（BIOSECURE法案未严格执行）", "创新药出海BD持续", "老龄化医疗需求刚性"],
+        "assumption_break": "如果BIOSECURE法案严格执行→药明康德美国业务中断；医保控费超预期→创新药定价受压",
+        "perez_stage": "irruption→synergy—创新药从me-too向first-in-class突破", "profit_pool": "expanding—创新药毛利率70-95%，CXO30-45%，器械50-70%",
+        "dcf_tv": "恒瑞PE 30-45x（管线估值法）；药明PE 20-30x（盈利恢复）；迈瑞PE 25-35x（国产替代溢价）",
+        "mianji_refs": "E26(医药子版块赛道投资), E42(周期底部逆向买入), E68(FCF两朵花=创新药现金流)",
+        "a_profit_pool": [
+            {"code": "603259", "name": "药明康德", "env": "CXO(毛利率30-45%)", "roe_ref": 18, "why": "全球CXO龙头，订单触底回暖，出海能力最强"},
+            {"code": "300760", "name": "迈瑞医疗", "env": "医疗器械(毛利率60-70%)", "roe_ref": 25, "why": "器械龙头，国产替代+出海双驱动"},
+            {"code": "300347", "name": "泰格医药", "env": "CRO(毛利率35-45%)", "roe_ref": 20, "why": "临床CRO龙头，创新药出海必要环节"},
+        ],
+        "a_avoid": "仿制药（毛利率<20%）：带量采购压价，利润空间极薄",
+    },
+
+    # ═══ 核心链13: 数据中心/云计算（IDC+液冷+云服务）═══
+    {
+        "name": "数据中心/云计算", "key_players": "科华数据→依米康→光环新网",
+        "lead_ticker": "002453", "support_tickers": [],
+        "all_tickers": ["002453", "300459", "300451"],
+        "is_conditional": False,
+        "hist_doubling_pe": 20, "prev_doubling": "科华数据 2022→2024: ¥15→¥50, AI数据中心+液冷, 历时18月",
+        "supply": "AI数据中心建设周期>18月；液冷渗透率仅5%→20%（2026E）；IDC一线城市资源稀缺",
+        "demand": "CSP资本开支2025年合计$250B+；GB300单机柜功耗>100kW→风冷失效→液冷刚需；国内算力中心政策驱动",
+        "gap_pct": 25, "gap_direction": "扩大中（AI集群功耗每代翻倍→液冷渗透加速）",
+        "catalysts": ["CSP季度Capex指引", "液冷标准化进展（ASHRAE规范）", "国内算力补贴政策", "大模型推理流量爆发"],
+        "assumption_hold": ["AI集群功耗持续提升（GPU每代TDP翻倍）", "液冷技术标准化推进", "CSP不削减Capex"],
+        "assumption_break": "如果AI芯片能效比突破（10x）→功耗下降→液冷需求放缓；IDC产能过剩→价格下行",
+        "perez_stage": "irruption→synergy—AI驱动液冷从0→1渗透", "profit_pool": "expanding—液冷35-45%，IDC25-35%，云服务30-50%",
+        "dcf_tv": "科华/依米康PE 25-40x（液冷高增速）；用订单可见度+扩产计划做前向估值",
+        "mianji_refs": "E155(五层蛋糕=Capex层基础设施), E124(DCF+经常性收入=IDC长约), E7/E84(链定位=AI算力物理底座)",
+        "a_profit_pool": [
+            {"code": "002453", "name": "科华数据",  "env": "UPS/液冷(毛利率35-45%)", "roe_ref": 15, "why": "数据中心电力+液冷双主线，AI IDC核心配套"},
+            {"code": "300459", "name": "依米康",   "env": "精密空调/液冷(毛利率30-40%)", "roe_ref": 12, "why": "液冷进入放量期，AI数据中心标配"},
+            {"code": "300451", "name": "创业慧康", "env": "IDC运营(毛利率25-35%)", "roe_ref": 10, "why": "算力中心资源稀缺，长期合约锁定收益"},
+        ],
+        "a_avoid": "通用服务器组装（毛利率5-8%）：高度竞争，没有差异化壁垒",
+    },
+
+    # ═══ 核心链14: 苹果产业链（AI换机周期+A股供应商）═══
+    {
+        "name": "苹果产业链", "key_players": "AAPL→立讯精密→蓝思科技",
+        "lead_ticker": "AAPL", "support_tickers": [],
+        "all_tickers": ["AAPL", "QCOM", "AVGO"],
+        "is_conditional": True,
+        "hist_doubling_pe": 22, "prev_doubling": "AAPL 2020.3→2021.12: $55→$180, 历时21月",
+        "supply": "iPhone 18 AI版2026Q3发布；A股供应商：立讯精密/蓝思科技/歌尔股份/鹏鼎控股",
+        "demand": "AI手机换机周期从36月→30月；折叠屏渗透率1%→5%（2027E）；服务收入占比持续提升",
+        "gap_pct": 0, "gap_direction": "稳定→温和扩大（AI功能推动换机需求，但整体市场已饱和）",
+        "catalysts": ["AAPL WWDC 2026: AI功能更新", "iPhone 18秋季发布会+预订数据", "折叠屏首发时间", "AI功能用户激活率"],
+        "assumption_hold": ["AI手机能驱动消费者换机", "苹果AI功能在中国市场合规落地", "A股供应商份额不流失"],
+        "assumption_break": "AI功能不能驱动换机→苹果增速回归低个位数→A股供应商业绩平淡",
+        "perez_stage": "maturity→synergy（AI注入成熟产品创造增量）", "profit_pool": "stable—品牌端利润稳定，A股供应商是β而非α",
+        "dcf_tv": "AAPL $3.5T市值，永续段>60%，翻倍难度大；A股供应商看换机周期弹性，PE 15-25x合理",
+        "mianji_refs": "E32(南添光谱右移=消费电子右侧逻辑), E94(Perez成熟期注入AI催化), E105(及早离去=AAPL巨无霸增速放缓)",
+        "a_profit_pool": [
+            {"code": "002475", "name": "立讯精密", "env": "精密组装(毛利率15-20%)", "roe_ref": 18, "why": "苹果最大组装商，iPhone份额>70%，AirPods独家"},
+            {"code": "300433", "name": "蓝思科技", "env": "玻璃/结构件(毛利率20-28%)", "roe_ref": 12, "why": "屏幕玻璃+折叠屏铰链，新产品驱动毛利率提升"},
+            {"code": "002241", "name": "歌尔股份", "env": "声学/VR(毛利率18-25%)", "roe_ref": 14, "why": "AirPods声学独家+Vision Pro供应商"},
+            {"code": "601138", "name": "鹏鼎控股", "env": "FPC软板(毛利率20-25%)", "roe_ref": 16, "why": "苹果FPC最大供应商，AI手机内部连接升级"},
+        ],
+        "a_avoid": "低端组装代工（毛利率<8%）：富士康等利润极薄，非LDS选股逻辑",
+    },
+
+    # ═══ 核心链15: 新能源汽车（宽体：整车+三电+智驾）═══
+    {
+        "name": "新能源汽车", "key_players": "比亚迪→宁德时代→小鹏",
+        "lead_ticker": "TSLA", "support_tickers": ["LI", "NIO"],
+        "all_tickers": ["TSLA", "LI", "NIO", "XPEV"],
+        "is_conditional": True,
+        "hist_doubling_pe": 25, "prev_doubling": "比亚迪 2020→2022: ¥25→¥350, 历时24月（新能源渗透率5%→25%）",
+        "supply": "比亚迪年产能500万+；宁德全球份额37%；智驾算法：华为ADS/小鹏XNGP/特斯拉FSD",
+        "demand": "全球新能源渗透率~25%→40%+；智驾渗透率从10%→40%（2027E）；出海东南亚/欧洲",
+        "gap_pct": 0, "gap_direction": "整车收窄（产能过剩）| 智驾扩大（渗透率仍低）",
+        "catalysts": ["特斯拉FSD入华时间表", "比亚迪海外工厂投产", "宁德固态电池量产", "华为ADS渗透率数据"],
+        "assumption_hold": ["全球新能源渗透率持续提升", "比亚迪出海不遭遇重大关税", "智驾商业化模式成立"],
+        "assumption_break": "欧美对中国新能源车加征50%+关税→比亚迪海外增速腰斩；整车价格战持续→全行业利润率趋零",
+        "perez_stage": "synergy→maturity过渡—整车成熟，智驾S2爆发", "profit_pool": "migrating—从整车→智驾/电池上游迁移，整车利润池承压",
+        "dcf_tv": "比亚迪PE 18-25x（合理）；宁德PE 15-20x（合理）；智驾标的PE 40-80x（成长溢价）",
+        "mianji_refs": "E126(三周期嵌套=新能源是朱格拉周期), E42(周期逆向=出清后买), E7/E84(链定位=买智驾不买组装)",
+        "a_profit_pool": [
+            {"code": "002594", "name": "比亚迪",   "env": "整车+电池(毛利率18-22%)", "roe_ref": 20, "why": "行业贝塔，全球销量第一，出海逻辑最强"},
+            {"code": "300750", "name": "宁德时代", "env": "动力电池(毛利率22-28%)", "roe_ref": 16, "why": "全球电池份额37%，储能+海外是增量"},
+            {"code": "002459", "name": "晶澳科技", "env": "智驾域控(毛利率40-50%)", "roe_ref": 14, "why": "智驾域控国内TOP3，利润率高于整车"},
+        ],
+        "a_avoid": "上游锂/正极材料（产能严重过剩，价格战利润崩塌）",
+    },
 ]
 
 # ═══════════════════════════════════
@@ -1095,8 +1217,20 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
             return
     
     if not a_picks:
-        w.write(doc_id, [("text", "⚠️ 无入选（数据缺失）")])
-        return
+        # fallback：直接从 WATCHLIST 核心票展示技术信号
+        from investment_system.domain import WATCHLIST
+        a_picks = [
+            {"symbol": code, "name": info.get("name", code),
+             "score": 0, "sector": info.get("chain", ""),
+             "tier": info.get("tier", "")}
+            for code, info in WATCHLIST.items()
+            if code.isdigit() and info.get("tier") in ("核心", "底仓")
+        ][:12]
+        if a_picks:
+            w.write(doc_id, [("text", "⚠️ 因子扫描数据不足，展示观察池核心A股票（技术信号为主）")])
+        else:
+            w.write(doc_id, [("text", "⚠️ A股数据暂不可用")])
+            return
     
     from investment_system.output.concept_engine import get_engine
     engine = get_engine()
@@ -1805,11 +1939,44 @@ def build_news_section(w, doc_id):
 # ═══════════════════════════════════
 def build_tracking_section(w, doc_id, scanner, macro):
     w.write(doc_id, [("divider", ""), ("h2", "七、👀 重点票追踪")])
-    w.write(doc_id, [("text", "（持仓池需从外部配置加载，当前为模板结构）")])
-    w.write(doc_id, [
-        ("bullet", "提示：在 config.py 或外部文件中维护持仓清单，本板块自动刷新价格和关键信号"),
-        ("text", w.ref("五、风控监控·四重确认")),
-    ])
+    try:
+        from investment_system.output.shadow_account import get_shadow_summary, check_stops
+        summary = get_shadow_summary()
+        positions = summary.get("positions", [])
+        alerts = check_stops()
+        alert_symbols = {a["symbol"] for a in alerts}
+
+        if not positions:
+            w.write(doc_id, [("text", "📭 模拟盘暂无持仓 — 使用 shadow_account.entry() 记录交易")])
+        else:
+            w.write(doc_id, [("bold", f"持仓 {len(positions)} 只 | 总估值 ¥{summary.get('total_value', 0):,.0f}")])
+            for pos in positions:
+                sym = pos["symbol"]
+                name = pos.get("name", sym)
+                entry_p = pos.get("entry", 0)
+                current_p = pos.get("current", entry_p)
+                chg = pos.get("change", 0)
+                stop = entry_p * 0.92
+                t1 = entry_p * 1.15
+                t2 = entry_p * 1.30
+                status = pos.get("status", "")
+                alert_tag = " 🚨止损!" if sym in alert_symbols else ""
+                w.write(doc_id, [("bullet",
+                    f"{status}{alert_tag} {name}({sym}) 买入¥{entry_p:.2f} → 现¥{current_p:.2f} "
+                    f"({chg:+.1f}%) | 止损¥{stop:.2f} | 止盈¥{t1:.2f}/¥{t2:.2f}"
+                )])
+
+        if alerts:
+            w.write(doc_id, [("bold", f"⚠️ 触发信号 {len(alerts)} 条：")])
+            for a in alerts:
+                kind = "🔴 止损" if a["type"] == "STOP_LOSS" else "🟡 止盈T1" if a["type"] == "TAKE_PROFIT_T1" else "🟢 止盈T2"
+                val = a.get("loss") or a.get("profit", 0)
+                w.write(doc_id, [("bullet", f"{kind} {a['name']}({a['symbol']}) 浮{val:+.1f}%")])
+
+    except Exception as e:
+        w.write(doc_id, [("text", f"⚠️ 持仓追踪加载失败: {str(e)[:60]}")])
+
+    w.write(doc_id, [("text", w.ref("五、风控监控·四重确认"))])
 
 # ═══════════════════════════════════
 # 板块 8: 调仓建议

@@ -201,8 +201,11 @@ class FactorScanner:
             daily = get_stock_daily(symbol, 180)
             if daily.empty:
                 return {"symbol": symbol, "score": 0, "error": "no_data"}
-
-            fin = get_financial_report(symbol)
+            fin = {}
+            try:
+                fin = get_financial_report(symbol) or {}
+            except Exception:
+                pass
             close = daily["close"] if "close" in daily.columns else daily.iloc[:, 4]
 
             # 6因子评分
