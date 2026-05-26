@@ -526,6 +526,67 @@ def _fetch_caixin_rss() -> List[Dict]:
     return items
 
 
+def _fetch_cls_flash() -> List[Dict]:
+    try:
+        import akshare as ak
+        df = ak.stock_info_global_cls(symbol="重点")
+        if df is None or df.empty:
+            return []
+        items = []
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        for _, row in df.iterrows():
+            title = str(row.get("标题", "") or row.get("内容", ""))
+            content = str(row.get("内容", ""))
+            if not title or len(title) < 5:
+                continue
+            pub = str(row.get("发布时间", "") or row.get("发布日期", "") or now_str)
+            items.append({
+                "title": _clean_title(title),
+                "description": content[:300],
+                "url": "",
+                "pub_date": pub,
+                "source_name": "财联社",
+                "category": "中国市场",
+                "lang": "zh",
+                "hotness": 2,
+            })
+        print(f"  [财联社] → {len(items)} 条")
+        return items
+    except Exception as e:
+        print(f"  [财联社] 获取失败: {e}")
+        return []
+
+
+def _fetch_sina_flash() -> List[Dict]:
+    try:
+        import akshare as ak
+        df = ak.stock_info_global_sina()
+        if df is None or df.empty:
+            return []
+        items = []
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        for _, row in df.iterrows():
+            content = str(row.get("内容", "") or row.get("标题", ""))
+            if not content or len(content) < 10:
+                continue
+            pub = str(row.get("时间", now_str))
+            items.append({
+                "title": _clean_title(content[:150]),
+                "description": content[:300],
+                "url": "",
+                "pub_date": pub,
+                "source_name": "新浪财经",
+                "category": "全球宏观",
+                "lang": "zh",
+                "hotness": 1,
+            })
+        print(f"  [新浪财经] → {len(items)} 条")
+        return items
+    except Exception as e:
+        print(f"  [新浪财经] 获取失败: {e}")
+        return []
+
+
 # ═══════════════════════════════════════════════════════════════
 # 第2部分：去重+排序
 # ═══════════════════════════════════════════════════════════════
@@ -1060,7 +1121,7 @@ def fetch_news(
     window_days: int = NEWS_WINDOW_DAYS,
 ) -> List[Dict]:
     if sources is None:
-        sources = ["google", "xueqiu", "caixin"]
+        sources = ["google", "xueqiu", "caixin", "cls", "sina"]
 
     all_items = []
 
@@ -1078,6 +1139,16 @@ def fetch_news(
     if "caixin" in sources:
         print("[新闻引擎] 抓取财新RSS...")
         items = _fetch_caixin_rss()
+        all_items.extend(items)
+
+    if "cls" in sources:
+        print("[新闻引擎] 抓取财联社重点电报...")
+        items = _fetch_cls_flash()
+        all_items.extend(items)
+
+    if "sina" in sources:
+        print("[新闻引擎] 抓取新浪财经快讯...")
+        items = _fetch_sina_flash()
         all_items.extend(items)
 
     print(f"[新闻引擎] 原始抓取: {len(all_items)} 条")

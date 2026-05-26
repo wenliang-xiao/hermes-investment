@@ -227,7 +227,20 @@ try:
             for _, line in core_no_signal[:10]:
                 w.write(doc_id, [('bullet', line)])
 
+        anomaly_stocks_for_news = []
+        for code, info in WATCHLIST.items():
+            pd_info = prices.get(code, {})
+            chg_val = pd_info.get("chg")
+            if chg_val is not None and abs(chg_val) >= 5:
+                anomaly_stocks_for_news.append({
+                    "symbol": code,
+                    "name": info.get("name", code),
+                    "chg": chg_val,
+                    "price": pd_info.get("price"),
+                })
+
     except Exception as e:
+        anomaly_stocks_for_news = []
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
@@ -284,16 +297,35 @@ try:
         w.write(doc_id, [('text', "⚠️ 周报尚未生成，请先运行 run_weekly.py")])
     log("Chain hooks done")
 
-    # ─── 板块5：今日情报摘要 ───
+    # ─── 板块5：今日情报（异动解读优先）───
     w.write(doc_id, [('divider', ''), ('h2', '📰 五、今日情报')])
-    w.write(doc_id, [('quote', '事件影响分析 — 只写改变持仓/候选判断的事件')])
+
+    anomaly_results = []
+    if anomaly_stocks_for_news:
+        w.write(doc_id, [('quote', f"发现 {len(anomaly_stocks_for_news)} 只异动股（≥5%），正在搜索驱动因素...")])
+        try:
+            from investment_system.analysis.anomaly_news import (
+                analyze_anomaly_stocks, format_anomaly_analysis_for_report
+            )
+            anomaly_results = analyze_anomaly_stocks(anomaly_stocks_for_news)
+            lines = format_anomaly_analysis_for_report(anomaly_results)
+            for block_type, content in lines:
+                w.write(doc_id, [(block_type, content)])
+            log(f"Anomaly analysis done: {len(anomaly_results)} stocks")
+        except Exception as e:
+            w.write(doc_id, [('bullet', f"⚠️ 异动分析失败: {str(e)[:80]}")])
+            log(f"Anomaly analysis failed: {e}")
+    else:
+        w.write(doc_id, [('quote', '今日观察池无≥5%异动，展示常规市场情报')])
 
     if summary_text and len(summary_text.strip()) > 50:
-        for line in summary_text.strip().split('\n')[:15]:
+        w.write(doc_id, [('bold', '📡 市场情报（AI分析）')])
+        for line in summary_text.strip().split('\n')[:12]:
             line = line.strip()
             if line:
                 w.write(doc_id, [('bullet', line[:250])])
-    else:
+    elif news_list:
+        w.write(doc_id, [('bold', '📡 今日快讯')])
         for n in sorted(news_list, key=lambda x: len(x.get('impacts', [])), reverse=True)[:5]:
             title = n.get('title', '')
             if not title or len(title) < 10: continue
