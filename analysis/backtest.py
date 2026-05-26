@@ -384,6 +384,8 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                         if len(curr_idx) > 0:
                             entry_prices[sym] = float(price_data[sym].loc[curr_idx[-1], "close"])
                 holdings = new_holdings
+                TRADE_COST = 0.002
+                portfolio_value.iloc[i - 1] *= (1 - TRADE_COST * (len(entered) + len(exited)) / max(PORTFOLIO_MAX_POSITIONS, 1))
 
         if not holdings:
             portfolio_value.iloc[i] = portfolio_value.iloc[i - 1]
@@ -473,8 +475,21 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
         bm_df = price_data["000300"]
         benchmark = bm_df["close"] / bm_df["close"].iloc[0]
 
-    print("[backtest] 生成因子评分...")
-    factor_scores = generate_mock_factor_scores(symbols, start, end, price_data)
+    print("[backtest] 加载/重建因子评分...")
+    try:
+        from investment_system.analysis.score_history import (
+            load_scores_range, build_historical_scores_from_prices
+        )
+        factor_scores = load_scores_range(start, end)
+        coverage = len(factor_scores)
+        print(f"[backtest] 历史快照加载: {coverage} 个交易日")
+        if coverage < 10:
+            print("[backtest] 历史快照不足，改用价格重建因子分（D-lite）...")
+            factor_scores = build_historical_scores_from_prices(symbols, price_data, start, end)
+            print(f"[backtest] D-lite重建完成: {len(factor_scores)} 个截面")
+    except Exception as e:
+        print(f"[backtest] 因子分加载失败({e})，fallback到模拟分...")
+        factor_scores = generate_mock_factor_scores(symbols, start, end, price_data)
 
     print("[backtest] 策略一：多因子选股...")
     r1 = run_multifactor_stock(price_data, factor_scores, start, end, benchmark, False)
@@ -483,7 +498,14 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
     r2 = run_allweather(price_data, start, end, benchmark)
 
     print("[backtest] 策略三：多因子+双门控制...")
-    gate_series = pd.Series(1, index=pd.date_range(start, end, freq="B"))
+    try:
+        from investment_system.analysis.score_history import load_macro_gate_series
+        gate_series = load_macro_gate_series(start, end)
+        closed_pct = (gate_series == 0).mean()
+        print(f"[backtest] 双门历史: 关闭{closed_pct:.1%}时间")
+    except Exception as e:
+        print(f"[backtest] 双门历史加载失败({e})，fallback到全开...")
+        gate_series = pd.Series(1, index=pd.date_range(start, end, freq="B"))
     r3 = run_multifactor_stock(price_data, factor_scores, start, end, benchmark, True, gate_series)
 
     return [r1, r2, r3]

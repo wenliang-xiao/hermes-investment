@@ -216,6 +216,20 @@ try:
     dt = time.time() - t0
     log(f"Total: {dt:.1f}s")
 
+    try:
+        from investment_system.analysis.score_history import save_scores, save_macro_gate
+        today_str = time.strftime('%Y-%m-%d')
+        scored = scanner.scan_market(top_n=60)
+        score_snapshot = {s["symbol"]: s["score"] for s in scored if not s.get("error")}
+        if score_snapshot:
+            save_scores(today_str, score_snapshot)
+            log(f"因子分快照已保存: {len(score_snapshot)} 只 ({today_str})")
+        dg = macro.get("dual_gate", {})
+        save_macro_gate(today_str, dg.get("macro_gate", "?"), dg.get("trend_gate", "?"))
+        log(f"双门状态已保存: {dg.get('macro_gate','?')}+{dg.get('trend_gate','?')}")
+    except Exception as e:
+        log(f"因子分/双门快照保存失败(不影响报告): {e}")
+
     # ═══ 写入链摘要供日报引用 ═══
     chain_summary = {
         "generated_at": time.strftime('%Y-%m-%d %H:%M'),
