@@ -61,8 +61,8 @@ class FactorScanner:
         # ROE权重最高，营收增速辅助，现金流保底
         return round(s_roe * 0.5 + s_rev * 0.25 + s_oc * 0.25, 1)
 
-    def calc_value_score(self, daily: pd.DataFrame) -> float:
-        """价值因子：PE分位 + PB估值"""
+    def calc_value_score(self, daily: pd.DataFrame, symbol: str = "") -> float:
+        """价值因子：PE历史百分位（面基原典：PE分位<30%才算便宜）+ PB"""
         if daily.empty:
             return 5.0
         pe = daily.iloc[-1].get("pe") if "pe" in daily.columns else None
@@ -70,25 +70,51 @@ class FactorScanner:
         pe = abs(pe) if pe and pe > 0 else None
         pb = abs(pb) if pb and pb > 0 else None
 
-        # A股典型PE: 10-40, PB: 0.8-5
-        s_pe = self._bounded_linear_score(pe, (10, 40)) if pe else 5.0
-        # 反向：PE越低越有价值
-        s_pe = 10 - s_pe + 1
+        if pe and symbol:
+            try:
+                from investment_system.data.data_layer import calc_pe_percentile
+                pct_info = calc_pe_percentile(symbol, float(pe), years=5)
+                pct = pct_info.get("percentile")
+                if pct is not None:
+                    s_pe = self._bounded_linear_score(100 - pct, (0, 100))
+                else:
+                    s_pe = self._bounded_linear_score(pe, (10, 40))
+                    s_pe = 10 - s_pe + 1
+            except Exception:
+                s_pe = self._bounded_linear_score(pe, (10, 40))
+                s_pe = 10 - s_pe + 1
+        elif pe:
+            s_pe = self._bounded_linear_score(pe, (10, 40))
+            s_pe = 10 - s_pe + 1
+        else:
+            s_pe = 5.0
 
         s_pb = self._bounded_linear_score(pb, (0.8, 5)) if pb else 5.0
-        s_pb = 10 - s_pb + 1  # PB越低越好
+        s_pb = 10 - s_pb + 1
 
         return round(s_pe * 0.6 + s_pb * 0.4, 1)
 
-    def calc_growth_score(self, fin: dict) -> float:
-        """成长因子：营收增速+利润增速（data_layer已输出百分比）"""
+    def calc_growth_score(self, fin: dict, fin_hist: list = None) -> float:
+        """成长因子：营收增速+利润增速+增速加速度（面基：增速加速度>0=肥美期）"""
         rev = abs(fin.get("营业收入同比增长率", 0) or 0)
         profit = abs(fin.get("净利润同比增长率", 0) or 0)
 
         s_rev = self._bounded_linear_score(rev, (0, 60))
         s_profit = self._bounded_linear_score(profit, (0, 80))
+        base = s_rev * 0.4 + s_profit * 0.6
 
-        return round(s_rev * 0.4 + s_profit * 0.6, 1)
+        acceleration_bonus = 0.0
+        if fin_hist and len(fin_hist) >= 2:
+            try:
+                roes = [h.get("roe") for h in fin_hist[:3] if h.get("roe") is not None]
+                if len(roes) >= 2 and roes[0] > roes[1]:
+                    acceleration_bonus = 0.8
+                elif len(roes) >= 2 and roes[0] < roes[1]:
+                    acceleration_bonus = -0.5
+            except Exception:
+                pass
+
+        return round(min(10, max(1, base + acceleration_bonus)), 1)
 
     def calc_lowvol_score(self, close_series: pd.Series) -> float:
         """低波因子：20日波动率 ← 越低越好"""
@@ -208,16 +234,20 @@ class FactorScanner:
                 pass
             close = daily["close"] if "close" in daily.columns else daily.iloc[:, 4]
 
-            # 6因子评分
+            fin_hist_early = []
+            try:
+                fin_hist_early = get_financial_history(symbol, quarters=4)
+            except Exception:
+                pass
+
             quality = self.calc_quality_score(fin)
-            value = self.calc_value_score(daily)
-            growth = self.calc_growth_score(fin)
+            value = self.calc_value_score(daily, symbol=symbol)
+            growth = self.calc_growth_score(fin, fin_hist=fin_hist_early)
             lowvol = self.calc_lowvol_score(close)
             div = self.calc_dividend_score(fin)
             momentum = self.calc_momentum_score(close)
             tech = self.calc_technical_score(daily)
 
-            # 加权综合（权重来自宏观状态）
             total_score = (
                 self.weights["质量"] * quality +
                 self.weights["价值"] * value +
@@ -227,9 +257,11 @@ class FactorScanner:
                 self.weights["动量"] * momentum
             )
 
-            # LDS技术加成（最多+1分）
             tech_bonus = max(0, (tech["total_tech_score"] - 5) * 0.2)
             total_score = min(10, total_score + tech_bonus)
+
+            perez_multiplier = self._get_perez_multiplier(symbol)
+            total_score = min(10, total_score * perez_multiplier)
 
             last_row = daily.iloc[-1]
             pe_val = last_row.get("pe") if "pe" in daily.columns else None
@@ -253,23 +285,22 @@ class FactorScanner:
             except Exception:
                 pass
 
-            # ROE 趋势 + FCF（最近4季）
             roe_trend = None
             latest_fcf = None
             try:
-                fin_hist = get_financial_history(symbol, quarters=4)
-                if len(fin_hist) >= 2:
-                    roes = [h["roe"] for h in fin_hist if h.get("roe") is not None]
+                if len(fin_hist_early) >= 2:
+                    roes = [h["roe"] for h in fin_hist_early if h.get("roe") is not None]
                     if len(roes) >= 2:
                         roe_trend = round(roes[0] - roes[-1], 1)
-                if fin_hist and fin_hist[0].get("fcf") is not None:
-                    latest_fcf = fin_hist[0]["fcf"]
+                if fin_hist_early and fin_hist_early[0].get("fcf") is not None:
+                    latest_fcf = fin_hist_early[0]["fcf"]
             except Exception:
                 pass
 
             return {
                 "symbol": symbol,
                 "score": round(total_score, 2),
+                "perez_multiplier": perez_multiplier,
                 "factors": {
                     "质量": quality, "价值": value, "成长": growth,
                     "低波": lowvol, "红利": div, "动量": momentum,
@@ -291,6 +322,34 @@ class FactorScanner:
             }
         except Exception as e:
             return {"symbol": symbol, "score": 0, "error": str(e)[:100]}
+
+    def _get_perez_multiplier(self, symbol: str) -> float:
+        """
+        LDS逻辑门：根据股票所在产业链的Perez阶段返回评分乘数。
+        展开期前段（渗透率<30%+加速度>0）= 黄金期，乘数最高。
+        成熟期/衰退期 = 降权，避免买进利润池已经在收缩的链。
+        """
+        PEREZ_MULTIPLIERS = {
+            "导入":  1.10,
+            "狂热":  1.05,
+            "展开":  1.15,
+            "协同":  1.00,
+            "成熟":  0.90,
+            "衰退":  0.75,
+            "沉寂":  0.60,
+        }
+        try:
+            from investment_system.config import INDUSTRY_CHAINS
+            for chain_name, chain_data in INDUSTRY_CHAINS.items():
+                if symbol in chain_data.get("symbols", []):
+                    perez = chain_data.get("perez_stage", "")
+                    for key, mult in PEREZ_MULTIPLIERS.items():
+                        if key in perez:
+                            return mult
+                    break
+        except Exception:
+            pass
+        return 1.0
 
     def _calc_chg(self, df):
         if df.empty or len(df) < 2:
