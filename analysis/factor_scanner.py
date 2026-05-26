@@ -11,8 +11,8 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from . import config
-from .data_layer import (get_stock_daily, get_financial_report,
+from investment_system import config
+from investment_system.data.data_layer import (get_stock_daily, get_financial_report,
                          get_financial_history, calc_pe_percentile, get_volume_signal)
 
 
@@ -302,7 +302,7 @@ class FactorScanner:
         """排序分位法全市场扫描 — LDS宏观→板块→个股
         板块轮抽：每个板块取N只，确保行业覆盖均衡。
         评分排序后取top_n。"""
-        from .stock_universe import ALL_LDS_STOCKS, get_stocks_for_macro, LDS_SECTORS, INDEX_DATA, MACRO_TO_SECTORS
+        from investment_system.domain.stock_universe import ALL_LDS_STOCKS, get_stocks_for_macro, LDS_SECTORS, INDEX_DATA, MACRO_TO_SECTORS
         
         # 获取当前宏观状态
         regime = self.macro.regime if self.macro and hasattr(self.macro, 'regime') else "default"
@@ -364,7 +364,7 @@ class FactorScanner:
 
     def _get_stock_sector(self, symbol: str) -> str:
         """查询股票所属LDS板块"""
-        from .stock_universe import LDS_SECTORS
+        from investment_system.domain.stock_universe import LDS_SECTORS
         for sector_name, stocks in LDS_SECTORS.items():
             if symbol in stocks:
                 return sector_name

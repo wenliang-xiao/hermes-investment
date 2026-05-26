@@ -2,9 +2,9 @@
 持仓监控引擎 — 偏离追踪+再平衡信号+风控检查
 """
 from datetime import datetime
-from . import config
-from .data_layer import get_stock_daily
-from .stock_analyzer import StockAnalyzer
+from investment_system import config
+from investment_system.data.data_layer import get_stock_daily
+from investment_system.scripts.stock_analyzer import StockAnalyzer
 
 
 class PortfolioMonitor:

@@ -16,7 +16,7 @@ import urllib.error
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 
-from .config import (
+from investment_system.config import (
     DATA_DIR, FX_PAIRS, BOND_MARKETS, GLOBAL_INDICES,
     HK_WATCHLIST, US_WATCHLIST, A_SHARE_ETF_WATCHLIST,
     REAL_ESTATE_WATCHLIST as REAL_ESTATE,

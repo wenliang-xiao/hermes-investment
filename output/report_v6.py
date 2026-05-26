@@ -27,20 +27,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from investment_system import config as cfg
-from investment_system.data_layer import (
+from investment_system.data.data_layer import (
     get_stock_daily, get_financial_report, get_macro_data,
     get_market_overview, get_sector_hotmap, get_concept_hotmap
 )
-from investment_system.factor_scanner import FactorScanner
-from investment_system.stock_universe import LDS_SECTORS, MACRO_TO_SECTORS, INDEX_DATA
-from investment_system.macro_engine import MacroEngine
+from investment_system.analysis.factor_scanner import FactorScanner
+from investment_system.domain.stock_universe import LDS_SECTORS, MACRO_TO_SECTORS, INDEX_DATA
+from investment_system.analysis.macro_engine import MacroEngine
 
-from investment_system.yf_data_layer import (
+from investment_system.data.yf_data_layer import (
     get_global_market_snapshot, score_stock, get_current_price,
     scan_us_stocks, scan_hk_stocks, scan_us_etfs,
     get_factor_data
 )
-from investment_system.global_universe import (
+from investment_system.data.global_universe import (
     ALL_US_STOCKS, US_CHAINS, US_ETFS, HK_WATCHLIST_V2,
     COMMODITIES_V2, FX_V2, BONDS_V2
 )
@@ -194,7 +194,7 @@ def build_gate_section(w, doc_id, macro):
         us10y_val = None
         cn10y_val = None
         try:
-            from investment_system.yf_data_layer import get_current_price
+            from investment_system.data.yf_data_layer import get_current_price
             us10y_raw = get_current_price("^TNX")
             if isinstance(us10y_raw, (int, float)) and 0 < us10y_raw < 15:
                 us10y_val = round(float(us10y_raw), 2)
@@ -249,7 +249,7 @@ def build_gate_section(w, doc_id, macro):
 # ═══════════════════════════════════
 def build_market_snapshot(w, doc_id):
     """一、全球市场全景 — 统一使用 full_asset_scanner 数据源（有价格校验）"""
-    from investment_system.full_asset_scanner import (
+    from investment_system.output.full_asset_scanner import (
         scan_commodities as _fas_comm, scan_fx as _fas_fx, scan_bonds as _fas_bonds
     )
     fas_comm = _fas_comm()
@@ -299,7 +299,7 @@ def build_market_snapshot(w, doc_id):
         w.write(doc_id, [("bullet", "VIX: ⚠️ 获取失败")])
 
     try:
-        from investment_system.data_layer import get_northbound_flow
+        from investment_system.data.data_layer import get_northbound_flow
         nb = get_northbound_flow()
         if nb.get("data_ok"):
             today_net = nb.get("today_net", 0)
@@ -358,7 +358,7 @@ def _get_lds_component_prices():
     results = {}
     for name, sym in lds_map.items():
         try:
-            from investment_system.yf_data_layer import get_current_price, get_price_data
+            from investment_system.data.yf_data_layer import get_current_price, get_price_data
             price = get_current_price(sym)
             df = get_price_data(sym, period="5d")
             chg = None
@@ -667,7 +667,7 @@ def _fetch_chain_ticker_data(cfg, live_data_cache):
             continue
         # 跳过港股A股代码（纯数字或含.HK/.SS/.SZ），这些用yfinance格式也能拉但可能失败
         try:
-            from investment_system.yf_data_layer import get_factor_data, get_current_price
+            from investment_system.data.yf_data_layer import get_factor_data, get_current_price
             fd = get_factor_data(t)
             price = get_current_price(t)
             if fd and "error" not in fd:
@@ -811,7 +811,7 @@ def build_chain_section(w, doc_id, scanner, macro):
     else:
         w.write(doc_id, [("quote", "E7 董艺婷：不是买好公司，是买利润率最高的环节。E94 Perez：盯住技术漫化阶段。E155 五层蛋糕：Capex→HALO→用户→应用→设备。")])
 
-    from investment_system.concept_engine import ConceptEngine, ChainSnapshot, StockSnapshot
+    from investment_system.output.concept_engine import ConceptEngine, ChainSnapshot, StockSnapshot
     engine = ConceptEngine()
 
     favored = macro.get("favored_sectors", [])
@@ -843,7 +843,7 @@ def build_chain_section(w, doc_id, scanner, macro):
     live_data_cache = {}  # 全局缓存
     fetch_ok = False
     try:
-        from investment_system.yf_data_layer import get_factor_data, get_current_price
+        from investment_system.data.yf_data_layer import get_factor_data, get_current_price
         for t in all_tickers_set:
             if t in live_data_cache:
                 continue
@@ -1059,7 +1059,7 @@ def _build_single_chain_analysis(w, doc_id, cfg, live_data_cache, favored, regim
             roe_str = f"ROE参考~{roe_ref}%" if roe_ref else ""
             price_info = ""
             try:
-                from investment_system.data_layer import get_stock_daily
+                from investment_system.data.data_layer import get_stock_daily
                 d = get_stock_daily(code, 3)
                 if not d.empty:
                     px = float(d.iloc[-1]["close"])
@@ -1098,7 +1098,7 @@ def _build_a_channel(w, doc_id, scanner, exclude_sectors=None):
         w.write(doc_id, [("text", "⚠️ 无入选（数据缺失）")])
         return
     
-    from investment_system.concept_engine import get_engine
+    from investment_system.output.concept_engine import get_engine
     engine = get_engine()
     
     filtered_count = 0
@@ -1200,7 +1200,7 @@ def _build_a_smallmid_channel(w, doc_id, scanner, exclude_sectors=None):
         # 尝试从data_layer获取市值
         mkt_cap = None
         try:
-            from investment_system.data_layer import get_stock_daily
+            from investment_system.data.data_layer import get_stock_daily
             daily = get_stock_daily(symbol, 20)
             if not daily.empty and "close" in daily.columns and len(daily) >= 5:
                 avg_vol = daily.get("volume", pd.Series()).tail(5).mean() if "volume" in daily.columns else 0
@@ -1242,7 +1242,7 @@ def _build_us_channel(w, doc_id):
     """美股 Top Picks — 独立因子通道（ROE/盈利动量/Nick四问/空头/PE折价）"""
     w.write(doc_id, [("h3", "🇺🇸 美股 Top Picks（ROE/盈利动量/Nick四问/PE折价）")])
     
-    from investment_system.concept_engine import ConceptEngine, StockSnapshot, get_engine
+    from investment_system.output.concept_engine import ConceptEngine, StockSnapshot, get_engine
     engine = get_engine()
     
     try:
@@ -1295,7 +1295,7 @@ def _build_hk_channel(w, doc_id):
     """港股 Top Picks — 跨境PE折价+南向资金+地缘风险溢价"""
     w.write(doc_id, [("h3", "🇭🇰 港股 Top Picks（跨境PE折价+南向资金+地缘风险溢价）")])
     
-    from investment_system.concept_engine import ConceptEngine, StockSnapshot, get_engine
+    from investment_system.output.concept_engine import ConceptEngine, StockSnapshot, get_engine
     engine = get_engine()
     
     try:
@@ -1471,7 +1471,7 @@ def _fetch_watchlist_prices(codes: list) -> dict:
 
     if other_codes:
         try:
-            from .yf_data_layer import get_current_price
+            from investment_system.data.yf_data_layer import get_current_price
             import time
             for code in other_codes[:15]:
                 try:
@@ -1489,7 +1489,7 @@ def _fetch_watchlist_prices(codes: list) -> dict:
 
 def _build_watchlist_section(w, doc_id):
     try:
-        from . import config as _cfg
+        from investment_system import config as _cfg
         watchlist = getattr(_cfg, "WATCHLIST", {})
         if not watchlist:
             return
@@ -1550,7 +1550,7 @@ def _build_watchlist_section(w, doc_id):
 
 def _build_opportunity_themes_section(w, doc_id):
     try:
-        from . import config as _cfg
+        from investment_system import config as _cfg
         themes = getattr(_cfg, "OPPORTUNITY_THEMES", {})
         if not themes:
             return
@@ -1730,7 +1730,7 @@ def build_news_section(w, doc_id):
     
     news_items = []
     try:
-        from investment_system.news_fetcher import fetch_news
+        from investment_system.domain.news_fetcher import fetch_news
         news = fetch_news()
         if news and news.get("items"):
             news_items = news.get("items", [])
@@ -1887,7 +1887,7 @@ def _get_market_state():
     """获取当前市场状态用于概念动态激活"""
     state = {"cpi": None, "trend": "?", "guoyun_deviation": None}
     try:
-        from investment_system.macro_engine import MacroEngine
+        from investment_system.analysis.macro_engine import MacroEngine
         me = MacroEngine()
         macro = me.refresh()
         md = macro.get("macro_data", {})
@@ -1903,14 +1903,14 @@ def _scan_high_pe_low_growth(engine):
     """扫描PE>60且增速<15%的票（E105及早离去信号）"""
     warning_list = []
     try:
-        from investment_system.yf_data_layer import scan_us_stocks
+        from investment_system.data.yf_data_layer import scan_us_stocks
         us = scan_us_stocks(max_stocks=30)
         for p in us[:15]:
             pe = p.get("pe")
             # 尝试获取增速
             fd = None
             try:
-                from investment_system.yf_data_layer import get_factor_data
+                from investment_system.data.yf_data_layer import get_factor_data
                 fd = get_factor_data(p.get("symbol", ""))
             except Exception:
                 pass
@@ -1931,7 +1931,7 @@ def _scan_big_rally_stocks(engine):
 def build_concept_section(w, doc_id):
     w.write(doc_id, [("divider", ""), ("h2", "九、📖 今日面基概念")])
     
-    from investment_system.concept_engine import ConceptEngine, MacroSnapshot, get_engine
+    from investment_system.output.concept_engine import ConceptEngine, MacroSnapshot, get_engine
     engine = get_engine()
     
     # ── 获取市场状态 ──

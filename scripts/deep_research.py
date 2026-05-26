@@ -26,8 +26,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from investment_system.yf_data_layer import get_stock_info, get_factor_data, get_price_data, get_current_price
-from investment_system.global_universe import ALL_US_STOCKS, HK_WATCHLIST_V2, US_CHAINS
+from investment_system.data.yf_data_layer import get_stock_info, get_factor_data, get_price_data, get_current_price
+from investment_system.data.global_universe import ALL_US_STOCKS, HK_WATCHLIST_V2, US_CHAINS
 
 # ═══════════════════════════════════
 # 飞书文档工具 (复用 v6 的)

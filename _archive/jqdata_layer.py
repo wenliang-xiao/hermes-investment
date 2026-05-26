@@ -34,7 +34,7 @@ def _jq_auth() -> bool:
         pwd = os.environ.get("JQDATA_PASS", "")
         if not user or not pwd:
             try:
-                from . import config as _cfg
+                from investment_system import config as _cfg
                 user = getattr(_cfg, "JQDATA_USER", "")
                 pwd = getattr(_cfg, "JQDATA_PASS", "")
             except Exception:

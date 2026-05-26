@@ -36,7 +36,7 @@ def _ts_init():
         token = os.environ.get("TUSHARE_TOKEN", "")
         if not token:
             try:
-                from . import config as _cfg
+                from investment_system import config as _cfg
                 token = getattr(_cfg, "TUSHARE_TOKEN", "")
             except Exception:
                 pass
@@ -296,7 +296,7 @@ def get_northbound_flow_ts() -> dict:
         flow_5d = df["north_money"].head(5).sum()
         flow_20d = df["north_money"].head(20).sum()
 
-        from . import config as _cfg
+        from investment_system import config as _cfg
         cfg = _cfg.NORTHBOUND_CONFIG
         if today_net >= cfg["strong_inflow_daily"]:
             signal = "🟢 强力流入"

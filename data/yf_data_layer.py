@@ -294,7 +294,7 @@ def score_stock(symbol: str, name: str = "", chain_info: dict = None) -> dict:
 
 def scan_us_stocks(chain_filter: str = None, max_stocks: int = 50) -> list:
     """扫描美股选票池，返回因子评分排序"""
-    from .global_universe import ALL_US_STOCKS, US_CHAINS, US_ETFS
+    from investment_system.data.global_universe import ALL_US_STOCKS, US_CHAINS, US_ETFS
     
     candidates = {}
     if chain_filter and chain_filter in US_CHAINS:
@@ -320,7 +320,7 @@ def scan_us_stocks(chain_filter: str = None, max_stocks: int = 50) -> list:
 
 def scan_hk_stocks(max_stocks: int = 24) -> list:
     """扫描港股权重池"""
-    from .global_universe import HK_WATCHLIST_V2
+    from investment_system.data.global_universe import HK_WATCHLIST_V2
     
     results = []
     count = 0
@@ -339,7 +339,7 @@ def scan_hk_stocks(max_stocks: int = 24) -> list:
 
 def scan_us_etfs(max_etfs: int = 22) -> list:
     """扫描美股ETF"""
-    from .global_universe import US_ETFS
+    from investment_system.data.global_universe import US_ETFS
     
     results = []
     for sym, info in US_ETFS.items():
@@ -376,7 +376,7 @@ def scan_us_etfs(max_etfs: int = 22) -> list:
 
 def scan_commodities_fx_bonds() -> dict:
     """扫描大宗商品/汇率/债券/情绪"""
-    from .global_universe import COMMODITIES_V2, FX_V2, BONDS_V2, SENTIMENT_V2
+    from investment_system.data.global_universe import COMMODITIES_V2, FX_V2, BONDS_V2, SENTIMENT_V2
     
     results = {"commodities": [], "fx": [], "bonds": [], "sentiment": []}
     

@@ -12,9 +12,9 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from . import config
-from .data_layer import get_stock_daily, get_financial_report
-from .factor_scanner import FactorScanner
+from investment_system import config
+from investment_system.data.data_layer import get_stock_daily, get_financial_report
+from investment_system.analysis.factor_scanner import FactorScanner
 
 
 class StockAnalyzer:
@@ -37,7 +37,7 @@ class StockAnalyzer:
         try:
             import baostock as bs
             # 扫描预定义池
-            from .stock_universe import ALL_CORE_STOCKS
+            from investment_system.domain.stock_universe import ALL_CORE_STOCKS
             for sym in ALL_CORE_STOCKS:
                 name = self.scanner._get_stock_name(sym)
                 if t in name:
@@ -98,7 +98,7 @@ class StockAnalyzer:
         switch = getattr(self.macro, "strategy_switch", "on")
 
         # 产业链匹配
-        from .stock_universe import INDEX_DATA
+        from investment_system.domain.stock_universe import INDEX_DATA
         in_growth_chain = any(symbol in chains for chains in INDEX_DATA.get("chains", {}).values())
         tech_chains = ["英伟达算力链", "半导体链", "国产替代链"]
 

@@ -11,8 +11,8 @@
 import logging
 import pandas as pd
 from datetime import datetime
-from .data_source_layer import get_a_share_universe_snapshot, build_candidate_universe, DataResult
-from . import config
+from investment_system.data.data_source_layer import get_a_share_universe_snapshot, build_candidate_universe, DataResult
+from investment_system import config
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def get_research_universe() -> list:
                 seen.add(code)
                 codes.append(code)
 
-    from . import config as cfg
+    from investment_system import config as cfg
     for chain_info in cfg.INDUSTRY_CHAINS.values():
         for code in chain_info.get("symbols", []):
             if len(code) == 6 and code.isdigit() and code not in seen:
@@ -145,7 +145,7 @@ def classify_by_theme(codes: list) -> dict:
     将股票代码按主题分类（基于 config.DOMESTIC_SUB_THEMES）
     返回 {code: [theme1, theme2, ...]}
     """
-    from . import config as cfg
+    from investment_system import config as cfg
     theme_map = {}
 
     for code in codes:
@@ -163,7 +163,7 @@ def get_decoupling_candidates() -> list:
     中美脱钩主题候选池：从 DOMESTIC_SUB_THEMES 里提取所有 A 股标的
     按脱钩评分（decoupling_score）降序排列
     """
-    from . import config as cfg
+    from investment_system import config as cfg
     candidates = []
     seen = set()
 

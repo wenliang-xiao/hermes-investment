@@ -11,8 +11,8 @@ import numpy as np
 import time
 import logging
 from datetime import datetime, timedelta
-from . import config
-from .stock_universe import ALL_CORE_STOCKS, INDEX_DATA
+from investment_system import config
+from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -106,17 +106,10 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。Tushare→JQData→baostock→AKShare。"""
+    """获取个股日线数据（含PE/PB）。Tushare→baostock→AKShare。"""
     try:
-        from .tushare_layer import get_stock_daily_ts
+        from investment_system.data.tushare_layer import get_stock_daily_ts
         df = get_stock_daily_ts(symbol, days)
-        if not df.empty:
-            return df
-    except Exception:
-        pass
-    try:
-        from .jqdata_layer import get_stock_daily_jq
-        df = get_stock_daily_jq(symbol, days)
         if not df.empty:
             return df
     except Exception:
@@ -163,17 +156,10 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
 # 3. 基本面数据（baostock）
 # ═══════════════════════════════════════════
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→JQData→baostock。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→baostock。"""
     try:
-        from .tushare_layer import get_financial_report_ts
+        from investment_system.data.tushare_layer import get_financial_report_ts
         result = get_financial_report_ts(symbol)
-        if result:
-            return result
-    except Exception:
-        pass
-    try:
-        from .jqdata_layer import get_financial_report_jq
-        result = get_financial_report_jq(symbol)
         if result:
             return result
     except Exception:
@@ -245,15 +231,8 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
     """
     获取多季度财务历史：ROE趋势 + FCF 计算所需数据
     返回按时间倒序的季度列表，用于计算 ROE 趋势和 FCF
-    JQData主源→baostock备
+    Tushare→baostock
     """
-    try:
-        from .jqdata_layer import get_financial_history_jq
-        result = get_financial_history_jq(symbol, quarters)
-        if result:
-            return result
-    except Exception:
-        pass
     _bs_login()
     bs_code = _bs_code(symbol)
     history = []
@@ -318,20 +297,13 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
     """
     获取个股 PE-TTM 历史序列，用于计算历史百分位。
-    Tushare（5年完整）→ JQData（试用约12个月）→ baostock（从日线重算）。
+    Tushare（5年完整）→ baostock（从日线重算）。
     返回 pd.Series，index=date，values=pe
     """
     try:
-        from .tushare_layer import get_pe_history_ts
+        from investment_system.data.tushare_layer import get_pe_history_ts
         s = get_pe_history_ts(symbol, years=years)
         if len(s) >= 60:
-            return s
-    except Exception:
-        pass
-    try:
-        from .jqdata_layer import get_pe_history_jq
-        s = get_pe_history_jq(symbol, days=min(years * 365, 400))
-        if len(s) >= 30:
             return s
     except Exception:
         pass
@@ -463,19 +435,12 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
 # 5. 宏观经济数据（AKShare不可用时的默认值）
 # ═══════════════════════════════════════════
 def get_macro_data() -> dict:
-    """获取宏观数据（CPI/PMI/M2/社融）。Tushare→JQData→AKShare→缓存兜底。"""
+    """获取宏观数据（CPI/PMI/M2/社融）。Tushare→AKShare→缓存兜底。"""
     try:
-        from .tushare_layer import get_macro_data_ts
+        from investment_system.data.tushare_layer import get_macro_data_ts
         ts_result = get_macro_data_ts()
         if ts_result.get("cpi") is not None and ts_result.get("pmi") is not None:
             return ts_result
-    except Exception:
-        pass
-    try:
-        from .jqdata_layer import get_macro_data_jq
-        jq_result = get_macro_data_jq()
-        if jq_result.get("cpi") is not None and jq_result.get("pmi") is not None:
-            return jq_result
     except Exception:
         pass
     import json, os
@@ -653,13 +618,13 @@ def get_northbound_flow() -> dict:
     2024-08-19起交易所停止每日披露，AKShare历史数据仅供参考。
     """
     try:
-        from .tushare_layer import get_northbound_flow_ts
+        from investment_system.data.tushare_layer import get_northbound_flow_ts
         ts_result = get_northbound_flow_ts()
         if ts_result.get("data_ok"):
             return ts_result
     except Exception:
         pass
-    from . import config as _cfg
+    from investment_system import config as _cfg
     global _northbound_cache, _northbound_cache_time
 
     if _northbound_cache and (time.time() - _northbound_cache_time) < _NORTHBOUND_TTL:

@@ -13,8 +13,8 @@
 import json, os, logging
 from datetime import datetime, timedelta
 import numpy as np
-from . import config
-from .data_layer import get_macro_data, get_index_data
+from investment_system import config
+from investment_system.data.data_layer import get_macro_data, get_index_data
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class MacroEngine:
         if not scan_results:
             return
             
-        from .config import MACRO_SECTOR_ROTATION
+        from investment_system.config import MACRO_SECTOR_ROTATION
         # 按板块聚合
         sector_by_regime = MACRO_SECTOR_ROTATION.get(self.regime, MACRO_SECTOR_ROTATION.get("default", {}))
         favored = sector_by_regime.get("favored", [])

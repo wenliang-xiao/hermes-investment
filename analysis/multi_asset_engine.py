@@ -250,7 +250,7 @@ class MultiAssetEngine:
     def _get_price_series(self, asset_id: str, src: str) -> pd.Series:
         try:
             if src == "akshare":
-                from .data_source_layer import get_a_etf_hist
+                from investment_system.data.data_source_layer import get_a_etf_hist
                 result = get_a_etf_hist(asset_id, days=180)
                 if result.ok and result.data is not None:
                     df = result.data
@@ -258,7 +258,7 @@ class MultiAssetEngine:
                     close.index = range(len(close))
                     return close
             elif src == "yfinance":
-                from .data_source_layer import get_yf_price_hist
+                from investment_system.data.data_source_layer import get_yf_price_hist
                 result = get_yf_price_hist(asset_id, period="6mo")
                 if result.ok and result.data is not None:
                     df = result.data

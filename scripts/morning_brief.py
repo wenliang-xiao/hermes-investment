@@ -9,12 +9,12 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from investment_system.global_data import (
+from investment_system.data.global_data import (
     fetch_all_global_market, load_cached_global_data,
     fetch_global_indices, fetch_hk_stocks, fetch_us_stocks,
     fetch_commodities, fetch_fx_rates, fetch_bond_yields,
 )
-from investment_system.news_fetcher import fetch_news
+from investment_system.domain.news_fetcher import fetch_news
 from investment_system.config import FEISHU_GROUP_CHAT
 
 # ─── 常量 ────────────────────────────────────

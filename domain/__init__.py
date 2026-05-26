@@ -1,33 +1,3 @@
-"""
-三源融合投资系统配置 v3.1 — 面基·LDS·Vibe-Trading
-升级版：排序分位法因子权重 + 四重确认 + 完整宏观映射
-"""
-import os
-from pathlib import Path
-
-BASE = Path("/home/admin/.hermes/investment_system")
-DATA_DIR = BASE / "data"
-try:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-except (PermissionError, OSError):
-    pass
-
-JQDATA_USER = ""
-JQDATA_PASS = ""
-
-# ─── Tushare Pro（宏观/社融/北向/PE历史5年，补充JQData）───
-# 注册：tushare.pro → 个人中心 → 接口TOKEN
-# 120积分（注册即送）可用大部分接口；2000积分解锁北向资金历史
-# 也可通过环境变量 TUSHARE_TOKEN 设置（优先）
-TUSHARE_TOKEN = "a123a8e0b24ac30890b65c6e83a8211a7309647066fd786b541873b3"
-
-# ─── 飞书 ───
-FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
-FEISHU_FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"
-FEISHU_USER_OPENID = "ou_e03d56632de9b44263adfc018f9d6e4d"
-FEISHU_GROUP_CHAT = "oc_4c9d6445fab7f3a2ada0c410f3aa7043"
-
-# ─── 宏观四象限判定阈值（面基框架）───
 MACRO_THRESHOLDS = {
     "shibor_loose": 1.8,     # Shibor < 1.8% = 宽货币
     "m2_loose": 8.0,         # M2 > 8% = 宽信用
@@ -37,8 +7,8 @@ MACRO_THRESHOLDS = {
     "pmi_cold": 48,          # PMI < 48 = 收缩
 }
 
-# ─── 面基6因子 × 宏观状态 动态权重矩阵 ───
-# 面基核心思想：不同宏观环境下因子有效性不同
+
+
 FACTOR_WEIGHTS = {
     "复苏期":    {"质量": 0.23, "价值": 0.18, "成长": 0.20, "低波": 0.12, "红利": 0.15, "动量": 0.12},
     "扩张期":    {"质量": 0.13, "价值": 0.10, "成长": 0.28, "低波": 0.07, "红利": 0.08, "动量": 0.34},
@@ -47,7 +17,8 @@ FACTOR_WEIGHTS = {
     "default":   {"质量": 0.23, "价值": 0.17, "成长": 0.17, "低波": 0.17, "红利": 0.17, "动量": 0.09},
 }
 
-# ─── CPI驱动策略开关（LDS核心）───
+
+
 CPI_STRATEGY_MAP = {
     "cpi_falling_below1": {"switch": "limited", "reason": "CPI<1%通缩风险，限制风险敞口", "caption": "50%"},
     "cpi_1_to_2":         {"switch": "on",      "reason": "CPI 1-2%温和通胀，正常操作",    "caption": "75%"},
@@ -56,7 +27,8 @@ CPI_STRATEGY_MAP = {
     "default":            {"switch": "on",      "reason": "CPI数据不足，按默认执行",         "caption": "50%"},
 }
 
-# ─── LDS趋势温度参数 ───
+
+
 TREND_TEMP = {
     "凉": {"max_deviation": -0.10, "action": "不开新仓，只做存量"},
     "平": {"max_deviation": 0.05,  "action": "中性操作，控制仓位"},
@@ -64,13 +36,8 @@ TREND_TEMP = {
     "热": {"max_deviation": 0.30,  "action": "逐步减仓，锁定利润"},
 }
 
-# ============================================================
-# ★ NEW v3.2: 多资产类别覆盖 — 面基全市场调研框架
-# 以同等权重关注：汇率、债券、A股ETF、港美股、房产
-# 数据源：Baostock (A股) + ChinaMoney (汇率) + Yahoo Finance (港美股/债券)
-# ============================================================
 
-# ─── 主要汇率对（中国外汇交易中心官方数据）───
+
 FX_PAIRS = {
     "USD/CNY": {"risk_sense": "贬值↑利空A股", "track_range": "6.8-7.3"},
     "EUR/CNY": {"risk_sense": "欧元强弱", "track_range": "7.5-8.2"},
@@ -80,13 +47,15 @@ FX_PAIRS = {
     "AUD/CNY": {"risk_sense": "商品货币", "track_range": "4.5-5.2"},
 }
 
-# ─── 债券市场观测 ───
+
+
 BOND_MARKETS = {
     "US10Y": {"name": "美国10年期国债", "risk_sense": "全球利率锚", "default": 4.5},
     "CN10Y": {"name": "中国10年期国债", "risk_sense": "国内利率锚", "default": 2.8},
 }
 
-# ─── 全球关键指数 ───
+
+
 GLOBAL_INDICES = {
     "^HSI":   {"name": "恒生指数",   "market": "HK"},
     "^GSPC":  {"name": "标普500",    "market": "US"},
@@ -95,8 +64,8 @@ GLOBAL_INDICES = {
     "000001.SS": {"name": "上证指数", "market": "CN"},
 }
 
-# ─── 港股精选观测池（中概+港股通核心）───
-# 同等权重关注港美股，从调研角度跟踪
+
+
 HK_WATCHLIST = {
     "0700.HK":  {"name": "腾讯控股",  "sector": "互联网"},
     "9988.HK":  {"name": "阿里巴巴",  "sector": "互联网"},
@@ -118,7 +87,8 @@ HK_WATCHLIST = {
     "0011.HK":  {"name": "恒生银行",  "sector": "银行"},
 }
 
-# ─── 美股中概观测池 ───
+
+
 US_WATCHLIST = {
     "BABA":  {"name": "阿里巴巴",   "sector": "电商", "exchange": "NYSE"},
     "JD":    {"name": "京东",       "sector": "电商", "exchange": "NASDAQ"},
@@ -134,7 +104,8 @@ US_WATCHLIST = {
     "QQQ":   {"name": "纳斯达克ETF", "sector": "美股ETF", "exchange": "NASDAQ"},
 }
 
-# ─── A股主要ETF观测池（沪深交易所，Baostock可用）───
+
+
 A_SHARE_ETF_WATCHLIST = [
     ("510050", "上证50ETF"),
     ("510300", "沪深300ETF"),
@@ -150,7 +121,8 @@ A_SHARE_ETF_WATCHLIST = [
     ("159845", "中证1000ETF"),
 ]
 
-# ─── 房地产相关标的 ───
+
+
 REAL_ESTATE_WATCHLIST = {
     # A股地产龙头
     "000002": "万科A",
@@ -172,11 +144,8 @@ REAL_ESTATE_WATCHLIST = {
     "0688.HK": "中国海外发展",
 }
 
-# ============================================================
-# ★ NEW v3.3: 大宗商品 + LDS板块轮动 + 政经新闻
-# ============================================================
 
-# ─── 大宗商品期货（Yahoo Finance）───
+
 COMMODITIES = {
     "GC=F": {"name": "黄金", "unit": "美元/盎司", "sector": "贵金属", "default": 4500},
     "SI=F": {"name": "白银", "unit": "美元/盎司", "sector": "贵金属", "default": 30},
@@ -191,8 +160,8 @@ COMMODITIES = {
     "CT=F": {"name": "棉花", "unit": "美元/磅", "sector": "农产品", "default": 0.70},
 }
 
-# ─── LDS宏观→板块轮动映射（面基播客核心方法论）───
-# 宏观象限决定哪些板块值得深挖
+
+
 MACRO_SECTOR_ROTATION = {
     "复苏期": {
         "favored": ["消费", "金融", "地产", "汽车", "半导体", "国产替代"],
@@ -221,7 +190,8 @@ MACRO_SECTOR_ROTATION = {
     },
 }
 
-# ─── 政经新闻源配置（RSS）───
+
+
 NEWS_SOURCES = {
     "google_finance_zh": {
         "url": "https://news.google.com/rss/search?q=中国+股市+经济&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
@@ -245,7 +215,8 @@ NEWS_SOURCES = {
     },
 }
 
-# ─── 风控参数（LDS纪律铁律）───
+
+
 RISK_PARAMS = {
     "stop_loss_pct": 0.08,           # 8%硬止损—不可商量
     "take_profit_tier1": 0.15,       # 15%减半仓
@@ -257,7 +228,8 @@ RISK_PARAMS = {
     "max_drawdown_liquidate": 0.25,  # 回撤>25%清仓—清盘线
 }
 
-# ─── LDS选股标准 ───
+
+
 LDS_STOCK_FILTERS = {
     "roe_min": 15.0,
     "rev_growth_min": 20.0,
@@ -266,11 +238,7 @@ LDS_STOCK_FILTERS = {
     "market_cap_max_small_mid": 200_0000_0000,
 }
 
-# ═══════════════════════════════════════════════════════════════
-# ★ v5.3 重点票关注池 — 面基/LDS框架下各链值得持续追踪的标的
-# 覆盖：A股龙头 + 港股折价 + 美股链核心 + ETF + 贵金属/大宗
-# 说明：这是"研究观测池"，不是建仓信号，结合四重确认再决策
-# ═══════════════════════════════════════════════════════════════
+
 
 WATCHLIST = {
     # ── A股：AI算力/光模块链（利润最厚的中游制造环节）──
@@ -382,11 +350,7 @@ WATCHLIST = {
     "DXY":   {"name": "美元指数", "chain": "汇率",     "focus": "美元走强→新兴市场承压；走弱→商品/A股受益", "tier": "追踪"},
 }
 
-# ═══════════════════════════════════════════════════════════════
-# ★ v5.3 挖掘票机会主题 — 基于产业逻辑的低估/趋势机会
-# 每个主题说明：驱动逻辑（为什么涨）+ 瓶颈在哪（谁受益最多）
-# + 中小市值优先标的（LDS找票标准：30-200亿，机构持仓<30%）
-# ═══════════════════════════════════════════════════════════════
+
 
 OPPORTUNITY_THEMES = {
     "光模块CPO技术升级": {
@@ -494,20 +458,7 @@ OPPORTUNITY_THEMES = {
     },
 }
 
-# ═══════════════════════════════════════════════════════════════
-# ★ v5.2 产业链升级：中观四层次 × Perez五阶段 × LDS翻倍逻辑
-# 每条链 = 产业分析，不只是标的罗列
-# ═══════════════════════════════════════════════════════════════
-# 面基框架来源：
-#   中观四层次(E7/E84): 产业生命周期→需求景气→业绩兑现→估值性价比
-#   Perez五阶段(E94/E98): 导入→转折→展开→成熟→沉寂
-#   五层蛋糕(E155): 芯片→硬件→模型→应用→终端
-#   Capex护城河(E155): 资本开支=壁垒深度，合同负债=业绩前瞻
-#   HALO(E155): 重资产+低淘汰=安全
-#   LDS产业链定位: 买利润率最高的环节
-#   Nick灵魂四问(E81/E118): 紧急度/趋势/共识/拥挤度
-#   复利增长(E153): G=E×P×F×T → 凯利f*=p-q/b
-# ═══════════════════════════════════════════════════════════════
+
 
 INDUSTRY_CHAINS = {
     # ─── 1. 英伟达算力链（AI基础设施核心）───
@@ -793,11 +744,7 @@ INDUSTRY_CHAINS = {
     },
 }
 
-# ═══════════════════════════════════════════════════════════════
-# ★ NEW v4.0: 国产替代评分体系 — 中美脱钩量化框架
-# 来源：面基E131唐军「逆全球化」+ E116「逆风才是试金石」
-# 四路挖掘：港股折价 / A股替代 / 美股受益 / 夹缝红利
-# ═══════════════════════════════════════════════════════════════
+
 
 DOMESTIC_SUB_THEMES = {
     "半导体设备": {
@@ -851,24 +798,7 @@ DOMESTIC_SUB_THEMES = {
     },
 }
 
-def get_domestic_sub_score(company_keywords: list, sector: str) -> float:
-    """
-    基于关键词匹配计算国产替代评分(0-10)
-    company_keywords: 公司业务关键词列表
-    sector: 公司所属板块
-    """
-    best_score = 0.0
-    for theme_name, theme in DOMESTIC_SUB_THEMES.items():
-        hits = sum(1 for kw in theme["keywords"] if any(kw in ck for ck in company_keywords))
-        if hits > 0:
-            theme_score = theme["decoupling_score"] * min(hits / 3, 1.0)
-            best_score = max(best_score, theme_score)
-    return round(best_score, 1)
 
-# ═══════════════════════════════════════════════════════════════
-# ★ NEW v4.0: 北向资金信号配置
-# 数据源：AKShare (stock_em_hsgt_north_net_flow_in_em)
-# ═══════════════════════════════════════════════════════════════
 
 NORTHBOUND_CONFIG = {
     "strong_inflow_daily": 30,    # 单日净流入 > 30亿 = 强流入信号
@@ -878,7 +808,8 @@ NORTHBOUND_CONFIG = {
     "weak_5d_cumulative": -50,    # 5日累计 < -50亿 = 趋势性流出
 }
 
-# ─── 宏观缓存TTL（按数据更新频率分级）───
+
+
 CACHE_TTL = {
     "macro_monthly": 86400 * 7,   # CPI/PMI 月度数据 7天缓存
     "index_daily": 3600,          # 指数日线 1小时缓存
@@ -887,3 +818,5 @@ CACHE_TTL = {
     "news": 1800,                 # 新闻 30分钟缓存
     "northbound": 3600,           # 北向资金 1小时缓存
 }
+
+

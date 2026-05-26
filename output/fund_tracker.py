@@ -10,7 +10,7 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from .data_source_layer import (
+from investment_system.data.data_source_layer import (
     get_a_etf_hist, get_yf_price_hist,
     get_all_lds_portfolio, DataResult, summarize_data_quality,
 )
@@ -281,7 +281,7 @@ def get_fund_performance_summary(fund_code: str, fund_name: str = "") -> dict:
     获取公募基金关键指标摘要（近1月/3月/6月/1年回报 + 最大回撤）
     用于日报的"主动基金追踪"板块
     """
-    from .data_source_layer import get_fund_nav_hist
+    from investment_system.data.data_source_layer import get_fund_nav_hist
 
     result = get_fund_nav_hist(fund_code, days=365)
     if not result.ok or result.data is None:
