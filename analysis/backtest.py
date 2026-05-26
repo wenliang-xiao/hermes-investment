@@ -89,20 +89,40 @@ class BacktestResult:
 
 def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.DataFrame]:
     """
-    批量拉取股票/ETF日线数据。
-    优先用 baostock（A股），fallback 到 yfinance（ETF/港股/美股）。
+    批量拉取股票/ETF/指数日线数据。
+      - A股个股（纯数字） → baostock
+      - 中国ETF（512/518/159/511/588开头）→ AKShare fund_etf_hist_em
+      - 沪深300（000300）→ baostock sh.000300
+      - 其它（字母开头）→ yfinance
     """
     data = {}
-    a_symbols = [s for s in symbols if str(s).isdigit()]
-    other_symbols = [s for s in symbols if not str(s).isdigit()]
+    import time as _time
 
-    if a_symbols:
+    # 分类
+    a_stock_list = []     # baostock
+    cn_etf_list = []      # AKShare
+    yf_list = []          # yfinance
+    for s in symbols:
+        ds = str(s)
+        if ds == "000300":
+            a_stock_list.append(s)  # baostock for CSI 300
+        elif ds.isdigit() and (ds.startswith(("512", "513", "518", "511", "588", "159")) or ds in ("159915", "159926", "159985")):
+            cn_etf_list.append(s)
+        elif ds.isdigit():
+            a_stock_list.append(s)
+        else:
+            yf_list.append(s)
+
+    # ─── baostock（A股个股 + 沪深300）───
+    if a_stock_list:
         try:
             import baostock as bs
             bs.login()
-            for sym in a_symbols:
+            for sym in a_stock_list:
                 try:
-                    code = f"sh.{sym}" if sym.startswith(("5", "6")) else f"sz.{sym}"
+                    code = "sh.000300" if str(sym) == "000300" else (
+                        f"sh.{sym}" if str(sym).startswith(("5", "6")) else f"sz.{sym}"
+                    )
                     rs = bs.query_history_k_data_plus(
                         code, "date,close",
                         start_date=start, end_date=end,
@@ -124,10 +144,49 @@ def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.D
         except Exception:
             pass
 
-    if other_symbols:
+    # ─── AKShare（中国ETF）───
+    if cn_etf_list:
+        try:
+            import akshare as ak
+            for sym in cn_etf_list:
+                try:
+                    start_dt = f"{start[:10]}"
+                    end_dt = f"{end[:10]}"
+                    df = ak.fund_etf_hist_em(
+                        symbol=sym,
+                        period="daily",
+                        start_date=start_dt,
+                        end_date=end_dt,
+                        adjust="qfq",
+                    )
+                    if df is not None and not df.empty:
+                        cols = [str(c).lower() for c in df.columns]
+                        if "日期" in cols:
+                            df["date"] = pd.to_datetime(df.iloc[:, 0])
+                            df.set_index("date", inplace=True)
+                            close_col = [i for i, c in enumerate(cols) if "收盘" in c]
+                            if close_col:
+                                df["close"] = pd.to_numeric(df.iloc[:, close_col[0]], errors="coerce")
+                                data[sym] = df[["close"]]
+                    _time.sleep(0.5)  # AKShare rate limit
+                except Exception:
+                    # Fallback to yfinance for this ETF
+                    try:
+                        import yfinance as yf
+                        yf_code = f"{sym}.SS"
+                        yf_df = yf.Ticker(yf_code).history(start=start, end=end)
+                        if not yf_df.empty:
+                            data[sym] = yf_df[["Close"]].rename(columns={"Close": "close"})
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # ─── yfinance（非A股，如美股ETF）───
+    if yf_list:
         try:
             import yfinance as yf
-            for sym in other_symbols:
+            for sym in yf_list:
                 try:
                     ticker = yf.Ticker(sym)
                     df = ticker.history(start=start, end=end)[["Close"]].rename(columns={"Close": "close"})
@@ -137,6 +196,13 @@ def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.D
                     pass
         except Exception:
             pass
+
+    # ── 统一 index 为无时区 ──
+    for sym in list(data.keys()):
+        df = data[sym]
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+            data[sym] = df
 
     return data
 
@@ -393,7 +459,7 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
             for s in chain.get("symbols", []):
                 if str(s).isdigit():
                     symbols_set.add(str(s))
-        symbols = list(symbols_set)[:60]
+        symbols = list(symbols_set)[:30]
 
     etf_symbols = list(ALLWEATHER_WEIGHTS.keys())
     all_symbols = list(set(symbols + etf_symbols + ["000300"]))
