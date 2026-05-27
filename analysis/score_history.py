@@ -131,14 +131,15 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
     """
     从历史CPI/PMI数据重建双门状态。
     
-    双门规则（OR严格版）：
-      双门关闭 = 宏观门(红灯) in (CPI<1%, CPI>3%) OR 趋势门(红灯) in (MA20<-5%)
+    双门规则（OR严格版，与 macro_engine.py 对齐）：
+      双门关闭 = 宏观门(红灯) in (CPI<1%, CPI>3%) OR 趋势门(红灯) in (MA60<-5%)
       任一触发→全仓关闭。覆盖场景：
-        - 2018熊市 → 趋势门触发(MA20<-5%)
+        - 2018熊市 → 趋势门触发(MA60持续<-5%)
         - 2020初CPI过热(5.4%) → 宏观门触发
         - 2021年初CPI通缩(-0.3%) → 宏观门触发
-        - 2022年熊市→ 趋势门触发
+        - 2022年熊市 → 趋势门触发(MA60持续<-5%)
         - 2023-2024通缩(CPI<1%) → 宏观门触发
+      MA60（60日均线）与 macro_engine._calc_trend_temp() 使用相同的基准。
     """
     dates = pd.date_range(start, end, freq="B")
     gate_series = pd.Series(1, index=dates)
@@ -214,7 +215,7 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
         socket.setdefaulttimeout(15)
         rs = bs.query_history_k_data_plus(
             "sh.000001", "date,close",
-            start_date=(datetime.strptime(start, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d"),
+            start_date=(datetime.strptime(start, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d"),
             end_date=end,
             frequency="d"
         )
@@ -226,11 +227,11 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
         bs.logout()
         if rows:
             df = pd.DataFrame(rows).set_index("date")
-            df["ma20"] = df["close"].rolling(20).mean()
-            df["dev"] = (df["close"] - df["ma20"]) / df["ma20"]
+            df["ma60"] = df["close"].rolling(60).mean()
+            df["dev"] = (df["close"] - df["ma60"]) / df["ma60"]
             result = {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
             if result:
-                print(f"[score_history] baostock 上证MA数据: {len(result)} 天")
+                print(f"[score_history] baostock 上证MA60数据: {len(result)} 天")
                 return result
     except Exception:
         pass
@@ -243,10 +244,10 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
         df = ticker.history(start=start_dt, end=end)
         if not df.empty:
             df.index = df.index.tz_localize(None)
-            df["ma20"] = df["Close"].rolling(20).mean()
-            df["dev"] = (df["Close"] - df["ma20"]) / df["ma20"]
+            df["ma60"] = df["Close"].rolling(60).mean()
+            df["dev"] = (df["Close"] - df["ma60"]) / df["ma60"]
             result = {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
-            print(f"[score_history] yfinance 上证MA数据(baostock fallback): {len(result)} 天")
+            print(f"[score_history] yfinance 上证MA60数据(baostock fallback): {len(result)} 天")
             return result
     except Exception as e:
         print(f"[score_history] yfinance fallback也失败: {e}")
