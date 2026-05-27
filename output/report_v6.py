@@ -468,11 +468,11 @@ _CHAIN_CONFIGS = [
         "assumption_hold": ["AI训练Capex不出现断崖式下降", "CUDA生态护城河维持（无竞争性替代）"],
         "assumption_break": "如果开源模型效率突破→专用芯片需求下降→AVGO/AMD受益、NVDA受损",
         "perez_stage": "frenzy(狂热期)→synergy过渡", "profit_pool": "expanding—上游GPU环节利润池最厚，但ASIC定制化分流在加速",
-        "dcf_tv": "NVDA $5T市值翻倍需$10T→永续段占比需>60%→概率低。关注AVBO(ASIC替代)和AMD(性价比路径)",
+        "dcf_tv": "NVDA $5T市值翻倍需$10T→永续段占比需>60%→概率低。关注AVGO(ASIC替代)和AMD(性价比路径)",
         "mianji_refs": "E7/E84(中观四层次), E124(DCF永续段), E94(Perez狂热期), E155(五层蛋糕Capex层)",
         "a_profit_pool": [
             {"code": "300502", "name": "新易盛",  "env": "光模块(毛利率35-45%)", "roe_ref": 38, "why": "800G→1.6T升级直接受益，AI算力互联核心"},
-            {"code": "301489", "name": "中际旭创", "env": "光模块(毛利率35-45%)", "roe_ref": 43, "why": "全球光模块市占率TOP3，ROE43%是链上最高"},
+            {"code": "300308", "name": "中际旭创", "env": "光模块(毛利率35-45%)", "roe_ref": 43, "why": "全球光模块市占率TOP3，ROE43%是链上最高"},
             {"code": "688183", "name": "海目星",   "env": "激光器件(毛利率45%+)", "roe_ref": 18, "why": "CPO共封装光学的上游激光光源"},
             {"code": "002463", "name": "沪电股份",  "env": "高速光模块PCB(毛利率20-30%)", "roe_ref": 15, "why": "AI服务器高速背板PCB配套，量价齐升"},
         ],
