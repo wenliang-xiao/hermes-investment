@@ -132,9 +132,10 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
     从历史CPI/PMI数据重建双门状态。
     Oracle建议：使用数据发布日期而非数据所属月份，避免前视偏差。
     
-    双门规则：
-      宏观门：CPI < 1.0% → 红灯，1.0-2.0% → 绿灯，2.0-3.0% → 黄灯，>3% → 红灯
-      趋势门：20日均线偏离度 < -5% → 红灯，-5%到5% → 黄灯，>5% → 绿灯
+    双门规则（完整版）：
+      宏观门：CPI < 1.0% → 红灯(关)    1.0-2.0% → 绿灯(开)  
+              2.0-3.0% → 黄灯(关)    >3% → 红灯(关)
+      趋势门：MA20偏离 < -5% → 红灯(关)  -5%~+5% → 黄灯(关)  >+5% → 绿灯(开)
       双门关闭 = 宏观门 in (红,黄) AND 趋势门 in (红,黄)
     """
     dates = pd.date_range(start, end, freq="B")
@@ -148,19 +149,23 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
         if cpi is None:
             macro_gate_closed = False
         elif cpi < 1.0:
-            macro_gate_closed = True
-        elif cpi > 3.0:
-            macro_gate_closed = True
+            macro_gate_closed = True   # 红灯
+        elif cpi <= 2.0:
+            macro_gate_closed = False  # 绿灯
+        elif cpi <= 3.0:
+            macro_gate_closed = True   # 黄灯
         else:
-            macro_gate_closed = False
+            macro_gate_closed = True   # 红灯
 
         dev = index_ma.get(date.strftime("%Y-%m-%d"), None)
         if dev is None:
             trend_gate_closed = False
         elif dev <= -0.05:
-            trend_gate_closed = True
+            trend_gate_closed = True   # 红灯
+        elif dev >= 0.05:
+            trend_gate_closed = False  # 绿灯
         else:
-            trend_gate_closed = False
+            trend_gate_closed = True   # 黄灯(-5%~+5%)
 
         gate_series.iloc[i] = 0 if (macro_gate_closed and trend_gate_closed) else 1
 
@@ -210,10 +215,15 @@ def _get_historical_cpi(start: str, end: str) -> Dict[str, float]:
 
 
 def _get_index_ma_series(start: str, end: str) -> Dict:
-    """获取上证指数20日均线偏离度序列（趋势门判断依据）。"""
+    """获取上证指数20日均线偏离度序列（趋势门判断依据）。
+    优先baostock，超时失败时fallback到yfinance。
+    """
+    # ── 先试 baostock ──
     try:
         import baostock as bs
         bs.login()
+        import socket
+        socket.setdefaulttimeout(15)
         rs = bs.query_history_k_data_plus(
             "sh.000001", "date,close",
             start_date=(datetime.strptime(start, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d"),
@@ -226,14 +236,34 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
             if r[1]:
                 rows.append({"date": pd.Timestamp(r[0]), "close": float(r[1])})
         bs.logout()
-        if not rows:
-            return {}
-        df = pd.DataFrame(rows).set_index("date")
-        df["ma20"] = df["close"].rolling(20).mean()
-        df["dev"] = (df["close"] - df["ma20"]) / df["ma20"]
-        return {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
+        if rows:
+            df = pd.DataFrame(rows).set_index("date")
+            df["ma20"] = df["close"].rolling(20).mean()
+            df["dev"] = (df["close"] - df["ma20"]) / df["ma20"]
+            result = {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
+            if result:
+                print(f"[score_history] baostock 上证MA数据: {len(result)} 天")
+                return result
     except Exception:
-        return {}
+        pass
+
+    # ── fallback: yfinance ──
+    try:
+        import yfinance as yf
+        start_dt = (datetime.strptime(start, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d")
+        ticker = yf.Ticker("000001.SS")
+        df = ticker.history(start=start_dt, end=end)
+        if not df.empty:
+            df.index = df.index.tz_localize(None)
+            df["ma20"] = df["Close"].rolling(20).mean()
+            df["dev"] = (df["Close"] - df["ma20"]) / df["ma20"]
+            result = {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
+            print(f"[score_history] yfinance 上证MA数据(baostock fallback): {len(result)} 天")
+            return result
+    except Exception as e:
+        print(f"[score_history] yfinance fallback也失败: {e}")
+
+    return {}
 
 
 def _get_latest_known_value(data_dict: Dict[str, float], date) -> Optional[float]:
