@@ -411,8 +411,7 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
         if use_dual_gate and gate_series is not None:
             gate_val = float(gate_series.get(date, gate_series.get(date - timedelta(days=1), 1.0)))
         gate_open = gate_val > 0
-        gate_half = (gate_val == 0.5)
-        if not gate_open:
+        if gate_val < 0.8:
             gate_closed_days += 1
 
         if not gate_open and holdings:
@@ -428,8 +427,6 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
             holdings = {}
             entry_prices = {}
             entry_dates = {}
-        elif gate_half and holdings:
-            holdings = {sym: w * 0.5 for sym, w in holdings.items()}
 
         exit_set = set()
         for sym in list(holdings.keys()):
@@ -563,7 +560,7 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                 curr_p = float(df.loc[curr_idx[-1], "close"])
                 daily_ret += (w / total_w) * (curr_p / prev_p - 1) if prev_p > 0 else 0
 
-        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret)
+        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret * gate_val)
 
     equity = portfolio_value.dropna()
     metrics = _calc_metrics(equity, benchmark)
@@ -700,8 +697,9 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
     try:
         from investment_system.analysis.score_history import load_macro_gate_series
         gate_series = load_macro_gate_series(start, end)
-        closed_pct = (gate_series == 0).mean()
-        print(f"[backtest] 双门历史: 关闭{closed_pct:.1%}时间")
+        closed_pct = (gate_series < 0.8).mean()
+        avg_mult = gate_series.mean()
+        print(f"[backtest] 双门历史: 非满仓{closed_pct:.1%}时间, 平均仓位乘数{avg_mult:.2f}")
     except Exception as e:
         print(f"[backtest] 双门历史加载失败({e})，fallback到全开...")
         gate_series = pd.Series(1, index=pd.date_range(start, end, freq="B"))
@@ -780,7 +778,7 @@ def print_report(results: List[BacktestResult]):
             turnover = len([t for t in r.trades if t.exit_reason not in ("dual_gate_close",)]) / (8 * n_years)
             print(f"    年化换手率: {turnover:.1f}x")
             if r.gate_closed_pct > 0:
-                print(f"    双门关闭: {r.gate_closed_pct:.1%}天持仓={1-r.gate_closed_pct:.1%}天")
+                print(f"    双门非满仓: {r.gate_closed_pct:.1%}天")
 
 
 def generate_investor_report(results: List[BacktestResult], output_path: str = "") -> str:
@@ -806,7 +804,7 @@ def generate_investor_report(results: List[BacktestResult], output_path: str = "
         lines.append(f"  年化收益：{r.annual_return:+.1%}  |  最大回撤：{r.max_drawdown:.1%}  |  夏普：{r.sharpe:.2f}  |  卡玛：{r.calmar:.2f}")
         lines.append(f"  月度胜率（vs沪深300）：{r.win_rate_vs_benchmark:.1%}")
         if r.gate_closed_pct > 0:
-            lines.append(f"  双门关闭：{r.gate_closed_pct:.1%}时间  |  实际持仓：{1-r.gate_closed_pct:.1%}时间")
+            lines.append(f"  双门非满仓：{r.gate_closed_pct:.1%}时间（满仓=gate≥0.8x）")
 
         if r.yearly_returns:
             lines.append("\n【二、逐年盈亏】")

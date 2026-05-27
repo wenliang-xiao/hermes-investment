@@ -129,38 +129,59 @@ def load_macro_gate_series(start: str, end: str) -> pd.Series:
 
 def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
     """
-    从历史CPI/PMI数据重建双门状态。
-    
-    双门规则（OR严格版，与 macro_engine.py 对齐）：
-      双门关闭 = 宏观门(红灯) in (CPI<1%, CPI>3%) OR 趋势门(红灯) in (MA60<-5%)
-      任一触发→全仓关闭。覆盖场景：
-        - 2018熊市 → 趋势门触发(MA60持续<-5%)
-        - 2020初CPI过热(5.4%) → 宏观门触发
-        - 2021年初CPI通缩(-0.3%) → 宏观门触发
-        - 2022年熊市 → 趋势门触发(MA60持续<-5%)
-        - 2023-2024通缩(CPI<1%) → 宏观门触发
-      MA60（60日均线）与 macro_engine._calc_trend_temp() 使用相同的基准。
+    双门仓位乘数（v2：仓位乘数模式，不再是0/1开关）。
+
+    面基+LDS 的真实含义：宏观不好不是「不能操作」而是「降低风险敞口」。
+    CPI<1%的通缩是中国长期常态，用0/1开关等于永久锁死策略。
+
+    宏观门（CPI驱动）：
+      CPI < 0.0%   → 0.3x（严重通缩，极度防御）
+      CPI 0.0-1.0% → 0.5x（温和通缩，半仓）
+      CPI 1.0-2.0% → 1.0x（正常，满仓）
+      CPI 2.0-3.0% → 0.75x（温和通胀，适度收缩）
+      CPI > 3.0%   → 0.3x（过热通胀，极度防御）
+
+    趋势门（MA60偏离）：
+      MA60偏离 <= -5% → 额外乘以 0.5x（趋势明显下行）
+      其他            → 不做额外调整
+
+    最终 gate_val = 宏观乘数 × 趋势乘数，范围 [0.15, 1.0]
+    backtest 里: gate_val=0 → 空仓，>0 → 按比例持仓
     """
     dates = pd.date_range(start, end, freq="B")
-    gate_series = pd.Series(1, index=dates)
+    gate_series = pd.Series(1.0, index=dates)
 
     cpi_history = _get_historical_cpi(start, end)
     index_ma = _get_index_ma_series(start, end)
 
     for i, date in enumerate(dates):
         cpi = _get_latest_known_value(cpi_history, date)
-        macro_gate_closed = False
-        if cpi is not None and (cpi < 1.0 or cpi > 3.0):
-            macro_gate_closed = True
+
+        if cpi is None:
+            macro_mult = 1.0
+        elif cpi < 0.0:
+            macro_mult = 0.3
+        elif cpi < 1.0:
+            macro_mult = 0.5
+        elif cpi < 2.0:
+            macro_mult = 1.0
+        elif cpi < 3.0:
+            macro_mult = 0.75
+        else:
+            macro_mult = 0.3
 
         dev = index_ma.get(date.strftime("%Y-%m-%d"), None)
-        trend_gate_closed = dev is not None and dev <= -0.05
+        trend_mult = 0.5 if (dev is not None and dev <= -0.05) else 1.0
 
-        gate_series.iloc[i] = 0 if (macro_gate_closed or trend_gate_closed) else 1
+        gate_val = round(macro_mult * trend_mult, 2)
+        gate_series.iloc[i] = gate_val
 
-    closed_count = (gate_series == 0).sum()
+    full_close = (gate_series <= 0.15).sum()
+    half = ((gate_series > 0.15) & (gate_series < 0.8)).sum()
+    full_open = (gate_series >= 0.8).sum()
     total = len(gate_series)
-    print(f"[score_history] 双门重建完成(OR严格): {closed_count}/{total}天关闭 ({closed_count/total:.1%})")
+    print(f"[score_history] 双门重建(仓位乘数): 全防御{full_close/total:.1%} "
+          f"| 半仓{half/total:.1%} | 满仓{full_open/total:.1%}")
     return gate_series
 
 
