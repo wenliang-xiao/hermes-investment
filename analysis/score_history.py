@@ -154,7 +154,7 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
         else:
             macro_gate_closed = False
 
-        dev = index_ma.get(date, None)
+        dev = index_ma.get(date.strftime("%Y-%m-%d"), None)
         if dev is None:
             trend_gate_closed = False
         elif dev <= -0.05:
@@ -231,7 +231,7 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
         df = pd.DataFrame(rows).set_index("date")
         df["ma20"] = df["close"].rolling(20).mean()
         df["dev"] = (df["close"] - df["ma20"]) / df["ma20"]
-        return df["dev"].to_dict()
+        return {k.strftime("%Y-%m-%d"): v for k, v in df["dev"].dropna().to_dict().items()}
     except Exception:
         return {}
 
