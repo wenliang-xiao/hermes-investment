@@ -130,13 +130,15 @@ def load_macro_gate_series(start: str, end: str) -> pd.Series:
 def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
     """
     从历史CPI/PMI数据重建双门状态。
-    Oracle建议：使用数据发布日期而非数据所属月份，避免前视偏差。
     
-    双门规则（完整版）：
-      宏观门：CPI < 1.0% → 红灯(关)    1.0-2.0% → 绿灯(开)  
-              2.0-3.0% → 黄灯(关)    >3% → 红灯(关)
-      趋势门：MA20偏离 < -5% → 红灯(关)  -5%~+5% → 黄灯(关)  >+5% → 绿灯(开)
-      双门关闭 = 宏观门 in (红,黄) AND 趋势门 in (红,黄)
+    双门规则（OR严格版）：
+      双门关闭 = 宏观门(红灯) in (CPI<1%, CPI>3%) OR 趋势门(红灯) in (MA20<-5%)
+      任一触发→全仓关闭。覆盖场景：
+        - 2018熊市 → 趋势门触发(MA20<-5%)
+        - 2020初CPI过热(5.4%) → 宏观门触发
+        - 2021年初CPI通缩(-0.3%) → 宏观门触发
+        - 2022年熊市→ 趋势门触发
+        - 2023-2024通缩(CPI<1%) → 宏观门触发
     """
     dates = pd.date_range(start, end, freq="B")
     gate_series = pd.Series(1, index=dates)
@@ -146,32 +148,18 @@ def _rebuild_gate_from_macro(start: str, end: str) -> pd.Series:
 
     for i, date in enumerate(dates):
         cpi = _get_latest_known_value(cpi_history, date)
-        if cpi is None:
-            macro_gate_closed = False
-        elif cpi < 1.0:
-            macro_gate_closed = True   # 红灯
-        elif cpi <= 2.0:
-            macro_gate_closed = False  # 绿灯
-        elif cpi <= 3.0:
-            macro_gate_closed = True   # 黄灯
-        else:
-            macro_gate_closed = True   # 红灯
+        macro_gate_closed = False
+        if cpi is not None and (cpi < 1.0 or cpi > 3.0):
+            macro_gate_closed = True
 
         dev = index_ma.get(date.strftime("%Y-%m-%d"), None)
-        if dev is None:
-            trend_gate_closed = False
-        elif dev <= -0.05:
-            trend_gate_closed = True   # 红灯
-        elif dev >= 0.05:
-            trend_gate_closed = False  # 绿灯
-        else:
-            trend_gate_closed = True   # 黄灯(-5%~+5%)
+        trend_gate_closed = dev is not None and dev <= -0.05
 
-        gate_series.iloc[i] = 0 if (macro_gate_closed and trend_gate_closed) else 1
+        gate_series.iloc[i] = 0 if (macro_gate_closed or trend_gate_closed) else 1
 
     closed_count = (gate_series == 0).sum()
     total = len(gate_series)
-    print(f"[score_history] 双门重建完成: {closed_count}/{total}天关闭 ({closed_count/total:.1%})")
+    print(f"[score_history] 双门重建完成(OR严格): {closed_count}/{total}天关闭 ({closed_count/total:.1%})")
     return gate_series
 
 
