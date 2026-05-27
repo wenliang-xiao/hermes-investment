@@ -612,24 +612,42 @@ def generate_mock_factor_scores(symbols: List[str], start: str, end: str,
     return scores
 
 
-def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
+def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
                  symbols: Optional[List[str]] = None) -> List[BacktestResult]:
     """
     主入口：运行三个策略的回测并返回结果列表。
+    end=None 时自动使用 baostock 最新交易日（动态截止），保证研报和回测数据同源。
     """
-    if symbols is None:
+    if end is None:
         try:
-            from investment_system.config import WATCHLIST
-            symbols = [k for k in WATCHLIST.keys() if str(k).isdigit()]
-            print(f"[backtest] 使用 watchlist A股核心票: {len(symbols)} 只")
+            import baostock as bs
+            bs.login()
+            rs = bs.query_trade_dates(start_date="2024-01-01", end_date="2030-12-31")
+            last_trade = "2024-12-31"
+            while rs.next():
+                r = rs.get_row_data()
+                if r[1] == "1":
+                    last_trade = r[0]
+            bs.logout()
+            end = last_trade
+            print(f"[backtest] end_date 自动设为 baostock 最新交易日: {end}")
         except Exception:
-            from investment_system.config import INDUSTRY_CHAINS
-            symbols_set = set()
-            for chain in INDUSTRY_CHAINS.values():
-                for s in chain.get("symbols", []):
-                    if str(s).isdigit():
-                        symbols_set.add(str(s))
-            symbols = list(symbols_set)[:60]
+            end = datetime.now().strftime("%Y-%m-%d")
+            print(f"[backtest] end_date fallback 到今天: {end}")
+    if symbols is None:
+        from investment_system.config import WATCHLIST, INDUSTRY_CHAINS
+        chain_symbols_set = set()
+        for chain in INDUSTRY_CHAINS.values():
+            for s in chain.get("symbols", []):
+                if str(s).isdigit():
+                    chain_symbols_set.add(str(s))
+        symbols = [k for k in WATCHLIST.keys()
+                   if str(k).isdigit() and str(k) in chain_symbols_set]
+        print(f"[backtest] 多因子选股池: WATCHLIST∩链内 = {len(symbols)}只"
+              f" (WATCHLIST共{sum(1 for k in WATCHLIST if str(k).isdigit())}只A股,"
+              f" 链内共{len(chain_symbols_set)}只)")
+        if not symbols:
+            symbols = [str(s) for s in chain_symbols_set][:60]
             print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
 
     etf_symbols = list(ALLWEATHER_WEIGHTS.keys())
@@ -907,7 +925,7 @@ def generate_investor_report(results: List[BacktestResult], output_path: str = "
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2018-01-01")
-    parser.add_argument("--end", default="2024-12-31")
+    parser.add_argument("--end", default=None, help="截止日期（默认自动取baostock最新交易日）")
     parser.add_argument("--output", default="", help="JSON输出路径（可选）")
     parser.add_argument("--investor-report", default="", help="投资者完整报告输出路径（.txt）")
     args = parser.parse_args()

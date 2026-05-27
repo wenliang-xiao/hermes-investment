@@ -403,13 +403,25 @@ def build_historical_scores_from_prices(
                     s_quality = max(1, min(10, 1 + 9 * min(abs(roe), 40) / 40))
                     s_growth = max(1, min(10, 1 + 9 * min(abs(rev), 60) / 60))
 
-            if use_fundamentals and sym in fundamental_data:
-                score = (s_quality * 0.25 + s_growth * 0.15 +
-                         s_momentum * 0.25 + s_lowvol * 0.20 + s_tech * 0.15)
-            else:
-                score = s_momentum * 0.50 + s_lowvol * 0.30 + s_tech * 0.20
+            try:
+                from investment_system.analysis.factor_scanner import FactorScanner
+                _fs = FactorScanner()
+                s_profit_pool = _fs._get_profit_pool_score(sym)
+                perez_mult = _fs._get_perez_multiplier(sym)
+            except Exception:
+                s_profit_pool = 5.0
+                perez_mult = 1.0
 
-            day_scores[sym] = round(max(1, min(10, score)), 2)
+            if use_fundamentals and sym in fundamental_data:
+                score = (s_quality * 0.20 + s_growth * 0.10 +
+                         s_momentum * 0.20 + s_lowvol * 0.15 + s_tech * 0.10 +
+                         s_profit_pool * 0.25)
+            else:
+                score = (s_momentum * 0.35 + s_lowvol * 0.20 + s_tech * 0.15 +
+                         s_profit_pool * 0.30)
+
+            score = max(1, min(10, score * perez_mult))
+            day_scores[sym] = round(score, 2)
 
         if day_scores:
             all_scores[date_str] = day_scores
