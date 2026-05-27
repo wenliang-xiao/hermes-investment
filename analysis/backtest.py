@@ -73,6 +73,7 @@ class BacktestResult:
     calmar: float = 0.0
     win_rate_vs_benchmark: float = 0.0
     monthly_returns: pd.Series = field(default_factory=pd.Series)
+    gate_closed_pct: float = 0.0  # 双门关闭比例（策略三）
 
     def to_dict(self) -> dict:
         return {
@@ -84,28 +85,29 @@ class BacktestResult:
             "calmar": f"{self.calmar:.2f}",
             "win_rate_vs_benchmark": f"{self.win_rate_vs_benchmark:.1%}",
             "total_trades": len(self.trades),
+            "gate_closed_pct": f"{self.gate_closed_pct:.1%}" if self.gate_closed_pct > 0 else "N/A",
         }
 
 
 def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.DataFrame]:
     """
     批量拉取股票/ETF/指数日线数据。
-      - A股个股（纯数字） → baostock
+      - A股个股（纯数字） → yfinance 优先，失败则 baostock 备用
       - 中国ETF（512/518/159/511/588开头）→ AKShare fund_etf_hist_em
-      - 沪深300（000300）→ baostock sh.000300
+      - 沪深300（000300）→ yfinance 或 AKShare
       - 其它（字母开头）→ yfinance
     """
     data = {}
     import time as _time
 
     # 分类
-    a_stock_list = []     # baostock
-    cn_etf_list = []      # AKShare
-    yf_list = []          # yfinance
+    a_stock_list = []
+    cn_etf_list = []
+    yf_list = []
     for s in symbols:
         ds = str(s)
         if ds == "000300":
-            a_stock_list.append(s)  # baostock for CSI 300
+            a_stock_list.append(s)  # 走 yfinance/AKShare
         elif ds.isdigit() and (ds.startswith(("512", "513", "518", "511", "588", "159")) or ds in ("159915", "159926", "159985")):
             cn_etf_list.append(s)
         elif ds.isdigit():
@@ -113,74 +115,104 @@ def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.D
         else:
             yf_list.append(s)
 
-    # ─── baostock（A股个股 + 沪深300）───
+    # ─── 沪深300：AKShare优先（yfinance仅925天不全）───
+    if "000300" in symbols:
+        try:
+            import akshare as ak
+            df = ak.stock_zh_index_daily(symbol="sh000300")
+            if not df.empty:
+                df["date"] = pd.to_datetime(df["date"])
+                df.set_index("date", inplace=True)
+                df = df[(df.index >= start) & (df.index <= end)].copy()
+                df["close"] = pd.to_numeric(df["close"], errors="coerce")
+                data["000300"] = df[["close"]]
+        except Exception:
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker("000300.SS")
+                df = ticker.history(start=start, end=end)
+                if not df.empty:
+                    if df.index.tz is not None:
+                        df.index = df.index.tz_localize(None)
+                    data["000300"] = df[["Close"]].rename(columns={"Close": "close"})
+            except Exception:
+                pass
+
+    # ─── yfinance（A股个股）───
     if a_stock_list:
         try:
-            import baostock as bs
-            bs.login()
+            import yfinance as yf
             for sym in a_stock_list:
                 try:
-                    code = "sh.000300" if str(sym) == "000300" else (
-                        f"sh.{sym}" if str(sym).startswith(("5", "6")) else f"sz.{sym}"
+                    code = "000300.SS" if str(sym) == "000300" else (
+                        f"{sym}.SS" if str(sym).startswith(("5", "6")) else f"{sym}.SZ"
                     )
-                    rs = bs.query_history_k_data_plus(
-                        code, "date,close",
-                        start_date=start, end_date=end,
-                        frequency="d", adjustflag="2"
-                    )
-                    rows = []
-                    while rs.next():
-                        r = rs.get_row_data()
-                        if r[1]:
-                            rows.append({"date": r[0], "close": float(r[1])})
-                    if rows:
-                        df = pd.DataFrame(rows)
-                        df["date"] = pd.to_datetime(df["date"])
-                        df.set_index("date", inplace=True)
-                        data[sym] = df
+                    ticker = yf.Ticker(code)
+                    df = ticker.history(start=start, end=end)
+                    if not df.empty:
+                        if df.index.tz is not None:
+                            df.index = df.index.tz_localize(None)
+                        data[sym] = df[["Close"]].rename(columns={"Close": "close"})
+                        continue  # 跳过baostock备用
                 except Exception:
                     pass
-            bs.logout()
         except Exception:
             pass
 
-    # ─── AKShare（中国ETF）───
-    if cn_etf_list:
+    # ─── 沪深300备用：AKShare ───
+    if "000300" not in data and "000300" in symbols:
         try:
             import akshare as ak
-            for sym in cn_etf_list:
-                try:
-                    start_dt = f"{start[:10]}"
-                    end_dt = f"{end[:10]}"
-                    df = ak.fund_etf_hist_em(
-                        symbol=sym,
-                        period="daily",
-                        start_date=start_dt,
-                        end_date=end_dt,
-                        adjust="qfq",
-                    )
-                    if df is not None and not df.empty:
-                        cols = [str(c).lower() for c in df.columns]
-                        if "日期" in cols:
-                            df["date"] = pd.to_datetime(df.iloc[:, 0])
-                            df.set_index("date", inplace=True)
-                            close_col = [i for i, c in enumerate(cols) if "收盘" in c]
-                            if close_col:
-                                df["close"] = pd.to_numeric(df.iloc[:, close_col[0]], errors="coerce")
-                                data[sym] = df[["close"]]
-                    _time.sleep(0.5)  # AKShare rate limit
-                except Exception:
-                    # Fallback to yfinance for this ETF
-                    try:
-                        import yfinance as yf
-                        yf_code = f"{sym}.SS"
-                        yf_df = yf.Ticker(yf_code).history(start=start, end=end)
-                        if not yf_df.empty:
-                            data[sym] = yf_df[["Close"]].rename(columns={"Close": "close"})
-                    except Exception:
-                        pass
+            df = ak.stock_zh_index_daily(symbol="sh000300")
+            if not df.empty:
+                df["date"] = pd.to_datetime(df["date"])
+                df.set_index("date", inplace=True)
+                df = df[(df.index >= start) & (df.index <= end)]
+                data["000300"] = df[["close"]]
         except Exception:
             pass
+
+    # ─── AKShare（中国ETF，优先），失败则yfinance ───
+    if cn_etf_list:
+        for sym in cn_etf_list:
+            try:
+                import yfinance as yf
+                # 先试 yfinance — 512xxx.SS / 159xxx.SZ
+                yf_code = f"{sym}.SS"
+                yf_df = yf.Ticker(yf_code).history(start=start, end=end)
+                if yf_df.empty:
+                    yf_code = f"{sym}.SZ"
+                    yf_df = yf.Ticker(yf_code).history(start=start, end=end)
+                if not yf_df.empty:
+                    if yf_df.index.tz is not None:
+                        yf_df.index = yf_df.index.tz_localize(None)
+                    data[sym] = yf_df[["Close"]].rename(columns={"Close": "close"})
+                    continue
+            except Exception:
+                pass
+            # Fallback: AKShare
+            try:
+                import akshare as ak
+                start_dt = f"{start[:10]}"
+                end_dt = f"{end[:10]}"
+                df = ak.fund_etf_hist_em(
+                    symbol=sym,
+                    period="daily",
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    adjust="qfq",
+                )
+                if df is not None and not df.empty:
+                    cols = [str(c).lower() for c in df.columns]
+                    if "日期" in cols:
+                        df["date"] = pd.to_datetime(df.iloc[:, 0])
+                        df.set_index("date", inplace=True)
+                        close_col = [i for i, c in enumerate(cols) if "收盘" in c]
+                        if close_col:
+                            df["close"] = pd.to_numeric(df.iloc[:, close_col[0]], errors="coerce")
+                            data[sym] = df[["close"]]
+            except Exception:
+                pass
 
     # ─── yfinance（非A股，如美股ETF）───
     if yf_list:
@@ -191,6 +223,8 @@ def _load_price_data(symbols: List[str], start: str, end: str) -> Dict[str, pd.D
                     ticker = yf.Ticker(sym)
                     df = ticker.history(start=start, end=end)[["Close"]].rename(columns={"Close": "close"})
                     if not df.empty:
+                        if df.index.tz is not None:
+                            df.index = df.index.tz_localize(None)
                         data[sym] = df
                 except Exception:
                     pass
@@ -320,11 +354,16 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
     trades: List[Trade] = []
     rebalance_dates = pd.date_range(start, end, freq="W-FRI")
 
+    gate_closed_days = 0
+    total_days = len(dates)
+
     for i, date in enumerate(dates[1:], 1):
         gate_open = True
         if use_dual_gate and gate_series is not None:
             gate_val = gate_series.get(date, gate_series.get(date - timedelta(days=1), 1))
             gate_open = bool(gate_val)
+            if not gate_open:
+                gate_closed_days += 1
 
         if not gate_open and holdings:
             for sym, w in list(holdings.items()):
@@ -415,6 +454,7 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
         equity_curve=equity,
         benchmark_curve=benchmark,
         trades=trades,
+        gate_closed_pct=gate_closed_days / max(total_days, 1),
         **{k: v for k, v in metrics.items() if k != "monthly_returns"},
     )
     result.monthly_returns = metrics.get("monthly_returns", pd.Series())
@@ -470,10 +510,22 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
     price_data = _load_price_data(all_symbols, start, end)
     print(f"[backtest] 成功加载: {len(price_data)} 只")
 
+    loaded_symbols = []
+    for s in symbols:
+        if s in price_data:
+            loaded_symbols.append(s)
+    symbols = loaded_symbols
+    print(f"[backtest] 可用A股标的: {len(symbols)} 只")
+
     benchmark = pd.Series(dtype=float)
     if "000300" in price_data:
         bm_df = price_data["000300"]
         benchmark = bm_df["close"] / bm_df["close"].iloc[0]
+        print(f"[backtest] 沪深300基准加载: {len(bm_df)} 天")
+    else:
+        # 无基准时用等权替代
+        print("[backtest] ⚠️ 沪深300基准不可用，跳过基准对比")
+        benchmark = pd.Series(index=pd.date_range(start, end, freq="B"), dtype=float)
 
     print("[backtest] 加载/重建因子评分...")
     try:
@@ -512,12 +564,13 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
 
 
 def print_report(results: List[BacktestResult]):
-    print("\n" + "="*70)
-    print("回测报告")
-    print("="*70)
-    headers = ["策略", "年化收益", "最大回撤", "夏普", "卡玛", "月度胜率(vs基准)"]
+    print("\n" + "=" * 80)
+    print("回测报告 — 三策略对比（2018-2024）")
+    print("=" * 80)
+    headers = ["策略", "年化收益", "最大回撤", "夏普", "卡玛", "月度胜率(vs基准)", "双门关闭"]
     rows = []
     for r in results:
+        gate_str = f"{r.gate_closed_pct:.1%}" if r.gate_closed_pct > 0 else "-"
         rows.append([
             r.strategy_name,
             f"{r.annual_return:.1%}",
@@ -525,6 +578,7 @@ def print_report(results: List[BacktestResult]):
             f"{r.sharpe:.2f}",
             f"{r.calmar:.2f}",
             f"{r.win_rate_vs_benchmark:.1%}",
+            gate_str,
         ])
 
     col_widths = [max(len(str(row[i])) for row in rows + [headers]) + 2 for i in range(len(headers))]
@@ -533,7 +587,7 @@ def print_report(results: List[BacktestResult]):
     print("-" * sum(col_widths))
     for row in rows:
         print(fmt.format(*row))
-    print("="*70)
+    print("=" * 80)
     print("\n目标验证（低波动+可接受回撤+2x沪深300）:")
     for r in results:
         passes = []
@@ -546,6 +600,26 @@ def print_report(results: List[BacktestResult]):
         else:
             passes.append(f"⚠️  夏普{r.sharpe:.2f}<1.0")
         print(f"  {r.strategy_name}: {' | '.join(passes)}")
+
+    # 详细分析
+    print("\n" + "─" * 80)
+    print("深度分析")
+    print("─" * 80)
+    for r in results:
+        if r.trades:
+            pnls = [t.pnl_pct for t in r.trades]
+            avg_pnl = np.mean(pnls) if pnls else 0
+            win_rate = sum(1 for p in pnls if p > 0) / len(pnls) if pnls else 0
+            stop_loss_count = sum(1 for t in r.trades if t.exit_reason == "stop_loss")
+            tp_full_count = sum(1 for t in r.trades if t.exit_reason == "take_profit_full")
+            print(f"  {r.strategy_name}:")
+            print(f"    交易次数: {len(r.trades)}")
+            print(f"    平均单笔盈亏: {avg_pnl:.2%}")
+            print(f"    胜率: {win_rate:.1%}")
+            print(f"    止损触发: {stop_loss_count}次")
+            print(f"    止盈(全仓)触发: {tp_full_count}次")
+            if r.gate_closed_pct > 0:
+                print(f"    双门关闭: {r.gate_closed_pct:.1%}天持仓={1-r.gate_closed_pct:.1%}天")
 
 
 if __name__ == "__main__":
