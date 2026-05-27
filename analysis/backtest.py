@@ -398,8 +398,10 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
     holdings: Dict[str, float] = {}
     entry_prices: Dict[str, float] = {}
     entry_dates: Dict[str, str] = {}
+    peak_prices: Dict[str, float] = {}
     trades: List[Trade] = []
-    rebalance_dates = pd.date_range(start, end, freq="W-FRI")
+    rebalance_dates = pd.date_range(start, end, freq="4W-FRI")
+    REPLACEMENT_THRESHOLD = 0.15
 
     gate_closed_days = 0
     total_days = len(dates)
@@ -441,24 +443,68 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
             entry_p = entry_prices.get(sym, curr_p)
             pnl = (curr_p - entry_p) / entry_p
             entry_d = entry_dates.get(sym, "")
-            if pnl <= -STOP_LOSS:
+
+            peak_prices[sym] = max(peak_prices.get(sym, curr_p), curr_p)
+            peak_p = peak_prices[sym]
+            dd_from_peak = (curr_p - peak_p) / peak_p if peak_p > 0 else 0
+
+            early_loss = pnl <= -STOP_LOSS
+
+            is_winner = pnl >= 0.15
+            trend_stop_triggered = is_winner and dd_from_peak <= -0.20
+
+            if early_loss:
                 exit_set.add(sym)
                 trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
-            elif pnl >= TAKE_PROFIT_FULL:
+            elif trend_stop_triggered:
                 exit_set.add(sym)
-                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_full", pnl))
-            elif pnl >= TAKE_PROFIT_HALF:
-                holdings[sym] *= 0.5
-                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_half", pnl))
+                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "trend_stop", pnl))
         for sym in exit_set:
             holdings.pop(sym, None)
             entry_prices.pop(sym, None)
+            peak_prices.pop(sym, None)
 
         if date in rebalance_dates and gate_open:
             date_str = date.strftime("%Y-%m-%d")
             scores = factor_scores.get(date_str, {})
             if scores:
-                top_n = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:PORTFOLIO_MAX_POSITIONS]
+                def _right_side_ok(sym):
+                    if sym not in price_data:
+                        return False
+                    df = price_data[sym]
+                    hist = df[df.index <= date]
+                    if len(hist) < 60:
+                        return True
+                    close = hist["close"].values
+                    ma20 = float(np.mean(close[-20:])) if len(close) >= 20 else close[-1]
+                    ma60 = float(np.mean(close[-60:]))
+                    return close[-1] > ma60 and ma20 > ma60
+
+                qualified = {sym: sc for sym, sc in scores.items() if _right_side_ok(sym)}
+                if not qualified:
+                    qualified = scores
+
+                top_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
+                held_scores = {sym: scores.get(sym, 0.0) for sym in holdings}
+                final_top = []
+                held_remaining = set(holdings.keys())
+                for sym, sc in top_candidates:
+                    if sym in holdings:
+                        final_top.append((sym, sc))
+                        held_remaining.discard(sym)
+                    else:
+                        if held_remaining:
+                            weakest_held = min(held_remaining, key=lambda s: held_scores.get(s, 0))
+                            if sc > held_scores.get(weakest_held, 0) * (1 + REPLACEMENT_THRESHOLD):
+                                final_top.append((sym, sc))
+                                held_remaining.discard(weakest_held)
+                        else:
+                            final_top.append((sym, sc))
+                    if len(final_top) >= PORTFOLIO_MAX_POSITIONS:
+                        break
+                if not final_top:
+                    final_top = top_candidates[:PORTFOLIO_MAX_POSITIONS]
+                top_n = final_top[:PORTFOLIO_MAX_POSITIONS]
                 new_holdings = {sym: 1.0 / PORTFOLIO_MAX_POSITIONS for sym, _ in top_n}
                 entered = set(new_holdings) - set(holdings)
                 exited = set(holdings) - set(new_holdings)
@@ -490,8 +536,12 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                     if sym in price_data:
                         curr_idx = price_data[sym].index[price_data[sym].index <= date]
                         if len(curr_idx) > 0:
-                            entry_prices[sym] = float(price_data[sym].loc[curr_idx[-1], "close"])
+                            ep = float(price_data[sym].loc[curr_idx[-1], "close"])
+                            entry_prices[sym] = ep
                             entry_dates[sym] = date.strftime("%Y-%m-%d")
+                            peak_prices[sym] = ep
+                for sym in exited:
+                    peak_prices.pop(sym, None)
                 holdings = new_holdings
                 TRADE_COST = 0.002
                 portfolio_value.iloc[i - 1] *= (1 - TRADE_COST * (len(entered) + len(exited)) / max(PORTFOLIO_MAX_POSITIONS, 1))
@@ -568,13 +618,19 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
     主入口：运行三个策略的回测并返回结果列表。
     """
     if symbols is None:
-        from investment_system.config import INDUSTRY_CHAINS
-        symbols_set = set()
-        for chain in INDUSTRY_CHAINS.values():
-            for s in chain.get("symbols", []):
-                if str(s).isdigit():
-                    symbols_set.add(str(s))
-        symbols = list(symbols_set)[:30]
+        try:
+            from investment_system.config import WATCHLIST
+            symbols = [k for k in WATCHLIST.keys() if str(k).isdigit()]
+            print(f"[backtest] 使用 watchlist A股核心票: {len(symbols)} 只")
+        except Exception:
+            from investment_system.config import INDUSTRY_CHAINS
+            symbols_set = set()
+            for chain in INDUSTRY_CHAINS.values():
+                for s in chain.get("symbols", []):
+                    if str(s).isdigit():
+                        symbols_set.add(str(s))
+            symbols = list(symbols_set)[:60]
+            print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
 
     etf_symbols = list(ALLWEATHER_WEIGHTS.keys())
     all_symbols = list(set(symbols + etf_symbols + ["000300"]))
@@ -690,7 +746,21 @@ def print_report(results: List[BacktestResult]):
             print(f"    平均单笔盈亏: {avg_pnl:.2%}")
             print(f"    胜率: {win_rate:.1%}")
             print(f"    止损触发: {stop_loss_count}次")
+            tp_full_count = sum(1 for t in r.trades if t.exit_reason == "take_profit_full")
+            trend_stop_count = sum(1 for t in r.trades if t.exit_reason == "trend_stop")
+            rebalance_count = sum(1 for t in r.trades if t.exit_reason == "rebalance")
             print(f"    止盈(全仓)触发: {tp_full_count}次")
+            print(f"    趋势止损触发: {trend_stop_count}次")
+            rebalance_pnls = [t.pnl_pct for t in r.trades if t.exit_reason == "rebalance"]
+            if rebalance_pnls:
+                rb_wr = sum(1 for p in rebalance_pnls if p > 0) / len(rebalance_pnls)
+                print(f"    换仓次数: {rebalance_count}次 | 换仓胜率: {rb_wr:.1%} | 换仓均盈: {np.mean(rebalance_pnls):+.1%}")
+            holding_days = [t.holding_period() for t in r.trades if t.holding_period() > 0]
+            if holding_days:
+                print(f"    平均持仓天数: {np.mean(holding_days):.0f}天 | 中位数: {np.median(holding_days):.0f}天")
+            n_years = max((pd.Timestamp(r.end_date) - pd.Timestamp(r.start_date)).days / 365, 1)
+            turnover = len([t for t in r.trades if t.exit_reason not in ("dual_gate_close",)]) / (8 * n_years)
+            print(f"    年化换手率: {turnover:.1f}x")
             if r.gate_closed_pct > 0:
                 print(f"    双门关闭: {r.gate_closed_pct:.1%}天持仓={1-r.gate_closed_pct:.1%}天")
 

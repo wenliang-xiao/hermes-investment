@@ -260,6 +260,9 @@ class FactorScanner:
             tech_bonus = max(0, (tech["total_tech_score"] - 5) * 0.2)
             total_score = min(10, total_score + tech_bonus)
 
+            profit_pool_score = self._get_profit_pool_score(symbol)
+            total_score = min(10, total_score * 0.70 + profit_pool_score * 0.30)
+
             perez_multiplier = self._get_perez_multiplier(symbol)
             total_score = min(10, total_score * perez_multiplier)
 
@@ -301,6 +304,7 @@ class FactorScanner:
                 "symbol": symbol,
                 "score": round(total_score, 2),
                 "perez_multiplier": perez_multiplier,
+                "profit_pool_score": round(profit_pool_score, 1),
                 "factors": {
                     "质量": quality, "价值": value, "成长": growth,
                     "低波": lowvol, "红利": div, "动量": momentum,
@@ -325,31 +329,57 @@ class FactorScanner:
 
     def _get_perez_multiplier(self, symbol: str) -> float:
         """
-        LDS逻辑门：根据股票所在产业链的Perez阶段返回评分乘数。
-        展开期前段（渗透率<30%+加速度>0）= 黄金期，乘数最高。
-        成熟期/衰退期 = 降权，避免买进利润池已经在收缩的链。
+        LDS逻辑门：Perez阶段同时影响评分乘数和建议仓位乘数。
+        展开期前段（渗透率<30%+加速度>0）= 黄金期，满仓。
+        导入期 = 半仓（高赔率低确定性，凯利半注）。
+        成熟/衰退 = 降权避让利润池收缩链。
         """
-        PEREZ_MULTIPLIERS = {
+        PEREZ_SCORE_MULT = {
             "导入":  1.10,
             "狂热":  1.05,
             "展开":  1.15,
             "协同":  1.00,
-            "成熟":  0.90,
-            "衰退":  0.75,
-            "沉寂":  0.60,
+            "成熟":  0.88,
+            "衰退":  0.70,
+            "沉寂":  0.55,
         }
         try:
             from investment_system.config import INDUSTRY_CHAINS
             for chain_name, chain_data in INDUSTRY_CHAINS.items():
                 if symbol in chain_data.get("symbols", []):
                     perez = chain_data.get("perez_stage", "")
-                    for key, mult in PEREZ_MULTIPLIERS.items():
+                    for key, mult in PEREZ_SCORE_MULT.items():
                         if key in perez:
                             return mult
                     break
         except Exception:
             pass
         return 1.0
+
+    def _get_profit_pool_score(self, symbol: str) -> float:
+        """
+        利润池位置评分（面基核心：买利润率最高的环节）。
+        链内毛利率最高的环节得10分，最低得2分。
+        无数据时返回中性5分。
+        """
+        try:
+            from investment_system.config import INDUSTRY_CHAINS
+            for chain_name, chain_data in INDUSTRY_CHAINS.items():
+                syms = chain_data.get("symbols", [])
+                if symbol not in [str(s) for s in syms]:
+                    continue
+                a_profit_pool = chain_data.get("a_profit_pool", [])
+                if not a_profit_pool:
+                    return 5.0
+                pool_codes = [str(p.get("code", "")) for p in a_profit_pool]
+                if str(symbol) in pool_codes:
+                    rank = pool_codes.index(str(symbol))
+                    total = len(pool_codes)
+                    return round(10 - (rank / max(total - 1, 1)) * 8, 1)
+                return 4.0
+        except Exception:
+            pass
+        return 5.0
 
     def _calc_chg(self, df):
         if df.empty or len(df) < 2:
