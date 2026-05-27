@@ -204,7 +204,7 @@ def _get_historical_cpi(start: str, end: str) -> Dict[str, float]:
 
 
 def _get_index_ma_series(start: str, end: str) -> Dict:
-    """获取上证指数20日均线偏离度序列（趋势门判断依据）。
+    """获取上证指数60日均线偏离度序列（趋势门判断依据）。
     优先baostock，超时失败时fallback到yfinance。
     """
     # ── 先试 baostock ──
@@ -239,7 +239,7 @@ def _get_index_ma_series(start: str, end: str) -> Dict:
     # ── fallback: yfinance ──
     try:
         import yfinance as yf
-        start_dt = (datetime.strptime(start, "%Y-%m-%d") - timedelta(days=60)).strftime("%Y-%m-%d")
+        start_dt = (datetime.strptime(start, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
         ticker = yf.Ticker("000001.SS")
         df = ticker.history(start=start_dt, end=end)
         if not df.empty:
