@@ -537,7 +537,7 @@ def run_backtest(start: str = "2018-01-01", end: str = "2024-12-31",
         print(f"[backtest] 历史快照加载: {coverage} 个交易日")
         if coverage < 10:
             print("[backtest] 历史快照不足，改用价格重建因子分（D-lite）...")
-            factor_scores = build_historical_scores_from_prices(symbols, price_data, start, end)
+            factor_scores = build_historical_scores_from_prices(symbols, price_data, start, end, use_fundamentals=False)
             print(f"[backtest] D-lite重建完成: {len(factor_scores)} 个截面")
     except Exception as e:
         print(f"[backtest] 因子分加载失败({e})，fallback到模拟分...")
