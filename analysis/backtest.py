@@ -57,6 +57,30 @@ class Trade:
     exit_price: Optional[float] = None
     exit_reason: str = ""
     pnl_pct: float = 0.0
+    chain: str = ""
+    score: float = 0.0
+    holding_days: int = 0
+
+    def holding_period(self) -> int:
+        if self.entry_date and self.exit_date:
+            try:
+                from datetime import datetime
+                d = (datetime.strptime(self.exit_date, "%Y-%m-%d") -
+                     datetime.strptime(self.entry_date, "%Y-%m-%d")).days
+                return max(0, d)
+            except Exception:
+                pass
+        return self.holding_days
+
+    def exit_reason_cn(self) -> str:
+        mapping = {
+            "stop_loss": "🔴止损(-8%)",
+            "take_profit_full": "🟢止盈(+30%)",
+            "take_profit_half": "🟡减半仓(+15%)",
+            "rebalance": "🔄换仓(周度再平衡)",
+            "dual_gate_close": "🚪双门关闭(空仓)",
+        }
+        return mapping.get(self.exit_reason, self.exit_reason)
 
 
 @dataclass
@@ -73,7 +97,9 @@ class BacktestResult:
     calmar: float = 0.0
     win_rate_vs_benchmark: float = 0.0
     monthly_returns: pd.Series = field(default_factory=pd.Series)
-    gate_closed_pct: float = 0.0  # 双门关闭比例（策略三）
+    yearly_returns: Dict[int, float] = field(default_factory=dict)
+    drawdown_series: pd.Series = field(default_factory=pd.Series)
+    gate_closed_pct: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -86,6 +112,7 @@ class BacktestResult:
             "win_rate_vs_benchmark": f"{self.win_rate_vs_benchmark:.1%}",
             "total_trades": len(self.trades),
             "gate_closed_pct": f"{self.gate_closed_pct:.1%}" if self.gate_closed_pct > 0 else "N/A",
+            "yearly_returns": {str(y): f"{r:.1%}" for y, r in self.yearly_returns.items()},
         }
 
 
@@ -270,6 +297,20 @@ def _calc_metrics(equity: pd.Series, benchmark: pd.Series, rf: float = RISK_FREE
     else:
         win_rate = 0.0
 
+    yearly_eq = equity.resample("YE").last()
+    yearly_returns = {}
+    for i in range(1, len(yearly_eq)):
+        year = yearly_eq.index[i].year
+        yr = float(yearly_eq.iloc[i] / yearly_eq.iloc[i - 1] - 1)
+        yearly_returns[year] = yr
+    if len(yearly_eq) >= 1:
+        first_year = yearly_eq.index[0].year
+        if first_year not in yearly_returns:
+            yr0 = float(yearly_eq.iloc[0] / equity.iloc[0] - 1)
+            yearly_returns[first_year] = yr0
+
+    drawdown_series = (equity - equity.expanding().max()) / equity.expanding().max()
+
     return {
         "annual_return": annual_return,
         "max_drawdown": max_drawdown,
@@ -277,6 +318,8 @@ def _calc_metrics(equity: pd.Series, benchmark: pd.Series, rf: float = RISK_FREE
         "calmar": calmar,
         "win_rate_vs_benchmark": win_rate,
         "monthly_returns": monthly_eq,
+        "yearly_returns": yearly_returns,
+        "drawdown_series": drawdown_series,
     }
 
 
@@ -321,15 +364,18 @@ def run_allweather(price_data: Dict[str, pd.DataFrame], start: str, end: str,
     equity = portfolio_value.dropna()
     metrics = _calc_metrics(equity, benchmark)
 
+    exclude = {"monthly_returns", "yearly_returns", "drawdown_series"}
     result = BacktestResult(
         strategy_name="LDS全天候ETF",
         start_date=start,
         end_date=end,
         equity_curve=equity,
         benchmark_curve=benchmark,
-        **{k: v for k, v in metrics.items() if k != "monthly_returns"},
+        **{k: v for k, v in metrics.items() if k not in exclude},
     )
     result.monthly_returns = metrics.get("monthly_returns", pd.Series())
+    result.yearly_returns = metrics.get("yearly_returns", {})
+    result.drawdown_series = metrics.get("drawdown_series", pd.Series())
     return result
 
 
@@ -351,6 +397,7 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
 
     holdings: Dict[str, float] = {}
     entry_prices: Dict[str, float] = {}
+    entry_dates: Dict[str, str] = {}
     trades: List[Trade] = []
     rebalance_dates = pd.date_range(start, end, freq="W-FRI")
 
@@ -374,9 +421,11 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                         exit_p = float(price_data[sym].loc[curr_idx[-1], "close"])
                         entry_p = entry_prices.get(sym, exit_p)
                         pnl = (exit_p - entry_p) / entry_p
-                        trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), exit_p, "dual_gate_close", pnl))
+                        entry_d = entry_dates.get(sym, "")
+                        trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), exit_p, "dual_gate_close", pnl))
             holdings = {}
             entry_prices = {}
+            entry_dates = {}
         elif gate_half and holdings:
             holdings = {sym: w * 0.5 for sym, w in holdings.items()}
 
@@ -391,15 +440,16 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
             curr_p = float(df.loc[curr_idx[-1], "close"])
             entry_p = entry_prices.get(sym, curr_p)
             pnl = (curr_p - entry_p) / entry_p
+            entry_d = entry_dates.get(sym, "")
             if pnl <= -STOP_LOSS:
                 exit_set.add(sym)
-                trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
+                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
             elif pnl >= TAKE_PROFIT_FULL:
                 exit_set.add(sym)
-                trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_full", pnl))
+                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_full", pnl))
             elif pnl >= TAKE_PROFIT_HALF:
                 holdings[sym] *= 0.5
-                trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_half", pnl))
+                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "take_profit_half", pnl))
         for sym in exit_set:
             holdings.pop(sym, None)
             entry_prices.pop(sym, None)
@@ -412,6 +462,17 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                 new_holdings = {sym: 1.0 / PORTFOLIO_MAX_POSITIONS for sym, _ in top_n}
                 entered = set(new_holdings) - set(holdings)
                 exited = set(holdings) - set(new_holdings)
+                sym_chain = {}
+                sym_score = {sym: sc for sym, sc in top_n}
+                try:
+                    from investment_system.config import INDUSTRY_CHAINS
+                    for chain_name, chain_data in INDUSTRY_CHAINS.items():
+                        for s in chain_data.get("symbols", []):
+                            if str(s) not in sym_chain:
+                                sym_chain[str(s)] = chain_name
+                except Exception:
+                    pass
+
                 for sym in exited:
                     if sym in price_data:
                         curr_idx = price_data[sym].index[price_data[sym].index <= date]
@@ -419,12 +480,18 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                             exit_p = float(price_data[sym].loc[curr_idx[-1], "close"])
                             entry_p = entry_prices.get(sym, exit_p)
                             pnl = (exit_p - entry_p) / entry_p
-                            trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), exit_p, "rebalance", pnl))
+                            entry_d = entry_dates.get(sym, "")
+                            t = Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"),
+                                      exit_p, "rebalance", pnl,
+                                      chain=sym_chain.get(sym, ""),
+                                      score=sym_score.get(sym, 0.0))
+                            trades.append(t)
                 for sym in entered:
                     if sym in price_data:
                         curr_idx = price_data[sym].index[price_data[sym].index <= date]
                         if len(curr_idx) > 0:
                             entry_prices[sym] = float(price_data[sym].loc[curr_idx[-1], "close"])
+                            entry_dates[sym] = date.strftime("%Y-%m-%d")
                 holdings = new_holdings
                 TRADE_COST = 0.002
                 portfolio_value.iloc[i - 1] *= (1 - TRADE_COST * (len(entered) + len(exited)) / max(PORTFOLIO_MAX_POSITIONS, 1))
@@ -450,6 +517,7 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
 
     equity = portfolio_value.dropna()
     metrics = _calc_metrics(equity, benchmark)
+    exclude = {"monthly_returns", "yearly_returns", "drawdown_series"}
     result = BacktestResult(
         strategy_name=strategy_name,
         start_date=start,
@@ -458,9 +526,11 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
         benchmark_curve=benchmark,
         trades=trades,
         gate_closed_pct=gate_closed_days / max(total_days, 1),
-        **{k: v for k, v in metrics.items() if k != "monthly_returns"},
+        **{k: v for k, v in metrics.items() if k not in exclude},
     )
     result.monthly_returns = metrics.get("monthly_returns", pd.Series())
+    result.yearly_returns = metrics.get("yearly_returns", {})
+    result.drawdown_series = metrics.get("drawdown_series", pd.Series())
     return result
 
 
@@ -625,11 +695,151 @@ def print_report(results: List[BacktestResult]):
                 print(f"    双门关闭: {r.gate_closed_pct:.1%}天持仓={1-r.gate_closed_pct:.1%}天")
 
 
+def generate_investor_report(results: List[BacktestResult], output_path: str = "") -> str:
+    """
+    三层完整投资者报告：
+    Layer 1: 组合概览（净值曲线、年度盈亏、回撤时段）
+    Layer 2: 每笔交易记录（买了什么、何时买、何时卖、原因、盈亏）
+    Layer 3: 选股逻辑（为什么选这只、在哪条链、得分多少）
+    """
+    lines = []
+    SEP = "=" * 90
+
+    lines.append(SEP)
+    lines.append("  面基三源融合投资系统 · 完整回测报告（投资者版）")
+    lines.append(SEP)
+
+    for r in results:
+        lines.append(f"\n{'━'*90}")
+        lines.append(f"  策略：{r.strategy_name}  |  区间：{r.start_date} ~ {r.end_date}")
+        lines.append(f"{'━'*90}")
+
+        lines.append("\n【一、组合总览】")
+        lines.append(f"  年化收益：{r.annual_return:+.1%}  |  最大回撤：{r.max_drawdown:.1%}  |  夏普：{r.sharpe:.2f}  |  卡玛：{r.calmar:.2f}")
+        lines.append(f"  月度胜率（vs沪深300）：{r.win_rate_vs_benchmark:.1%}")
+        if r.gate_closed_pct > 0:
+            lines.append(f"  双门关闭：{r.gate_closed_pct:.1%}时间  |  实际持仓：{1-r.gate_closed_pct:.1%}时间")
+
+        if r.yearly_returns:
+            lines.append("\n【二、逐年盈亏】")
+            bm_yearly = {}
+            if not r.benchmark_curve.empty:
+                bm_yr = r.benchmark_curve.resample("YE").last()
+                for i in range(1, len(bm_yr)):
+                    y = bm_yr.index[i].year
+                    bm_yearly[y] = float(bm_yr.iloc[i] / bm_yr.iloc[i-1] - 1)
+
+            header = f"  {'年份':<6} {'策略收益':>10} {'基准(沪深300)':>14} {'超额':>8} {'判定':>6}"
+            lines.append(header)
+            lines.append("  " + "-" * 50)
+            for year in sorted(r.yearly_returns.keys()):
+                ret = r.yearly_returns[year]
+                bm = bm_yearly.get(year, None)
+                bm_str = f"{bm:+.1%}" if bm is not None else "  N/A  "
+                alpha = f"{ret - bm:+.1%}" if bm is not None else "  N/A"
+                flag = "✅" if ret > 0 else "❌"
+                lines.append(f"  {year:<6} {ret:>+10.1%} {bm_str:>14} {alpha:>8} {flag:>6}")
+
+        if not r.drawdown_series.empty:
+            lines.append("\n【三、最大回撤时段】")
+            dd = r.drawdown_series
+            min_dd = dd.min()
+            if min_dd < -0.05:
+                min_idx = dd.idxmin()
+                peak_before = dd[:min_idx]
+                peak_date = peak_before[peak_before == 0].index[-1] if (peak_before == 0).any() else dd.index[0]
+                recovery = dd[min_idx:]
+                recovery_dates = recovery[recovery >= -0.01].index
+                rec_date = recovery_dates[0] if len(recovery_dates) > 0 else "未恢复"
+                lines.append(f"  最大回撤 {min_dd:.1%}：从 {peak_date.strftime('%Y-%m-%d')} 开始，"
+                              f"谷底 {min_idx.strftime('%Y-%m-%d')}，"
+                              f"恢复于 {rec_date.strftime('%Y-%m-%d') if hasattr(rec_date, 'strftime') else rec_date}")
+
+                dd_pcts = [-0.05, -0.10, -0.15, -0.20]
+                for threshold in dd_pcts:
+                    periods = []
+                    in_dd = False
+                    start_d = None
+                    for d, v in dd.items():
+                        if v <= threshold and not in_dd:
+                            in_dd = True
+                            start_d = d
+                        elif v > threshold and in_dd:
+                            in_dd = False
+                            periods.append((start_d, d))
+                    if in_dd:
+                        periods.append((start_d, dd.index[-1]))
+                    if periods:
+                        dur = sum((e - s).days for s, e in periods)
+                        lines.append(f"  回撤>{abs(threshold):.0%} 共 {len(periods)} 次，累计 {dur} 天")
+
+        if r.trades:
+            lines.append(f"\n【四、逐笔交易记录】（共{len(r.trades)}笔）")
+            lines.append(f"  {'入场日':>12} {'出场日':>12} {'代码':>10} {'产业链':<18} {'入场价':>8} {'出场价':>8} {'盈亏':>8} {'持仓天':>6} {'原因'}")
+            lines.append("  " + "-" * 110)
+
+            sorted_trades = sorted(r.trades, key=lambda t: t.entry_date or "")
+            for t in sorted_trades:
+                hold = t.holding_period()
+                pnl_str = f"{t.pnl_pct:+.1%}"
+                flag = "🟢" if t.pnl_pct > 0 else "🔴"
+                chain_short = (t.chain[:16] + "..") if len(t.chain) > 16 else t.chain
+                lines.append(
+                    f"  {t.entry_date or '?':>12} {t.exit_date or '?':>12} {t.symbol:>10} "
+                    f"{chain_short:<18} {t.entry_price:>8.2f} {t.exit_price or 0:>8.2f} "
+                    f"{flag}{pnl_str:>7} {hold:>6}天  {t.exit_reason_cn()}"
+                )
+
+            lines.append(f"\n【五、按退出原因统计】")
+            from collections import Counter
+            reason_counts = Counter(t.exit_reason for t in r.trades)
+            reason_pnl: Dict[str, List[float]] = {}
+            for t in r.trades:
+                reason_pnl.setdefault(t.exit_reason, []).append(t.pnl_pct)
+            for reason, count in sorted(reason_counts.items(), key=lambda x: -x[1]):
+                pnls = reason_pnl[reason]
+                avg = np.mean(pnls)
+                win = sum(1 for p in pnls if p > 0) / len(pnls)
+                cn = {"stop_loss":"止损","take_profit_full":"止盈(全)","take_profit_half":"止盈(半)",
+                      "rebalance":"换仓","dual_gate_close":"双门关闭"}.get(reason, reason)
+                lines.append(f"  {cn:<12} {count:>5}次  平均盈亏 {avg:+.1%}  胜率 {win:.0%}")
+
+            lines.append(f"\n【六、产业链分布】")
+            chain_data: Dict[str, List[float]] = {}
+            for t in r.trades:
+                if t.chain:
+                    chain_data.setdefault(t.chain, []).append(t.pnl_pct)
+            for chain, pnls in sorted(chain_data.items(), key=lambda x: -len(x[1])):
+                avg = np.mean(pnls)
+                win = sum(1 for p in pnls if p > 0) / len(pnls)
+                lines.append(f"  {chain:<22} {len(pnls):>4}笔  平均盈亏 {avg:+.1%}  胜率 {win:.0%}")
+
+            top_wins = sorted(r.trades, key=lambda t: t.pnl_pct, reverse=True)[:5]
+            top_loss = sorted(r.trades, key=lambda t: t.pnl_pct)[:5]
+            lines.append(f"\n【七、最佳5笔 vs 最差5笔】")
+            lines.append("  最佳:")
+            for t in top_wins:
+                lines.append(f"    {t.symbol} {t.entry_date}→{t.exit_date}  {t.pnl_pct:+.1%}  [{t.chain}]")
+            lines.append("  最差:")
+            for t in top_loss:
+                lines.append(f"    {t.symbol} {t.entry_date}→{t.exit_date}  {t.pnl_pct:+.1%}  [{t.chain}]  {t.exit_reason_cn()}")
+
+    report_text = "\n".join(lines)
+
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(report_text)
+        print(f"[investor_report] 完整报告已保存: {output_path}")
+
+    return report_text
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2018-01-01")
     parser.add_argument("--end", default="2024-12-31")
     parser.add_argument("--output", default="", help="JSON输出路径（可选）")
+    parser.add_argument("--investor-report", default="", help="投资者完整报告输出路径（.txt）")
     args = parser.parse_args()
 
     results = run_backtest(args.start, args.end)
@@ -639,3 +849,11 @@ if __name__ == "__main__":
         with open(args.output, "w", encoding="utf-8") as f:
             json.dump([r.to_dict() for r in results], f, ensure_ascii=False, indent=2)
         print(f"\n结果已保存到: {args.output}")
+
+    investor_path = getattr(args, "investor_report", "")
+    if investor_path:
+        generate_investor_report(results, investor_path)
+    else:
+        print("\n" + "─"*50)
+        print("提示：加 --investor-report /tmp/report.txt 生成完整投资者报告（含逐笔交易）")
+        print("─"*50)
