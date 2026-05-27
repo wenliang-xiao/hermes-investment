@@ -358,12 +358,13 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
     total_days = len(dates)
 
     for i, date in enumerate(dates[1:], 1):
-        gate_open = True
+        gate_val = 1.0
         if use_dual_gate and gate_series is not None:
-            gate_val = gate_series.get(date, gate_series.get(date - timedelta(days=1), 1))
-            gate_open = bool(gate_val)
-            if not gate_open:
-                gate_closed_days += 1
+            gate_val = float(gate_series.get(date, gate_series.get(date - timedelta(days=1), 1.0)))
+        gate_open = gate_val > 0
+        gate_half = (gate_val == 0.5)
+        if not gate_open:
+            gate_closed_days += 1
 
         if not gate_open and holdings:
             for sym, w in list(holdings.items()):
@@ -376,6 +377,8 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                         trades.append(Trade(sym, "", entry_p, date.strftime("%Y-%m-%d"), exit_p, "dual_gate_close", pnl))
             holdings = {}
             entry_prices = {}
+        elif gate_half and holdings:
+            holdings = {sym: w * 0.5 for sym, w in holdings.items()}
 
         exit_set = set()
         for sym in list(holdings.keys()):
