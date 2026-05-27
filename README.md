@@ -1,6 +1,6 @@
 # Hermes Investment — 面基·LDS·Vibe-Trading 三源融合量化投研系统
 
-> 基于面基播客 154 期知识体系 × LDS 实战框架 × Vibe-Trading 量化工具，每日自动生成投资决策日报推送到飞书。
+> 基于面基播客 154 期知识体系 × LDS 实战框架 × Vibe-Trading 量化工具，每日自动生成投资决策日报推送到飞书，并提供多策略回测引擎。
 
 ---
 
@@ -17,192 +17,203 @@
 
 ---
 
-## 二、系统架构
+## 二、系统架构（v4.0 插件化分层架构）
 
 ```
 hermes-investment/
 │
-├── 📊 数据层（Data）
-│   ├── data_layer.py          主数据层：Tushare→JQData→baostock→AKShare 四层优先级
-│   ├── tushare_layer.py        Tushare Pro：PE历史5年/社融/北向资金（最权威）
-│   ├── jqdata_layer.py         JQData 聚宽：日线/财务/多季ROE/FCF
+├── config.py                   全局配置：WATCHLIST(83只)/INDUSTRY_CHAINS(14条链)/
+│                               FACTOR_WEIGHTS/MACRO_THRESHOLDS/风控参数
+├── __init__.py                 包入口（version: 3.3.0）
+│
+├── core/                       基础契约层
+│   ├── __init__.py             数据模型：AssetSnapshot/MacroState/ResearchContext
+│   └── secrets.py              凭据管理（优先读环境变量）
+│
+├── data/                       数据获取层
+│   ├── data_layer.py           主数据层：Tushare→baostock→AKShare 三层优先级
+│   ├── tushare_layer.py        Tushare Pro：PE历史5年/社融/北向资金
 │   ├── yf_data_layer.py        Yahoo Finance：美股/港股/ETF/商品/汇率
-│   ├── data_source_layer.py    AKShare ETF专用层：A股ETF行情/全市场快照
-│   └── global_universe.py      全球资产标的池（美股9链/港股/ETF/商品/汇率）
+│   ├── data_source_layer.py    AKShare ETF 专用层
+│   ├── global_universe.py      全球资产标的池
+│   └── global_data.py          全球市场数据采集
 │
-├── 🧠 分析层（Analysis）
+├── analysis/                   分析引擎层
 │   ├── macro_engine.py         宏观引擎：货币信用四象限/趋势温度/LDS双门/国运线
-│   ├── factor_scanner.py       多因子扫描：6因子评分+PE历史分位+FCF+ROE趋势+成交量
-│   ├── full_asset_scanner.py   全资产扫描：LDS全天候/ETF三维/商品/汇率/桥水四象限
-│   ├── multi_asset_engine.py   多资产轮动引擎：风险平价×宏观匹配×动量评分（54只资产）
-│   ├── universe_builder.py     动态选股宇宙：全市场A股快照→研究池/买入池/脱钩池
-│   ├── news_engine.py          新闻引擎：12路RSS+时间窗口+情绪量化+LLM总结
-│   └── concept_engine.py       面基概念引擎：Nick四问/凯利公式/DCF等27个概念可计算
+│   ├── factor_scanner.py       多因子扫描：6因子+PE历史分位+FCF+ROE趋势+利润池
+│   ├── multi_asset_engine.py   多资产轮动引擎：风险平价×宏观匹配×动量
+│   ├── universe_builder.py     动态选股宇宙
+│   ├── news_engine.py          新闻引擎：多路RSS+财联社+新浪+LLM影响分析
+│   ├── anomaly_news.py         异动股新闻联动：≥5%异动→自动搜索驱动因素
+│   ├── chain_scanner.py        链内候选扫描：四段筛选+双轨评分
+│   ├── etf_bond_scorer.py      ETF/债券评分器：宏观匹配×动量×低波×技术
+│   ├── score_history.py        因子分历史数据库：快照持久化/D-lite重建
+│   └── backtest.py             回测引擎：三策略对比/月频再平衡/趋势止损
 │
-├── ⚙️ 配置层（Config）
-│   ├── config.py               全局配置：WATCHLIST(80只)/OPPORTUNITY_THEMES/宏观阈值/数据源账号
-│   ├── stock_universe.py       A股选股宇宙：11个板块/157只/宏观→板块映射
-│   └── fund_tracker.py         基金追踪：LDS全天候两个版本/ETF同类对比/公募基金
-│
-├── 📝 报告层（Report）
+├── output/                     输出层（报告生成+飞书写入）
 │   ├── report_v6.py            核心报告库：所有 build_* 板块函数
-│   └── scripts/
-│       ├── run_report_v8.py    🟢 主日报（5分钟决策版）—— 每日先跑
-│       └── run_report_v7.py    🔵 详细研究版（全量分析）—— 每日后跑
+│   ├── full_asset_scanner.py   全资产扫描：ETF三维/商品/汇率/桥水象限
+│   ├── fund_tracker.py         基金追踪：LDS全天候/再平衡信号
+│   ├── concept_engine.py       面基概念引擎：Nick四问/凯利/DCF
+│   └── shadow_account.py       模拟盘追踪
 │
-└── 🔧 工具（Tools）
-    ├── morning_brief.py        盘前简报（8:30 AM，全球隔夜市场）
-    ├── stock_analyzer.py       个股深度分析（LDS产业链定位法）
-    ├── deep_research.py        个股深度研报（8维框架：翻倍逻辑/DCF/贝叶斯/Nick四问）
-    ├── shadow_account.py       Shadow Account（信号记录/模拟盘/纪律追踪）
-    └── portfolio_monitor.py    持仓监控（偏离追踪/再平衡信号/止损检查）
+├── domain/                     纯数据层（无业务逻辑）
+│   ├── __init__.py             所有静态数据：WATCHLIST/INDUSTRY_CHAINS(14条)等
+│   ├── stock_universe.py       A股选股宇宙
+│   ├── news_fetcher.py         RSS新闻拉取
+│   └── etf_data.py             ETF静态数据
+│
+├── scripts/                    可执行入口
+│   ├── run_daily.py            每日决策简报（08:30+18:00）← 主要入口
+│   ├── run_weekly.py           周度链研究（周日18:00）
+│   ├── run_research.py         按需个股深度研报
+│   ├── run_brief.py            兼容入口 → run_report_v8.py
+│   ├── run_detail.py           兼容入口 → run_report_v7.py
+│   ├── run_report_v7.py        全量日报（含15链深度分析）
+│   ├── run_report_v8.py        精简日报（5分钟决策版）
+│   ├── deep_research.py        CLI深度研报
+│   ├── morning_brief.py        盘前简报
+│   ├── stock_analyzer.py       个股分析
+│   ├── portfolio_monitor.py    持仓监控
+│   └── verify_stock_codes.py   股票代码完整性验证（需baostock）
+│
+└── _archive/                   已停用（保留备查）
+    └── jqdata_layer.py         JQData（试用账号数据不足，已停用）
 ```
 
 ---
 
-## 三、日报体系
+## 三、14条产业链（INDUSTRY_CHAINS）
 
-### 主日报（5分钟决策版）`scripts/run_report_v8.py`
-
-每天早上最先推送，只看这一份就够做当日决策：
-
-```
-一、今日核心信号
-  宏观双门状态 | 桥水象限 | 实际利率信号
-  全球市场快照（指数/VIX/北向资金）| LDS全天候今日表现
-
-二、观察池今日行情
-  只展示今日有信号的标的（超买/超卖/放量/大涨大跌）
-  每只票：价格+涨跌+技术分+RSI+产业链+核心逻辑
-
-三、今日重要事件（最多5条）
-  LLM提炼 + 产业链影响标注 + 市场情绪得分
-
-四、操作纪律
-  双门关闭→防御模式 | 双门开启→进攻板块
-  8%止损 / 15%+30%止盈 / 2%仓位上限
-```
-
-### 详细研究版（全量分析）`scripts/run_report_v7.py`
-
-深度阅读用，包含：
-- 桥水四象限 + 多资产配置引擎（54只资产风险平价）
-- LDS全天候 ETF 组合成分 + 再平衡信号
-- ETF 动量-风险-费率三维排序
-- 债券收益率曲线 + 大宗商品 + 外汇地缘折价
-- **10链深度分析**：链内多因子排名 + A股利润池映射 + 翻倍逻辑 + 催化剂日历
-- A股/港股/美股多因子新票发现（含PE历史分位/FCF/ROE趋势）
-- 核心观察池（80只标的今日行情）+ 7大挖掘主题 + 国家队资金信号
-- 政经要闻（12路RSS + 情绪量化 + LLM总结）
+| 链名 | 类型 | 核心标的 | 核心逻辑 |
+|---|---|---|---|
+| 英伟达算力链 | 核心 | 300308中际旭创/300502新易盛 | GPU/光模块/PCB，AI算力基础设施 |
+| 台积电先进制程链 | 核心 | 688041北方华创/688328华海清科 | CoWoS/先进封装/设备，物理瓶颈 |
+| 存储/HBM链 | 核心 | 688008澜起科技/603986兆易创新 | HBM供给缺口>30% |
+| AI应用/Agent链 | 核心 | — | Token消耗×渗透率<5%，肥美期 |
+| 新能源链 | 核心 | 300750宁德/601012阳光电源 | 储能/逆变器，产能出清中 |
+| 半导体链 | 核心 | 688012中微/688041北方华创 | 国产替代，设备国产化15%→35% |
+| 国产替代/信创链 | 核心 | — | 2027央企信创DDL |
+| 医药创新链 | 核心 | 603259药明/300760迈瑞 | CXO回暖，GLP-1出海 |
+| 军工链 | 核心 | 600760沈飞/002179中航光电 | 军费稳增+军贸出口 |
+| 机器人/自动化链 | 核心 | 300665绿的谐波/300274汇川 | Optimus量产预期，核心零部件 |
+| 消费电子链 | 条件触发 | — | AI手机换机，CPI>1.5%激活 |
+| 数据/云计算链 | 核心 | — | IDC/液冷，AI算力物理底座 |
+| 苹果产业链 | 条件触发 | — | AI手机换机+A股供应商 |
+| 新能源汽车链 | 条件触发 | 300750宁德/002594比亚迪 | 智驾爆发，整车出海 |
 
 ---
 
-## 四、数据源架构
+## 四、日报/周报体系
+
+### 每日决策简报 `scripts/run_daily.py`
+
+每天 **08:30（开盘前）** + **18:00（收盘后）** 触发，6个板块：
 
 ```
-数据请求
-  ↓
-Tushare Pro（主力，配置后生效）
-  PE历史5年 ✅  社融增速 ✅  ROE多季 ✅  FCF ✅  北向资金（需2000积分）
-  ↓ 失败
-JQData 聚宽（3个月试用已接入）
-  日线行情 ✅  财务指标 ✅  PE历史12个月 ✅
-  ↓ 失败
-baostock（稳定免费安全网）
-  基础日线 ✅
-  ↓ 失败
-AKShare（宏观月度数据兜底）
-  CPI/PMI/M2 ✅  ETF实时快照 ✅
-
-美股/港股/ETF/商品/汇率 → Yahoo Finance（独立通道）
+一、决策面板：双门状态 | 桥水象限 | VIX/北向/美债10Y/DXY/CPI | 凯利开关
+二、持仓风控：浮盈% | 止损价 | 触发状态（有持仓才显示）
+三、观察池信号：MA20/MA60买点 | 超买/超卖/异动解读（≥5%联动新闻搜索）
+四、链路摘要：引用上次周报结论
+五、今日情报：GLM影响分析（事实+影响路径+受影响标的+建议动作）
+六、调仓建议：宏观基调+纪律检查
 ```
 
-在 `config.py` 配置账号（或设置同名环境变量）：
+### 周度链研究 `scripts/run_weekly.py`
 
-```python
-JQDATA_USER = "手机号"        # 聚宽 JQData
-JQDATA_PASS = "密码"
-TUSHARE_TOKEN = ""            # tushare.pro 注册免费获取，120积分即可用
-```
+每**周日 18:00** 触发，含15链深度分析+链内候选扫描+因子分快照保存。
 
 ---
 
-## 五、核心观察池（WATCHLIST，约80只）
+## 五、回测引擎 `analysis/backtest.py`
 
-| 类别 | 代表标的 | 核心逻辑 |
-|------|---------|---------|
-| AI算力链 | 新易盛/中际旭创/寒武纪 | 光模块800G→1.6T，AI算力互联瓶颈 |
-| 半导体设备 | 中微/北方华创/华海清科 | CoWoS刻蚀设备，国产化率<20% |
-| 机器人零部件 | 绿的谐波/汇川技术/埃斯顿 | 减速器/伺服是瓶颈，不赌整机 |
-| 消费防守 | 贵州茅台/招商银行/长江电力 | 高ROE+高股息，防守压舱石 |
-| 港股折价 | 腾讯/中芯/美团 | PE折价30-60%，地缘修复机会 |
-| 美股AI链 | NVDA/TSM/MSFT/GOOGL | 各链龙头，研究用 |
-| LDS底仓ETF | 512890/513100/518880/159985 | 全天候，不择时月度再平衡 |
-| 债券/黄金 | TLT/511010/GLD | 象限4防御，实际利率驱动 |
+三策略对比（2018-至今，end_date自动取baostock最新交易日）：
 
----
+| 策略 | 宇宙 | 关键规则 |
+|---|---|---|
+| 多因子选股 | WATCHLIST∩链内（当前17只） | 月频再平衡/换仓门槛15%/趋势止损 |
+| LDS全天候ETF | 红利25%+纳指30%+黄金25%+豆粕20% | 月底再平衡 |
+| 多因子+双门 | 同策略一 | CPI<1%或>3% OR MA60<-5% → 空仓 |
 
-## 六、LDS 投资铁律
-
-| 规则 | 参数 |
-|------|------|
-| 硬止损 | -8%，到了就执行，不商量 |
-| 第一止盈 | +15%，减半仓 |
-| 第二止盈 | +30%，清仓 |
-| 单票仓位 | ≤总资产2%（凯利/2） |
-| 最大持仓数 | 8只 |
-| 再平衡触发 | 偏离>5% |
-| 总回撤清盘 | >25% |
-| 宏观+趋势双关 | 空仓等信号 |
-
----
-
-## 七、快速开始
+因子评分构成（D-lite+）：
+- 利润池位置 25%（面基核心：买利润率最高环节）
+- ROE质量 20%
+- Perez阶段乘数（展开期×1.15，导入期×1.10，成熟期×0.88）
+- 动量 20%、低波 15%、技术 10%、营收增速 10%
 
 ```bash
-# 安装依赖
-pip install baostock akshare yfinance tushare jqdatasdk pandas numpy
-
-# 运行主日报（生产环境）
-cd /home/admin/.hermes
-python investment_system/scripts/run_report_v8.py   # 主日报，约30秒
-python investment_system/scripts/run_report_v7.py   # 详细版，约5分钟
-
-# 盘前简报
-python investment_system/morning_brief.py
-```
-
-推荐 cron 调度：
-```cron
-00 9 * * 1-5  cd /home/admin/.hermes && python investment_system/scripts/run_report_v8.py
-05 9 * * 1-5  cd /home/admin/.hermes && python investment_system/scripts/run_report_v7.py
-30 8 * * 1-5  cd /home/admin/.hermes && python investment_system/morning_brief.py
+python3 -m investment_system.analysis.backtest \
+  --start 2018-01-01 \
+  --investor-report /tmp/report.txt
 ```
 
 ---
 
-## 八、中美脱钩视角（核心主题）
+## 六、Hermes Cron
 
-- **给AI美国公司做制造**：NVDA/MSFT订单链 → 沪电股份(002463)/新易盛(300502)
-- **技术封锁受益**：美国禁运 → 华大九天(688099) EDA / 中微(688012) 刻蚀设备
-- **资本管制收紧**：富途/老虎被罚 → 中信证券(600030)/东方财富(300059)/港交所
-- **国家队资金**：社保/汇金季报监控 → 招商银行/长江电力/北方华创
+```yaml
+command: python /home/admin/.hermes/investment_system/scripts/run_daily.py
+schedule: "30 8 * * 1-5"   # 工作日08:30
+
+command: python /home/admin/.hermes/investment_system/scripts/run_daily.py
+schedule: "0 18 * * 1-5"   # 工作日18:00
+
+command: python /home/admin/.hermes/investment_system/scripts/run_weekly.py
+schedule: "0 18 * * 0"     # 周日18:00
+```
 
 ---
 
-## 九、面基关键期数索引
+## 七、环境变量
 
-| 期数 | 核心观点 | 代码体现 |
-|------|---------|---------|
-| E7/E84 | 中观四层次 | `_CHAIN_CONFIGS` profit_pool 字段 |
-| E68/E124 | FCF两朵花/DCF | `data_layer.get_financial_history()` |
-| E94/E98 | Perez五阶段/康波 | 每条链的 perez_stage 字段 |
-| E119 | 桥水全天候/风险平价 | `multi_asset_engine.py` |
-| E131 | 逆全球化/新宏观坐标 | `OPPORTUNITY_THEMES` 中美脱钩 |
-| E153 | 复利+凯利公式 | `concept_engine.kelly_position()` |
-| E155 | 五层蛋糕/Capex护城河 | 链分析⑤面基框架标注 |
-| E81/E118 | Nick灵魂四问 | `concept_engine.nick_four_questions()` |
+```bash
+export FEISHU_APP_ID="xxx"
+export FEISHU_APP_SECRET="xxx"
+export ARK_API_KEY="your_zhipu_key"       # Zhipu GLM-4-Flash，永久免费
+export ARK_MODEL="glm-4-flash"
+export ARK_API_BASE="https://open.bigmodel.cn/api/paas/v4/chat/completions"
+export TUSHARE_TOKEN="your_token"         # 120积分以上
+```
 
-## 许可
+---
 
-内部研究用途
+## 八、风控纪律
+
+```
+止损：单票买入后立即设止损 = 成本 × 0.92（-8%）
+止盈：成功持仓（涨>15%后）改用趋势止损（从峰值回撤20%才卖）
+仓位：单票 ≤ 总资产 2%（凯利/2约束）
+持仓：最多 8 只
+再平衡：月度检查，偏离5%触发
+清盘线：总回撤 > 25% 全清
+```
+
+---
+
+## 九、数据源
+
+| 数据源 | 覆盖范围 | 费用 |
+|---|---|---|
+| baostock | A股日线/财务季报/指数 | 免费 |
+| Tushare Pro | PE历史5年/社融/北向 | 120积分（免费注册） |
+| Yahoo Finance | 美股/港股/ETF/商品/汇率 | 免费 |
+| AKShare | 宏观CPI/PMI/财联社电报 | 免费 |
+| Zhipu GLM-4-Flash | 新闻分析LLM | 永久免费 |
+
+JQData 已停用（见 `_archive/jqdata_layer.py`，试用账号近3个月数据不足回测需求）。
+
+---
+
+## 十、面基期数索引
+
+| 期数 | 核心概念 | 系统对应 |
+|---|---|---|
+| E7/E84 | 中观四层次 | analysis/chain_scanner.py |
+| E68/E124 | FCF两朵花/DCF | analysis/factor_scanner.py |
+| E94/E98 | Perez五阶段/康波 | config.py INDUSTRY_CHAINS |
+| E119 | 桥水全天候/风险平价 | output/fund_tracker.py |
+| E153 | 复利+凯利公式 | analysis/backtest.py |
+| E155 | 五层蛋糕/Capex/HALO | output/concept_engine.py |
+| E81/E118 | Nick灵魂四问/趋势 | analysis/factor_scanner.py |
+| E131 | 新宏观坐标/逆全球化 | config.py DOMESTIC_SUB_THEMES |
+| E126 | 三周期嵌套 | analysis/macro_engine.py |
