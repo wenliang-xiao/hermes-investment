@@ -279,11 +279,14 @@ def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict
     """
     从baostock拉取历史财务数据（季度ROE+营收增速）。
     加45天报告滞后，避免前视偏差。
+    baostock超时时返回空字典，回测fallback到纯价格因子。
     返回格式：{symbol: [{report_date, available_date, roe, rev_growth}]}
     """
     result = {}
     try:
         import baostock as bs
+        import socket
+        socket.setdefaulttimeout(4)  # 4s超时避免卡死
         bs.login()
         for sym in symbols:
             code = f"sh.{sym}" if sym.startswith(("5", "6")) else f"sz.{sym}"
@@ -317,7 +320,7 @@ def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict
                 result[sym] = sorted(records, key=lambda x: x["available_date"])
         bs.logout()
     except Exception as e:
-        print(f"[score_history] 财务数据拉取失败: {e}")
+        print(f"[score_history] 财务数据拉取失败(超时/无数据): {e}")
     return result
 
 
