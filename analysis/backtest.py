@@ -409,6 +409,202 @@ def run_allweather(price_data: Dict[str, pd.DataFrame], start: str, end: str,
     return result
 
 
+MACRO_REGIME_WEIGHTS = {
+    "扩张期": {"stock": 0.40, "broad_etf": 0.25, "gold": 0.15, "bond": 0.10, "commodity": 0.10},
+    "过热期": {"stock": 0.20, "broad_etf": 0.15, "gold": 0.25, "bond": 0.10, "commodity": 0.30},
+    "衰退期": {"stock": 0.10, "broad_etf": 0.10, "gold": 0.30, "bond": 0.40, "commodity": 0.10},
+    "复苏期": {"stock": 0.35, "broad_etf": 0.30, "gold": 0.15, "bond": 0.15, "commodity": 0.05},
+    "default": {"stock": 0.30, "broad_etf": 0.25, "gold": 0.20, "bond": 0.15, "commodity": 0.10},
+}
+
+STRATEGY4_ETF_MAP = {
+    "broad_etf": "513100",
+    "gold":      "518880",
+    "bond":      "511260",
+    "commodity": "159985",
+}
+
+
+def _get_regime_for_date(date: pd.Timestamp, cpi_history: dict, index_ma: dict) -> str:
+    date_str = date.strftime("%Y-%m-%d")
+    cpi = None
+    for d in sorted(cpi_history.keys(), reverse=True):
+        if d <= date_str:
+            cpi = cpi_history[d]
+            break
+    dev = index_ma.get(date_str)
+    if dev is None:
+        for d in sorted(index_ma.keys(), reverse=True):
+            if d <= date_str:
+                dev = index_ma[d]
+                break
+    trend_down = dev is not None and dev <= -0.05
+    if cpi is None:
+        return "default"
+    if cpi >= 2.0 and not trend_down:
+        return "过热期" if cpi >= 3.0 else "扩张期"
+    if cpi < 1.0 and trend_down:
+        return "衰退期"
+    if trend_down:
+        return "衰退期"
+    if cpi < 1.0:
+        return "复苏期"
+    return "扩张期"
+
+
+def _relaxed_gate_val(cpi_val: Optional[float], dev: Optional[float]) -> float:
+    if cpi_val is None:
+        macro_mult = 1.0
+    elif cpi_val < 0.0:
+        macro_mult = 0.5
+    elif cpi_val < 1.0:
+        macro_mult = 0.8
+    elif cpi_val < 2.0:
+        macro_mult = 1.0
+    elif cpi_val < 3.0:
+        macro_mult = 0.85
+    else:
+        macro_mult = 0.4
+    trend_mult = 0.6 if (dev is not None and dev <= -0.05) else 1.0
+    return round(macro_mult * trend_mult, 2)
+
+
+def run_macro_driven_allweather(
+    price_data: Dict[str, pd.DataFrame],
+    factor_scores: Dict[str, Dict[str, float]],
+    start: str, end: str,
+    benchmark: pd.Series,
+    stock_symbols: List[str],
+) -> BacktestResult:
+    from investment_system.analysis.score_history import (
+        _get_historical_cpi, _get_index_ma_series, _get_latest_known_value
+    )
+    dates = pd.date_range(start, end, freq="B")
+    portfolio_value = pd.Series(index=dates, dtype=float)
+    portfolio_value.iloc[0] = 1.0
+
+    cpi_history = _get_historical_cpi(start, end)
+    index_ma = _get_index_ma_series(start, end)
+
+    rebalance_dates = pd.date_range(start, end, freq="4W-FRI")
+    last_regime = "default"
+    stock_holdings: Dict[str, float] = {}
+    stock_entry: Dict[str, float] = {}
+    stock_peak: Dict[str, float] = {}
+    trades: List[Trade] = []
+
+    for i, date in enumerate(dates[1:], 1):
+        date_str = date.strftime("%Y-%m-%d")
+        cpi_val = _get_latest_known_value(cpi_history, date)
+        dev_val = index_ma.get(date_str)
+        if dev_val is None:
+            for d in sorted(index_ma.keys(), reverse=True):
+                if d <= date_str:
+                    dev_val = index_ma[d]
+                    break
+        gate_val = _relaxed_gate_val(cpi_val, dev_val)
+
+        if date in rebalance_dates:
+            last_regime = _get_regime_for_date(date, cpi_history, index_ma)
+            regime_w = MACRO_REGIME_WEIGHTS.get(last_regime, MACRO_REGIME_WEIGHTS["default"])
+            stock_target = regime_w["stock"] * gate_val
+
+            date_scores = factor_scores.get(date_str, {})
+            valid = {s: date_scores[s] for s in stock_symbols if s in date_scores and s in price_data}
+            top_stocks = sorted(valid.items(), key=lambda x: x[1], reverse=True)[:5]
+            new_stock_syms = {s for s, _ in top_stocks}
+
+            for sym in list(stock_holdings.keys()):
+                if sym not in new_stock_syms and sym in price_data:
+                    idx = price_data[sym].index[price_data[sym].index <= date]
+                    if len(idx) > 0:
+                        exit_p = float(price_data[sym].loc[idx[-1], "close"])
+                        entry_p = stock_entry.get(sym, exit_p)
+                        trades.append(Trade(sym, stock_entry.get(sym + "_date", ""), entry_p,
+                                            date_str, exit_p, "rebalance",
+                                            (exit_p - entry_p) / entry_p if entry_p > 0 else 0))
+            for sym in new_stock_syms:
+                if sym not in stock_holdings and sym in price_data:
+                    idx = price_data[sym].index[price_data[sym].index <= date]
+                    if len(idx) > 0:
+                        ep = float(price_data[sym].loc[idx[-1], "close"])
+                        stock_entry[sym] = ep
+                        stock_entry[sym + "_date"] = date_str
+                        stock_peak[sym] = ep
+            stock_holdings = {s: stock_target / max(len(top_stocks), 1) for s, _ in top_stocks}
+
+        exit_set = set()
+        for sym in list(stock_holdings.keys()):
+            if sym not in price_data:
+                continue
+            idx = price_data[sym].index[price_data[sym].index <= date]
+            if not len(idx):
+                continue
+            curr_p = float(price_data[sym].loc[idx[-1], "close"])
+            entry_p = stock_entry.get(sym, curr_p)
+            pnl = (curr_p - entry_p) / entry_p
+            stock_peak[sym] = max(stock_peak.get(sym, curr_p), curr_p)
+            dd = (curr_p - stock_peak[sym]) / stock_peak[sym] if stock_peak[sym] > 0 else 0
+            if pnl <= -STOP_LOSS:
+                exit_set.add(sym)
+                trades.append(Trade(sym, stock_entry.get(sym + "_date", ""), entry_p,
+                                    date_str, curr_p, "stop_loss", pnl))
+            elif pnl >= 0.15 and dd <= -0.20:
+                exit_set.add(sym)
+                trades.append(Trade(sym, stock_entry.get(sym + "_date", ""), entry_p,
+                                    date_str, curr_p, "trend_stop", pnl))
+        for sym in exit_set:
+            stock_holdings.pop(sym, None)
+            stock_entry.pop(sym, None)
+            stock_peak.pop(sym, None)
+
+        regime_w = MACRO_REGIME_WEIGHTS.get(last_regime, MACRO_REGIME_WEIGHTS["default"])
+        daily_ret = 0.0
+        stock_total_w = sum(stock_holdings.values())
+        if stock_total_w > 0:
+            for sym, w in stock_holdings.items():
+                if sym not in price_data:
+                    continue
+                df = price_data[sym]
+                pi = df.index[df.index <= dates[i - 1]]
+                ci = df.index[df.index <= date]
+                if len(pi) > 0 and len(ci) > 0:
+                    pp = float(df.loc[pi[-1], "close"])
+                    cp = float(df.loc[ci[-1], "close"])
+                    daily_ret += (w / stock_total_w) * regime_w["stock"] * (cp / pp - 1) if pp > 0 else 0
+
+        for asset_class, sym in STRATEGY4_ETF_MAP.items():
+            class_w = regime_w.get(asset_class, 0) * gate_val
+            if sym not in price_data or class_w <= 0:
+                continue
+            df = price_data[sym]
+            pi = df.index[df.index <= dates[i - 1]]
+            ci = df.index[df.index <= date]
+            if len(pi) > 0 and len(ci) > 0:
+                pp = float(df.loc[pi[-1], "close"])
+                cp = float(df.loc[ci[-1], "close"])
+                daily_ret += class_w * (cp / pp - 1) if pp > 0 else 0
+
+        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret)
+
+    equity = portfolio_value.dropna()
+    metrics = _calc_metrics(equity, benchmark)
+    exclude = {"monthly_returns", "yearly_returns", "drawdown_series"}
+    result = BacktestResult(
+        strategy_name="策略四：宏观驱动全天候+双门",
+        start_date=start,
+        end_date=end,
+        equity_curve=equity,
+        benchmark_curve=benchmark,
+        trades=trades,
+        **{k: v for k, v in metrics.items() if k not in exclude},
+    )
+    result.monthly_returns = metrics.get("monthly_returns", pd.Series())
+    result.yearly_returns = metrics.get("yearly_returns", {})
+    result.drawdown_series = metrics.get("drawdown_series", pd.Series())
+    return result
+
+
 def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                           factor_scores: Dict[str, Dict[str, float]],
                           start: str, end: str,
@@ -965,22 +1161,16 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
             symbols = [str(s) for s in chain_symbols_set][:60]
             print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
 
-    etf_symbols = list(ALLWEATHER_WEIGHTS.keys())
+    etf_symbols = list(ALLWEATHER_WEIGHTS.keys()) + list(STRATEGY4_ETF_MAP.values())
     all_symbols = list(set(symbols + etf_symbols + ALL_ETF_POOL + ["000300"]))
-
-    # 添加WATCHLIST中的美股和港股
-    try:
-        from investment_system.config import WATCHLIST
-        us_hk = [k for k in WATCHLIST.keys() if any(c in str(k) for c in ["NVDA", "TSLA", "TSM", "GOOGL", "MSFT", "AMZN", "INTC", "VST", "CEG", "EQIX", "DLR", ".HK"])]
-        all_symbols = list(set(all_symbols + us_hk))
-    except Exception:
-        pass
 
     # 策略四需要完整WATCHLIST（含美股/港股）
     all_watchlist = symbols.copy()
     try:
         from investment_system.config import WATCHLIST
         all_watchlist = [str(k) for k in WATCHLIST.keys()]
+        us_hk = [k for k in WATCHLIST.keys() if any(c in str(k) for c in ["NVDA", "TSLA", "TSM", "GOOGL", "MSFT", "AMZN", "INTC", "VST", "CEG", "EQIX", "DLR", ".HK"])]
+        all_symbols = list(set(all_symbols + us_hk))
     except Exception:
         pass
 
