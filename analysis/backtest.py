@@ -907,13 +907,18 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
     portfolio_value.iloc[0] = 1.0
     rebalance_dates = pd.date_range(start, end, freq="4W-FRI")
 
-    # 准备宏观数据
+    try:
+        from investment_system.config import WATCHLIST
+        core_a_symbols = {str(k) for k, v in WATCHLIST.items()
+                          if str(k).isdigit() and v.get("tier") == "核心"}
+    except Exception:
+        core_a_symbols = set(str(s) for s in stock_symbols if str(s).isdigit())
+
     try:
         from investment_system.analysis.score_history import _get_historical_cpi
         cpi_dict = _get_historical_cpi(start, end)
     except Exception:
         cpi_dict = {}
-    # PMI数据（简化版：从CPI字典反向推理或使用默认值）
     pmi_dict = {}
 
     holdings: Dict[str, float] = {}
@@ -961,24 +966,25 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
             if scores:
                 qualified = {}
                 for sym, sc in scores.items():
-                    if sym in stock_symbols and sym in price_data:
-                        right_side = True
-                        df_hist = price_data[sym][price_data[sym].index <= date]
-                        if len(df_hist) >= 60:
-                            c = df_hist["close"].values
-                            ma60 = float(np.mean(c[-60:]))
-                            ma20 = float(np.mean(c[-20:]))
-                            if c[-1] <= ma60 or ma20 <= ma60:
-                                right_side = False
-                        if right_side:
-                            qualified[sym] = sc
+                    if sym not in core_a_symbols or sym not in price_data:
+                        continue
+                    right_side = True
+                    df_hist = price_data[sym][price_data[sym].index <= date]
+                    if len(df_hist) >= 60:
+                        c = df_hist["close"].values
+                        ma60 = float(np.mean(c[-60:]))
+                        ma20 = float(np.mean(c[-20:]))
+                        if c[-1] <= ma60 or ma20 <= ma60:
+                            right_side = False
+                    if right_side:
+                        qualified[sym] = sc
                 if not qualified:
                     qualified = {sym: sc for sym, sc in scores.items()
-                                 if sym in stock_symbols and sym in price_data}
+                                 if sym in core_a_symbols and sym in price_data}
                 all_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
                 if regime in ("衰退期", "过热期"):
                     all_candidates = [(s, sc) for s, sc in all_candidates if s in holdings]
-                top_stocks = all_candidates[:8]
+                top_stocks = all_candidates[:5]
             else:
                 top_stocks = []
 
@@ -1165,8 +1171,9 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
         try:
             import baostock as bs
             bs.login()
-            rs = bs.query_trade_dates(start_date="2024-01-01", end_date="2030-12-31")
-            last_trade = "2024-12-31"
+            query_start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            rs = bs.query_trade_dates(start_date=query_start, end_date="2030-12-31")
+            last_trade = datetime.now().strftime("%Y-%m-%d")
             while rs.next():
                 r = rs.get_row_data()
                 if r[1] == "1":
