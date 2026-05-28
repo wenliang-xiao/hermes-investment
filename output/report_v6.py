@@ -1766,14 +1766,35 @@ def _build_state_fund_section(w, doc_id):
 
 
 def build_discovery_section(w, doc_id, scanner, macro):
-    w.write(doc_id, [("divider", ""), ("h2", "十、🔍 多因子新票发现")])
+    w.write(doc_id, [("divider", ""), ("h2", "十、🔍 选股漏斗（三层过滤→候选池）")])
 
     regime = macro.get('regime', '')
+    dual_gate = macro.get("dual_gate", {})
+    dual_open = not (dual_gate.get("macro_gate") in ("红灯", "黄灯") and
+                     dual_gate.get("trend_gate") in ("红灯", "黄灯"))
+
+    w.write(doc_id, [("h3", "漏斗说明（三层，逐层收窄）")])
+    w.write(doc_id, [
+        ("bullet", "L1 宏观门控：双门开启 + 非衰退/过热期 → 允许开新A股仓"),
+        ("bullet", "L2 链景气筛选：来自周报九（15链深度）的链内候选，Perez展开期优先"),
+        ("bullet", "L3 动量+质量门：60-120日动量排名 Top8 + ROE/营收增速不崩塌（排除烂票）"),
+        ("quote", f"当前象限: {regime} | 双门: {'✅开启' if dual_open else '🔒关闭'} | "
+                  f"{'允许开新仓' if dual_open and regime not in ('衰退期','过热期') else '⚠️不建议开新A股仓'}"),
+    ])
+
     exclude_sectors = []
     if regime == '扩张期':
         exclude_sectors = ['白酒', '红利', '公用事业', '消费必需品', '新能源']
-        w.write(doc_id, [("quote", "⚡ 扩张期逻辑：聚焦科技/半导体/AI/国产替代/高端制造，已自动过滤防御品种")])
+        w.write(doc_id, [("quote", "⚡ 扩张期：已过滤防御品种，聚焦科技/AI/国产替代")])
+    elif regime == '衰退期':
+        w.write(doc_id, [("quote", "🔴 衰退期：A股不开新仓，只看债券ETF/黄金/商品ETF机会")])
+    elif regime == '过热期':
+        w.write(doc_id, [("quote", "⚠️ 过热期：A股仓位压缩，存量票观察trailing stop")])
 
+    w.write(doc_id, [("h3", "L2: 本周链内候选（来自九、15链深度研究）")])
+    w.write(doc_id, [("quote", "详见上方九、15链深度研究各链「核心标的」部分")])
+
+    w.write(doc_id, [("h3", "L3: 多因子动量扫描结果")])
     _build_a_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
     _build_a_smallmid_channel(w, doc_id, scanner, exclude_sectors=exclude_sectors)
     _build_us_channel(w, doc_id)
@@ -1958,14 +1979,28 @@ def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
                 entry_p = pos.get("entry", 0)
                 current_p = pos.get("current", entry_p)
                 chg = pos.get("change", 0)
-                stop = entry_p * 0.92
-                t1 = entry_p * 1.15
-                t2 = entry_p * 1.30
+                peak_p = pos.get("peak", current_p) or current_p
+                hold_days = pos.get("hold_days", 0) or 0
+                pnl = (current_p - entry_p) / entry_p if entry_p > 0 else 0
+                dd_from_peak = (current_p - peak_p) / peak_p if peak_p > 0 else 0
+
+                if hold_days < 10:
+                    stop_price = entry_p * 0.92
+                    stop_label = f"硬止损¥{stop_price:.2f}(-8%)"
+                else:
+                    trailing_pct = 0.12 if pnl >= 0.30 else (0.15 if pnl >= 0.10 else 0.20)
+                    stop_price = peak_p * (1 - trailing_pct)
+                    trail_label = f"-{trailing_pct:.0%}@峰值¥{peak_p:.2f}"
+                    stop_label = f"trailing止损¥{stop_price:.2f}({trail_label})"
+
+                trailing_alert = dd_from_peak <= -(0.12 if pnl >= 0.30 else (0.15 if pnl >= 0.10 else 0.20)) and hold_days >= 10
+                hard_alert = pnl <= -0.08 and hold_days < 10
+                alert_tag = " 🚨触发止损!" if (sym in alert_symbols or trailing_alert or hard_alert) else ""
                 status = pos.get("status", "")
-                alert_tag = " 🚨止损!" if sym in alert_symbols else ""
+
                 w.write(doc_id, [("bullet",
                     f"{status}{alert_tag} {name}({sym}) 买入¥{entry_p:.2f} → 现¥{current_p:.2f} "
-                    f"({chg:+.1f}%) | 止损¥{stop:.2f} | 止盈¥{t1:.2f}/¥{t2:.2f}"
+                    f"({chg:+.1f}%) 持{hold_days}天 | {stop_label}"
                 )])
 
         if alerts:
@@ -2011,6 +2046,12 @@ def build_action_section(w, doc_id, macro, section_prefix="八"):
     bw_key = bw_q[:2] if bw_q else ""
     bw_hint = bw_asset_hint.get(bw_key, "")
 
+    try:
+        from investment_system.analysis.backtest import STRATEGY4_QUADRANT_WEIGHTS
+        s4_w = STRATEGY4_QUADRANT_WEIGHTS.get(regime, STRATEGY4_QUADRANT_WEIGHTS.get("default", {}))
+    except Exception:
+        s4_w = {}
+
     w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、⚖️ 调仓建议")])
 
     w.write(doc_id, [("h3", "宏观基调")])
@@ -2021,30 +2062,45 @@ def build_action_section(w, doc_id, macro, section_prefix="八"):
     if bw_hint:
         w.write(doc_id, [("bullet", f"桥水{bw_key}象限资产排序: {bw_hint}")])
 
+    if s4_w:
+        etf_map = {"stock_etf": "股票ETF", "bond_etf": "债券ETF",
+                   "commodity_etf": "商品ETF", "us_stock": "美股", "hk_stock": "港股"}
+        parts = [f"A股链内 {s4_w.get('a_share', 0):.0%}"]
+        for k, label in etf_map.items():
+            v = s4_w.get(k, 0)
+            if v > 0:
+                parts.append(f"{label} {v:.0%}")
+        w.write(doc_id, [("bullet", f"策略四当期配比: {' | '.join(parts)}")])
+
     if dual_closed:
         w.write(doc_id, [("bold", "🔒 双门关闭 → 防御模式")])
-        w.write(doc_id, [("bullet", "不开新仓 | 持有票检查8%止损线 | 不追高不加仓")])
+        w.write(doc_id, [("bullet", "不开新仓 | 持有票检查 trailing stop | 不追高不加仓")])
         if "Q4" in bw_q:
             w.write(doc_id, [("bullet",
-                "象限4(增长↓通胀↓)建议: 可建长债底仓(TLT/159926/511010)，黄金维持底仓，"
-                "等待CPI回升至1.5%+再考虑股票"
+                "象限4(增长↓通胀↓): 建长债底仓(511010/159926)，黄金维持，"
+                "等CPI回升至1.5%+再看股票"
             )])
         cpi = macro.get("macro_data", {}).get("cpi")
         trend = macro.get("trend_temp", "?")
-        cpi_need = "1.5%+" if cpi is not None else "?"
         w.write(doc_id, [("bullet",
-            f"双门转绿条件: CPI回升至{cpi_need} (当前={cpi}%) + 趋势温度回升至温 (当前={trend})"
+            f"双门转绿条件: CPI回升≥1.5% (当前={cpi}%) + 趋势温度≥温 (当前={trend})"
         )])
     else:
         w.write(doc_id, [("bold", "✅ 双门开启 → 正常操作")])
-        w.write(doc_id, [("bullet", f"优先进攻: {favor}")])
+        w.write(doc_id, [("bullet", f"优先进攻方向: {favor}")])
+        if s4_w:
+            a_pct = s4_w.get("a_share", 0.25)
+            w.write(doc_id, [("bullet",
+                f"A股仓位上限: {a_pct:.0%} | 单票≤2%总资产 | 最多持8只"
+            )])
 
     w.write(doc_id, [
-        ("h3", "纪律检查"),
-        ("bullet", "8% 硬止损：每票买入后立即设止损价 = 成本 × 0.92"),
-        ("bullet", "15% 止盈减半仓 / 30% 止盈清仓"),
-        ("bullet", "凯利仓位上限：每票 ≤ 总资产 2%"),
-        ("bullet", "月度再平衡 + 6个月评估"),
+        ("h3", "交易纪律"),
+        ("bullet", "建仓：双门开 + 趋势温/热 + 右侧(价格>MA60且MA20>MA60) → 分两批建，首批50%"),
+        ("bullet", "止损：持仓<10天 → 成本-8%硬止损；≥10天 → trailing: 盈利≥30%从峰值-12%，盈利10-30%从峰值-15%，其余从峰值-20%"),
+        ("bullet", "止盈：无固定止盈线，trailing stop自动让赢家跑；基本面恶化(ROE连降2季)主动清仓"),
+        ("bullet", "换仓：新票分数需比最弱持仓高20%才换；衰退/过热期不开新A股仓"),
+        ("bullet", "仓位：单票≤2%总资产 | A股总仓位=策略四当期A股配比 | 月度再平衡"),
         ("text", w.ref("六、交易纪律")),
     ])
 
