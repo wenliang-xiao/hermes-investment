@@ -1230,7 +1230,7 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
     r3 = run_multifactor_stock(price_data, factor_scores, start, end, benchmark, True, gate_series)
 
     print("[backtest] 策略四：宏观驱动跨资产配置+双门...")
-    r4 = run_strategy4(price_data, factor_scores, all_watchlist, start, end, benchmark, gate_series)
+    r4 = run_macro_driven_allweather(price_data, factor_scores, start, end, benchmark, all_watchlist)
 
     return [r1, r2, r3, r4]
 
