@@ -25,12 +25,32 @@ import re
 import json
 import time
 import hashlib
+import signal
+import socket
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+socket.setdefaulttimeout(8)  # 全局socket超时8秒，防止外部API挂死
+
+class _TimeLimitError(Exception):
+    pass
+
+def _timeout_call(seconds, func, *args, **kwargs):
+    """信号超时包装器——用于AKShare等不遵守socket超时的调用"""
+    def _handler(signum, frame):
+        raise _TimeLimitError(f"调用超时（{seconds}s限制）")
+    old = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        result = func(*args, **kwargs)
+        return result
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
 
 # ═══════════════════════════════════════════════════════════════
 # 基础配置
@@ -529,7 +549,7 @@ def _fetch_caixin_rss() -> List[Dict]:
 def _fetch_cls_flash() -> List[Dict]:
     try:
         import akshare as ak
-        df = ak.stock_info_global_cls(symbol="重点")
+        df = _timeout_call(15, ak.stock_info_global_cls, symbol="重点")
         if df is None or df.empty:
             return []
         items = []
@@ -560,7 +580,7 @@ def _fetch_cls_flash() -> List[Dict]:
 def _fetch_sina_flash() -> List[Dict]:
     try:
         import akshare as ak
-        df = ak.stock_info_global_sina()
+        df = _timeout_call(15, ak.stock_info_global_sina)
         if df is None or df.empty:
             return []
         items = []

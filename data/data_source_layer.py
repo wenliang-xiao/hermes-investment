@@ -23,10 +23,13 @@ import logging
 import hashlib
 import json
 import os
+import socket
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Optional, Any
 import pandas as pd
+
+socket.setdefaulttimeout(8)  # 全局socket超时8秒，防止外部API挂死不返回
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +90,8 @@ def _is_connection_reset(e: Exception) -> bool:
     return any(k in msg for k in ("connection aborted", "remote end closed", "remotedisconnected", "connection reset"))
 
 
-def _retry(fn, max_attempts: int = 4, delay: float = 2.0, source: str = ""):
+def _retry(fn, max_attempts: int = 2, delay: float = 1.0, source: str = ""):
+    """重试包装器，默认2次重试（无超时时容易挂死，少重试比多重试好）"""
     last_err = None
     for attempt in range(max_attempts):
         try:
