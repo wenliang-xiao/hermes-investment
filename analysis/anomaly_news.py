@@ -16,8 +16,28 @@
 import os
 import json
 import time
+import signal
+import socket
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+
+socket.setdefaulttimeout(8)  # 全局socket超时8秒
+
+class _TimeLimitError(Exception):
+    pass
+
+def _timeout_call(seconds, func, *args, **kwargs):
+    """信号超时包装器——用于AKShare等不遵守socket超时的调用"""
+    def _handler(signum, frame):
+        raise _TimeLimitError(f"调用超时（{seconds}s限制）")
+    old = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        result = func(*args, **kwargs)
+        return result
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
 
 
 def _fetch_stock_news_ak(symbol: str, name: str) -> List[Dict]:
@@ -53,7 +73,7 @@ def _fetch_stock_news_ak(symbol: str, name: str) -> List[Dict]:
 def _fetch_cls_flash() -> List[Dict]:
     try:
         import akshare as ak
-        df = ak.stock_info_global_cls(symbol="重点")
+        df = _timeout_call(15, ak.stock_info_global_cls, symbol="重点")
         if df is None or df.empty:
             return []
         results = []
@@ -76,7 +96,7 @@ def _fetch_cls_flash() -> List[Dict]:
 def _fetch_sina_flash() -> List[Dict]:
     try:
         import akshare as ak
-        df = ak.stock_info_global_sina()
+        df = _timeout_call(15, ak.stock_info_global_sina)
         if df is None or df.empty:
             return []
         results = []

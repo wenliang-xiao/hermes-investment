@@ -526,7 +526,7 @@ def _ts_to_str(ts: int) -> str:
 # 财新RSS（备选）
 # ═══════════════════════════════════════════════════════════════
 
-CAIXIN_RSS_URL = "https://rsshub.app/caixin/latest"
+CAIXIN_RSS_URL = "https://www.caixin.com/rss/caixin.xml"
 
 
 def _fetch_caixin_rss() -> List[Dict]:
