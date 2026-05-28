@@ -227,6 +227,41 @@ try:
         dg = macro.get("dual_gate", {})
         save_macro_gate(today_str, dg.get("macro_gate", "?"), dg.get("trend_gate", "?"))
         log(f"双门状态已保存: {dg.get('macro_gate','?')}+{dg.get('trend_gate','?')}")
+
+        try:
+            from investment_system.analysis.score_history import build_historical_scores_from_prices
+            from investment_system.data.data_layer import get_stock_daily
+            from investment_system.config import WATCHLIST, INDUSTRY_CHAINS
+            chain_syms = list({str(s) for c in INDUSTRY_CHAINS.values() for s in c.get("symbols", []) if str(s).isdigit()})
+            watchlist_syms = [k for k in WATCHLIST.keys() if str(k).isdigit() and str(k) in set(chain_syms)]
+            price_snap = {}
+            for sym in watchlist_syms[:40]:
+                try:
+                    from datetime import datetime, timedelta
+                    start_180 = (datetime.strptime(today_str, "%Y-%m-%d") - timedelta(days=180)).strftime("%Y-%m-%d")
+                    df = get_stock_daily(sym, start=start_180, end=today_str)
+                    if df is not None and not df.empty:
+                        price_snap[sym] = df
+                except Exception:
+                    pass
+            if price_snap:
+                dlite_scores = build_historical_scores_from_prices(list(price_snap.keys()), price_snap, today_str, today_str, use_fundamentals=False)
+                dlite_top8 = set(sorted(dlite_scores.get(today_str, {}).items(), key=lambda x: x[1], reverse=True)[:8])
+                six_top8 = set(sorted(score_snapshot.items(), key=lambda x: x[1], reverse=True)[:8])
+                dlite_syms = {s for s, _ in dlite_top8}
+                six_syms = {s for s, _ in six_top8}
+                overlap = len(dlite_syms & six_syms)
+                overlap_pct = overlap / max(len(six_syms), 1)
+                log(f"Shadow run: 六因子Top8={list(six_syms)} DLite Top8={list(dlite_syms)} 重叠{overlap}/8={overlap_pct:.0%}")
+                w.write(doc_id, [
+                    ('divider', ''),
+                    ('h2', f'十五、🔬 Shadow Run — 六因子 vs D-lite 重叠率'),
+                    ('bullet', f"本周六因子Top8: {', '.join(sorted(six_syms))}"),
+                    ('bullet', f"D-lite动量Top8: {', '.join(sorted(dlite_syms))}"),
+                    ('bold', f"重叠率: {overlap_pct:.0%} ({overlap}/8) — {'✅ 因子收敛良好' if overlap_pct >= 0.5 else '⚠️ 因子分歧，继续观察'}"),
+                ])
+        except Exception as e:
+            log(f"Shadow run 对比失败(不影响报告): {e}")
     except Exception as e:
         log(f"因子分/双门快照保存失败(不影响报告): {e}")
 

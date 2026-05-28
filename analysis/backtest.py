@@ -854,28 +854,36 @@ def _score_etf_pool(pool: List[str], price_data: Dict[str, pd.DataFrame],
 
 def _get_historical_regime(date: pd.Timestamp, cpi_dict: Dict[str, float],
                             pmi_dict: Dict[str, float]) -> str:
-    """用CPI + PMI推算历史宏观象限"""
-    # 找最近的CPI（延迟45天）
+    date_str = date.strftime("%Y-%m-%d")
+    sorted_keys = sorted(cpi_dict.keys())
+
     cpi_val = 1.5
-    for d_str in sorted(cpi_dict.keys(), reverse=True):
-        if date >= pd.Timestamp(d_str):
-            cpi_val = cpi_dict[d_str]
-            break
-    # 找最近的PMI
+    cpi_prev = 1.5
+    found = 0
+    for d_str in reversed(sorted_keys):
+        if d_str <= date_str:
+            if found == 0:
+                cpi_val = cpi_dict[d_str]
+            elif found == 1:
+                cpi_prev = cpi_dict[d_str]
+                break
+            found += 1
+    cpi_trend = cpi_val - cpi_prev
+
     pmi_val = 50.0
-    for d_str in sorted(pmi_dict.keys(), reverse=True):
-        if date >= pd.Timestamp(d_str):
+    for d_str in reversed(sorted(pmi_dict.keys())):
+        if d_str <= date_str:
             pmi_val = pmi_dict[d_str]
             break
 
-    if pmi_val < 48:
-        return "衰退期" if cpi_val < 1.0 else "复苏期"
-    elif cpi_val < 1.0:
-        return "复苏期"
-    elif cpi_val < 2.5:
+    if pmi_val < 48 or (cpi_trend < -0.3 and cpi_val < 1.0):
+        return "衰退期"
+    elif cpi_val >= 2.5 or (cpi_val >= 1.5 and cpi_trend > 0.3):
+        return "过热期"
+    elif cpi_trend > 0.15 and cpi_val > 0.3:
         return "扩张期"
     else:
-        return "过热期"
+        return "复苏期"
 
 
 def run_strategy4(price_data: Dict[str, pd.DataFrame],
@@ -967,7 +975,10 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
                 if not qualified:
                     qualified = {sym: sc for sym, sc in scores.items()
                                  if sym in stock_symbols and sym in price_data}
-                top_stocks = sorted(qualified.items(), key=lambda x: x[1], reverse=True)[:8]
+                all_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
+                if regime in ("衰退期", "过热期"):
+                    all_candidates = [(s, sc) for s, sc in all_candidates if s in holdings]
+                top_stocks = all_candidates[:8]
             else:
                 top_stocks = []
 
@@ -1055,6 +1066,27 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
             # 交易摩擦
             churn = (len(entered) + len(exited)) / max(len(holdings) + len(exited), 1)
             portfolio_value.iloc[i - 1] *= (1 - 0.002 * churn)
+
+        stop_set = set()
+        for sym in list(holdings.keys()):
+            if not str(sym).isdigit():
+                continue
+            if sym not in price_data:
+                continue
+            curr_idx = price_data[sym].index[price_data[sym].index <= date]
+            if not len(curr_idx):
+                continue
+            curr_p = float(price_data[sym].loc[curr_idx[-1], "close"])
+            entry_p = entry_prices.get(sym, curr_p)
+            pnl = (curr_p - entry_p) / entry_p
+            if pnl <= -STOP_LOSS:
+                stop_set.add(sym)
+                trades.append(Trade(sym, entry_dates.get(sym, ""), entry_p,
+                                    date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
+        for sym in stop_set:
+            holdings.pop(sym, None)
+            entry_prices.pop(sym, None)
+            entry_dates.pop(sym, None)
 
         # 每日净值更新
         if not holdings:
