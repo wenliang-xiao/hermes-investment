@@ -976,7 +976,23 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
                 all_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
                 if regime in ("衰退期", "过热期"):
                     all_candidates = [(s, sc) for s, sc in all_candidates if s in holdings]
-                top_stocks = all_candidates[:8]
+                held_a_scores = {s: scores.get(s, 0.0) for s in holdings if str(s).isdigit()}
+                filtered = []
+                held_remaining = set(held_a_scores.keys())
+                for sym, sc in all_candidates:
+                    if sym in holdings:
+                        filtered.append((sym, sc))
+                        held_remaining.discard(sym)
+                    elif held_remaining:
+                        weakest = min(held_remaining, key=lambda s: held_a_scores.get(s, 0))
+                        if sc > held_a_scores.get(weakest, 0) * 1.20:
+                            filtered.append((sym, sc))
+                            held_remaining.discard(weakest)
+                    else:
+                        filtered.append((sym, sc))
+                    if len(filtered) >= 8:
+                        break
+                top_stocks = filtered if filtered else all_candidates[:8]
             else:
                 top_stocks = []
 

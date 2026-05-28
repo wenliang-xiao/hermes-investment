@@ -287,13 +287,16 @@ def _get_latest_known_value(data_dict: Dict[str, float], date) -> Optional[float
 
 def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict[str, List[dict]]:
     result = {}
+    pe_history: Dict[str, pd.Series] = {}
     try:
         import baostock as bs
         import socket
         socket.setdefaulttimeout(8)
         bs.login()
+
         for sym in symbols:
             code = f"sh.{sym}" if sym.startswith(("5", "6")) else f"sz.{sym}"
+
             growth_by_period: Dict[str, dict] = {}
             for year in range(int(start[:4]) - 1, int(end[:4]) + 1):
                 for quarter in [1, 2, 3, 4]:
@@ -354,13 +357,47 @@ def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict
                     "gross_margin": dupont_by_period.get(period_key, {}).get("gross_margin", 0.0),
                 }
                 records.append(rec)
-
             if records:
                 result[sym] = sorted(records, key=lambda x: x["available_date"])
+
+            try:
+                rs_pe = bs.query_history_k_data_plus(
+                    code, "date,peTTM",
+                    start_date=start, end_date=end,
+                    frequency="w", adjustflag="3")
+                if rs_pe.error_code == "0":
+                    pe_rows = []
+                    while rs_pe.next():
+                        r = rs_pe.get_row_data()
+                        try:
+                            if r[1] and r[1].strip():
+                                pe_val = float(r[1])
+                                if 0 < pe_val < 2000:
+                                    pe_rows.append((r[0], pe_val))
+                        except Exception:
+                            pass
+                    if pe_rows:
+                        s = pd.Series(dict(pe_rows))
+                        s.index = pd.to_datetime(s.index)
+                        pe_history[sym] = s.dropna()
+            except Exception:
+                pass
+
         bs.logout()
     except Exception as e:
         print(f"[score_history] 财务数据拉取失败(超时/无数据): {e}")
+
+    result["__pe_history__"] = pe_history  # type: ignore[assignment]
     return result
+
+
+def _calc_pe_percentile_from_history(pe_series: pd.Series, date: pd.Timestamp, current_pe: float) -> Optional[float]:
+    if pe_series.empty or current_pe <= 0:
+        return None
+    hist = pe_series[pe_series.index <= date]
+    if len(hist) < 20:
+        return None
+    return float((hist < current_pe).mean()) * 100
 
 
 def _get_latest_fundamental(fund_hist: List[dict], date) -> dict:
@@ -377,30 +414,46 @@ def build_historical_scores_from_prices(
     rebalance_freq: str = "W-FRI",
     use_fundamentals: bool = True,
 ) -> Dict[str, Dict[str, float]]:
-    """
-    从历史价格+基本面数据重建因子分快照（D-lite+方案）。
-    
-    因子构成（与 factor_scanner 对齐）：
-      - 质量（ROE）：权重 25% — 需要baostock历史财务，45天滞后
-      - 成长（营收增速）：权重 15% — 同上
-      - 动量（20/60/120日）：权重 25%
-      - 低波（90日波动率倒数）：权重 20%
-      - 技术（RSI+MA）：权重 15%
-    
-    Oracle注意：PE历史百分位仍缺失（需Tushare，可后续增加）。
-    比纯动量分可信得多，基本面因子有时间滞后保护，无前视偏差。
-    """
     fundamental_data: Dict[str, List[dict]] = {}
+    pe_hist_map: Dict[str, pd.Series] = {}
+
     if use_fundamentals:
-        print("[score_history] 拉取历史财务数据（ROE+营收增速，含45天滞后）...")
-        fundamental_data = _fetch_fundamental_history(symbols, start, end)
-        print(f"[score_history] 财务数据覆盖: {len(fundamental_data)}/{len(symbols)} 只")
+        print("[score_history] 拉取历史财务+PE数据（含45天PIT延迟）...")
+        raw = _fetch_fundamental_history(symbols, start, end)
+        pe_hist_map = raw.pop("__pe_history__", {})  # type: ignore[arg-type]
+        fundamental_data = raw
+        print(f"[score_history] 财务覆盖: {len(fundamental_data)}/{len(symbols)}只  PE历史: {len(pe_hist_map)}只")
+
+    try:
+        from investment_system.config import FACTOR_WEIGHTS
+        _factor_weights = FACTOR_WEIGHTS
+    except Exception:
+        _factor_weights = {"default": {"质量": 0.23, "价值": 0.17, "成长": 0.17,
+                                        "低波": 0.17, "红利": 0.17, "动量": 0.09}}
+
+    cpi_hist = _get_historical_cpi(start, end)
+    index_ma = _get_index_ma_series(start, end)
+
+    try:
+        from investment_system.analysis.factor_scanner import FactorScanner
+        _fs = FactorScanner()
+    except Exception:
+        _fs = None
 
     all_scores = {}
     rebalance_dates = pd.date_range(start, end, freq=rebalance_freq)
 
     for date in rebalance_dates:
         date_str = date.strftime("%Y-%m-%d")
+
+        cpi_val = _get_latest_known_value(cpi_hist, date)
+        dev_val = index_ma.get(date_str)
+        try:
+            regime = _get_historical_regime_for_score(date, cpi_val, dev_val)
+        except Exception:
+            regime = "default"
+        w = _factor_weights.get(regime, _factor_weights.get("default", {}))
+
         day_scores = {}
 
         for sym in symbols:
@@ -415,13 +468,11 @@ def build_historical_scores_from_prices(
             ret_20 = (close[-1] / close[-21] - 1) * 100 if len(close) >= 21 else 0
             ret_60 = (close[-1] / close[-61] - 1) * 100 if len(close) >= 61 else 0
             ret_120 = (close[-1] / close[-121] - 1) * 100 if len(close) >= 121 else 0
-            momentum_raw = ret_20 * 0.4 + ret_60 * 0.35 + ret_120 * 0.25
-            s_momentum = max(1, min(10, 5 + momentum_raw / 8))
+            s_momentum = max(1.0, min(10.0, 5 + (ret_20 * 0.4 + ret_60 * 0.35 + ret_120 * 0.25) / 8))
 
             if len(close) >= 60:
-                returns_arr = np.diff(close[-61:]) / close[-61:-1]
-                vol = float(np.std(returns_arr) * np.sqrt(252) * 100)
-                s_lowvol = max(1, min(10, 10 - (vol - 15) / 4))
+                vol = float(np.std(np.diff(close[-61:]) / close[-61:-1]) * np.sqrt(252) * 100)
+                s_lowvol = max(1.0, min(10.0, 10 - (vol - 15) / 4))
             else:
                 s_lowvol = 5.0
 
@@ -441,49 +492,82 @@ def build_historical_scores_from_prices(
                 s_tech += 1.5
             if ma60_dev > 0:
                 s_tech += 0.5
-            s_tech = max(1, min(10, s_tech))
+            s_tech = max(1.0, min(10.0, s_tech))
 
             s_quality = 5.0
             s_growth = 5.0
-            s_gross_margin = 5.0
+            s_value = 5.0
+            s_dividend = 5.0
             has_fundamentals = False
+
             if sym in fundamental_data:
                 fd = _get_latest_fundamental(fundamental_data[sym], date)
                 if fd:
                     has_fundamentals = True
-                    roe = fd.get("roe", 0) or 0
-                    rev = fd.get("rev_growth", 0) or 0
-                    profit_g = fd.get("profit_growth", 0) or 0
-                    gm = fd.get("gross_margin", 0) or 0
-                    s_roe = max(1, min(10, 1 + 9 * min(abs(roe), 40) / 40))
-                    s_ocf = max(1, min(10, 1 + 9 * min(abs(gm), 60) / 60))
-                    s_quality = round(s_roe * 0.6 + s_ocf * 0.4, 2)
-                    s_rev = max(1, min(10, 1 + 9 * min(abs(rev), 60) / 60))
-                    s_profit = max(1, min(10, 1 + 9 * min(abs(profit_g), 80) / 80))
-                    s_growth = round(s_rev * 0.45 + s_profit * 0.55, 2)
-                    s_gross_margin = max(1, min(10, 1 + 9 * min(abs(gm), 55) / 55))
+                    roe = abs(fd.get("roe", 0) or 0)
+                    rev = abs(fd.get("rev_growth", 0) or 0)
+                    profit_g = abs(fd.get("profit_growth", 0) or 0)
+                    gm = abs(fd.get("gross_margin", 0) or 0)
 
-            try:
-                from investment_system.analysis.factor_scanner import FactorScanner
-                _fs = FactorScanner()
-                s_profit_pool = _fs._get_profit_pool_score(sym)
-                perez_mult = _fs._get_perez_multiplier(sym)
-            except Exception:
-                s_profit_pool = 5.0
-                perez_mult = 1.0
+                    s_roe = max(1.0, min(10.0, 1 + 9 * min(roe, 40) / 40))
+                    s_gm  = max(1.0, min(10.0, 1 + 9 * min(gm, 60) / 60))
+                    s_quality = round(s_roe * 0.65 + s_gm * 0.35, 2)
+
+                    s_rev    = max(1.0, min(10.0, 1 + 9 * min(rev, 60) / 60))
+                    s_profit = max(1.0, min(10.0, 1 + 9 * min(profit_g, 80) / 80))
+                    s_growth = round(s_rev * 0.40 + s_profit * 0.60, 2)
+
+                    pe_series = pe_hist_map.get(sym, pd.Series(dtype=float))
+                    pe_pct = _calc_pe_percentile_from_history(pe_series, date, roe * 10)
+                    if pe_pct is not None:
+                        s_value = max(1.0, min(10.0, 10 - pe_pct / 11))
+                    else:
+                        s_value = 5.0
+
+                    s_dividend = max(1.0, min(10.0, s_roe * 0.5 + s_gm * 0.5))
+
+            s_profit_pool = 5.0
+            perez_mult = 1.0
+            if _fs is not None:
+                try:
+                    s_profit_pool = _fs._get_profit_pool_score(sym)
+                    perez_mult = _fs._get_perez_multiplier(sym)
+                except Exception:
+                    pass
 
             if use_fundamentals and has_fundamentals:
-                score = (s_quality * 0.20 + s_growth * 0.15 + s_gross_margin * 0.05 +
-                         s_momentum * 0.18 + s_lowvol * 0.12 + s_tech * 0.10 +
-                         s_profit_pool * 0.20)
+                base = (
+                    w.get("质量", 0.23) * s_quality +
+                    w.get("价值", 0.17) * s_value +
+                    w.get("成长", 0.17) * s_growth +
+                    w.get("低波", 0.17) * s_lowvol +
+                    w.get("红利", 0.17) * s_dividend +
+                    w.get("动量", 0.09) * s_momentum
+                )
+                score = min(10.0, base * 0.75 + s_profit_pool * 0.25)
             else:
-                score = (s_momentum * 0.35 + s_lowvol * 0.20 + s_tech * 0.15 +
-                         s_profit_pool * 0.30)
+                score = s_momentum * 0.35 + s_lowvol * 0.20 + s_tech * 0.15 + s_profit_pool * 0.30
 
-            score = max(1, min(10, score * perez_mult))
+            score = max(1.0, min(10.0, score * perez_mult))
             day_scores[sym] = round(score, 2)
 
         if day_scores:
             all_scores[date_str] = day_scores
 
     return all_scores
+
+
+def _get_historical_regime_for_score(date: pd.Timestamp, cpi_val: Optional[float],
+                                      dev_val: Optional[float]) -> str:
+    trend_down = dev_val is not None and dev_val <= -0.05
+    if cpi_val is None:
+        return "default"
+    if trend_down and cpi_val < 1.0:
+        return "衰退期"
+    if cpi_val >= 2.5:
+        return "过热期"
+    if trend_down:
+        return "衰退期"
+    if cpi_val >= 1.0:
+        return "扩张期"
+    return "复苏期"
