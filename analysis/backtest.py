@@ -671,17 +671,22 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
             peak_p = peak_prices[sym]
             dd_from_peak = (curr_p - peak_p) / peak_p if peak_p > 0 else 0
 
-            early_loss = pnl <= -STOP_LOSS
+            try:
+                hold_days = (date - pd.Timestamp(entry_d)).days if entry_d else 0
+            except Exception:
+                hold_days = 999
 
-            is_winner = pnl >= 0.15
-            trend_stop_triggered = is_winner and dd_from_peak <= -0.20
+            if hold_days < 10:
+                stop_triggered = pnl <= -STOP_LOSS
+                reason = "stop_loss"
+            else:
+                trailing_threshold = -0.12 if pnl >= 0.30 else (-0.15 if pnl >= 0.10 else -0.20)
+                stop_triggered = dd_from_peak <= trailing_threshold
+                reason = "trend_stop"
 
-            if early_loss:
+            if stop_triggered:
                 exit_set.add(sym)
-                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
-            elif trend_stop_triggered:
-                exit_set.add(sym)
-                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, "trend_stop", pnl))
+                trades.append(Trade(sym, entry_d, entry_p, date.strftime("%Y-%m-%d"), curr_p, reason, pnl))
         for sym in exit_set:
             holdings.pop(sym, None)
             entry_prices.pop(sym, None)
@@ -917,6 +922,7 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
     holdings: Dict[str, float] = {}
     entry_prices: Dict[str, float] = {}
     entry_dates: Dict[str, str] = {}
+    peak_prices_s4: Dict[str, float] = {}
     trades: List[Trade] = []
     gate_closed_days = 0
     total_days = len(dates)
@@ -1074,6 +1080,7 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
             for sym in exited:
                 entry_prices.pop(sym, None)
                 entry_dates.pop(sym, None)
+                peak_prices_s4.pop(sym, None)
 
             holdings = new_holdings
 
@@ -1093,14 +1100,30 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
             curr_p = float(price_data[sym].loc[curr_idx[-1], "close"])
             entry_p = entry_prices.get(sym, curr_p)
             pnl = (curr_p - entry_p) / entry_p
-            if pnl <= -STOP_LOSS:
+            peak_prices_s4[sym] = max(peak_prices_s4.get(sym, curr_p), curr_p)
+            peak_p = peak_prices_s4[sym]
+            dd_from_peak = (curr_p - peak_p) / peak_p if peak_p > 0 else 0
+            entry_d = entry_dates.get(sym, "")
+            try:
+                hold_days = (date - pd.Timestamp(entry_d)).days if entry_d else 0
+            except Exception:
+                hold_days = 999
+            if hold_days < 10:
+                stop_triggered = pnl <= -STOP_LOSS
+                reason = "stop_loss"
+            else:
+                trailing_threshold = -0.12 if pnl >= 0.30 else (-0.15 if pnl >= 0.10 else -0.20)
+                stop_triggered = dd_from_peak <= trailing_threshold
+                reason = "trend_stop"
+            if stop_triggered:
                 stop_set.add(sym)
-                trades.append(Trade(sym, entry_dates.get(sym, ""), entry_p,
-                                    date.strftime("%Y-%m-%d"), curr_p, "stop_loss", pnl))
+                trades.append(Trade(sym, entry_d, entry_p,
+                                    date.strftime("%Y-%m-%d"), curr_p, reason, pnl))
         for sym in stop_set:
             holdings.pop(sym, None)
             entry_prices.pop(sym, None)
             entry_dates.pop(sym, None)
+            peak_prices_s4.pop(sym, None)
 
         # 每日净值更新
         if not holdings:

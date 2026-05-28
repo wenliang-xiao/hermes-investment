@@ -494,37 +494,23 @@ def build_historical_scores_from_prices(
                 s_tech += 0.5
             s_tech = max(1.0, min(10.0, s_tech))
 
-            s_quality = 5.0
-            s_growth = 5.0
-            s_value = 5.0
-            s_dividend = 5.0
-            has_fundamentals = False
-
-            if sym in fundamental_data:
+            quality_gate_pass = True
+            if use_fundamentals and sym in fundamental_data:
                 fd = _get_latest_fundamental(fundamental_data[sym], date)
                 if fd:
-                    has_fundamentals = True
-                    roe = abs(fd.get("roe", 0) or 0)
-                    rev = abs(fd.get("rev_growth", 0) or 0)
-                    profit_g = abs(fd.get("profit_growth", 0) or 0)
-                    gm = abs(fd.get("gross_margin", 0) or 0)
+                    roe = fd.get("roe", None)
+                    rev = fd.get("rev_growth", None)
+                    profit_g = fd.get("profit_growth", None)
+                    roe_neg = roe is not None and roe < -5.0
+                    rev_collapse = rev is not None and rev < -30.0
+                    profit_collapse = profit_g is not None and profit_g < -50.0
+                    if roe_neg and rev_collapse:
+                        quality_gate_pass = False
+                    if profit_collapse and roe_neg:
+                        quality_gate_pass = False
 
-                    s_roe = max(1.0, min(10.0, 1 + 9 * min(roe, 40) / 40))
-                    s_gm  = max(1.0, min(10.0, 1 + 9 * min(gm, 60) / 60))
-                    s_quality = round(s_roe * 0.65 + s_gm * 0.35, 2)
-
-                    s_rev    = max(1.0, min(10.0, 1 + 9 * min(rev, 60) / 60))
-                    s_profit = max(1.0, min(10.0, 1 + 9 * min(profit_g, 80) / 80))
-                    s_growth = round(s_rev * 0.40 + s_profit * 0.60, 2)
-
-                    pe_series = pe_hist_map.get(sym, pd.Series(dtype=float))
-                    pe_pct = _calc_pe_percentile_from_history(pe_series, date, roe * 10)
-                    if pe_pct is not None:
-                        s_value = max(1.0, min(10.0, 10 - pe_pct / 11))
-                    else:
-                        s_value = 5.0
-
-                    s_dividend = max(1.0, min(10.0, s_roe * 0.5 + s_gm * 0.5))
+            if not quality_gate_pass:
+                continue
 
             s_profit_pool = 5.0
             perez_mult = 1.0
@@ -535,19 +521,23 @@ def build_historical_scores_from_prices(
                 except Exception:
                     pass
 
-            if use_fundamentals and has_fundamentals:
-                base = (
-                    w.get("质量", 0.23) * s_quality +
-                    w.get("价值", 0.17) * s_value +
-                    w.get("成长", 0.17) * s_growth +
-                    w.get("低波", 0.17) * s_lowvol +
-                    w.get("红利", 0.17) * s_dividend +
-                    w.get("动量", 0.09) * s_momentum
-                )
-                score = min(10.0, base * 0.75 + s_profit_pool * 0.25)
-            else:
-                score = s_momentum * 0.35 + s_lowvol * 0.20 + s_tech * 0.15 + s_profit_pool * 0.30
+            industry_rel = 0.0
+            if len(close) >= 61:
+                sym_ret_60 = close[-1] / close[-61] - 1
+                all_rets = []
+                for other in list(day_scores.keys())[:30]:
+                    if other in price_data:
+                        oh = price_data[other]
+                        oh_hist = oh[oh.index <= date]
+                        if len(oh_hist) >= 61:
+                            all_rets.append(oh_hist["close"].values[-1] / oh_hist["close"].values[-61] - 1)
+                if all_rets:
+                    industry_rel = sym_ret_60 - float(np.median(all_rets))
 
+            s_rel_momentum = max(1.0, min(10.0, 5.0 + industry_rel * 30))
+            score = (s_momentum * 0.50 + s_rel_momentum * 0.20 +
+                     s_lowvol * 0.10 + s_tech * 0.05 +
+                     s_profit_pool * 0.15)
             score = max(1.0, min(10.0, score * perez_mult))
             day_scores[sym] = round(score, 2)
 
