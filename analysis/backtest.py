@@ -36,6 +36,36 @@ ALLWEATHER_WEIGHTS = {
     "159985": 0.20,
 }
 
+# ═══ 策略四：跨资产配置参数 ═══
+# 宏观象限→各类资产权重（面基框架：货币信用四象限驱动配置）
+# 复苏期：宽货币·紧信用 → 债券+A股双高
+# 扩张期：宽货币·宽信用 → 股票(美股+A股)高配
+# 过热期：紧货币·宽信用 → 商品最强，A股最低
+# 衰退期：紧货币·紧信用 → 债券最高，商品最低
+STRATEGY4_QUADRANT_WEIGHTS = {
+    "复苏期":  {"a_share": 0.30, "stock_etf": 0.15, "bond_etf": 0.20, "commodity_etf": 0.10, "us_stock": 0.15, "hk_stock": 0.10},
+    "扩张期":  {"a_share": 0.25, "stock_etf": 0.20, "bond_etf": 0.10, "commodity_etf": 0.15, "us_stock": 0.20, "hk_stock": 0.10},
+    "过热期":  {"a_share": 0.15, "stock_etf": 0.10, "bond_etf": 0.10, "commodity_etf": 0.30, "us_stock": 0.20, "hk_stock": 0.15},
+    "衰退期":  {"a_share": 0.20, "stock_etf": 0.10, "bond_etf": 0.30, "commodity_etf": 0.10, "us_stock": 0.15, "hk_stock": 0.15},
+    "default": {"a_share": 0.25, "stock_etf": 0.15, "bond_etf": 0.15, "commodity_etf": 0.15, "us_stock": 0.15, "hk_stock": 0.15},
+}
+
+# ETF池分类（按资产类别）
+STOCK_ETF_POOL = ["512890", "513100", "512480", "512660"]
+BOND_ETF_POOL = ["511260"]    # 国开债ETF（债券久期替代）
+COMMODITY_ETF_POOL = ["518880", "159985"]
+
+# ETF多因子评分权重（用户确认：动量40%+低波20%+流动性15%+跟踪误差10%+宏观拟合度15%）
+ETF_FACTOR_WEIGHTS = {
+    "momentum": 0.40,
+    "low_vol": 0.20,
+    "liquidity": 0.15,
+    "tracking_error": 0.10,
+    "macro_fit": 0.15,
+}
+
+ALL_ETF_POOL = list(set(STOCK_ETF_POOL + BOND_ETF_POOL + COMMODITY_ETF_POOL))
+
 LDS_STOCK_FILTERS = {
     "roe_min": 12.0,
     "rev_growth_min": 15.0,
@@ -581,6 +611,294 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
     return result
 
 
+def _score_etf_pool(pool: List[str], price_data: Dict[str, pd.DataFrame],
+                     date: pd.Timestamp) -> Dict[str, float]:
+    """ETF多因子评分：动量40%+低波20%+流动性15%+跟踪误差10%+宏观拟合度15%"""
+    scores = {}
+    for sym in pool:
+        if sym not in price_data:
+            scores[sym] = 5.0  # 无数据则中位数
+            continue
+        df = price_data[sym]
+        hist = df[df.index <= date]
+        if len(hist) < 20:
+            scores[sym] = 5.0
+            continue
+        close = hist["close"].values
+
+        # 动量(60日)
+        mom_60d = (close[-1] / close[max(0, len(close)-61)] - 1) * 100 if len(close) >= 61 else 0
+        mom_score = max(0, min(10, 5 + mom_60d / 8))
+
+        # 低波(20日波动率倒数)
+        rets = np.diff(close[-21:]) / close[-21:-1] if len(close) >= 21 else [0.005] * 20
+        vol_20d = float(np.std(rets) * np.sqrt(252) * 100)
+        vol_score = max(1, min(10, 10 - vol_20d / 4))
+
+        # 流动性(用数据可用天数/总天数 ≈ 交易活跃度代理)
+        total_days = len(hist)
+        data_gap_ratio = total_days / max((date - hist.index[0]).days, 1)
+        liq_score = max(3, min(10, 5 + data_gap_ratio * 5))
+
+        # 跟踪误差(固定中位数，后续可细化)
+        te_score = 5.0
+
+        # 宏观拟合度(固定中位数，后续可用CPI相关性细化)
+        mf_score = 5.0
+
+        total = (mom_score * ETF_FACTOR_WEIGHTS["momentum"] +
+                 vol_score * ETF_FACTOR_WEIGHTS["low_vol"] +
+                 liq_score * ETF_FACTOR_WEIGHTS["liquidity"] +
+                 te_score * ETF_FACTOR_WEIGHTS["tracking_error"] +
+                 mf_score * ETF_FACTOR_WEIGHTS["macro_fit"])
+        scores[sym] = round(total, 2)
+
+    return scores
+
+
+def _get_historical_regime(date: pd.Timestamp, cpi_dict: Dict[str, float],
+                            pmi_dict: Dict[str, float]) -> str:
+    """用CPI + PMI推算历史宏观象限"""
+    # 找最近的CPI（延迟45天）
+    cpi_val = 1.5
+    for d_str in sorted(cpi_dict.keys(), reverse=True):
+        if date >= pd.Timestamp(d_str):
+            cpi_val = cpi_dict[d_str]
+            break
+    # 找最近的PMI
+    pmi_val = 50.0
+    for d_str in sorted(pmi_dict.keys(), reverse=True):
+        if date >= pd.Timestamp(d_str):
+            pmi_val = pmi_dict[d_str]
+            break
+
+    if pmi_val < 48:
+        return "衰退期" if cpi_val < 1.0 else "复苏期"
+    elif cpi_val < 1.0:
+        return "复苏期"
+    elif cpi_val < 2.5:
+        return "扩张期"
+    else:
+        return "过热期"
+
+
+def run_strategy4(price_data: Dict[str, pd.DataFrame],
+                  factor_scores: Dict[str, Dict[str, float]],
+                  stock_symbols: List[str],
+                  start: str, end: str,
+                  benchmark: pd.Series,
+                  gate_series: Optional[pd.Series] = None) -> BacktestResult:
+    """
+    策略四：宏观象限驱动的跨资产配置 + 多因子链内选股 + 双门乘数控制
+
+    流程：
+    1. 宏观象限→各类资产权重
+    2. 各类资产池内多因子评分→排序选股
+    3. 宏观权重×选股权重→最终配置
+    4. 双门v2连续乘数×总仓位
+    """
+    strategy_name = "策略四：宏观驱动跨资产配置+双门"
+    dates = pd.date_range(start, end, freq="B")
+    portfolio_value = pd.Series(index=dates, dtype=float)
+    portfolio_value.iloc[0] = 1.0
+    rebalance_dates = pd.date_range(start, end, freq="4W-FRI")
+
+    # 准备宏观数据
+    try:
+        from investment_system.analysis.score_history import _get_historical_cpi
+        cpi_dict = _get_historical_cpi(start, end)
+    except Exception:
+        cpi_dict = {}
+    # PMI数据（简化版：从CPI字典反向推理或使用默认值）
+    pmi_dict = {}
+
+    holdings: Dict[str, float] = {}
+    entry_prices: Dict[str, float] = {}
+    entry_dates: Dict[str, str] = {}
+    trades: List[Trade] = []
+    gate_closed_days = 0
+    total_days = len(dates)
+
+    for i, date in enumerate(dates[1:], 1):
+        gate_val = 1.0
+        if gate_series is not None:
+            gate_val = float(gate_series.get(date, gate_series.get(date - timedelta(days=1), 1.0)))
+        if gate_val < 0.8:
+            gate_closed_days += 1
+
+        # 仓位乘数为0时清仓
+        if gate_val <= 0 and holdings:
+            for sym, w in list(holdings.items()):
+                if sym in price_data:
+                    curr_idx = price_data[sym].index[price_data[sym].index <= date]
+                    if len(curr_idx) > 0:
+                        exit_p = float(price_data[sym].loc[curr_idx[-1], "close"])
+                        entry_p = entry_prices.get(sym, exit_p)
+                        pnl = (exit_p - entry_p) / entry_p
+                        trades.append(Trade(
+                            sym, entry_dates.get(sym, ""), entry_p,
+                            date.strftime("%Y-%m-%d"), exit_p, "dual_gate_close", pnl
+                        ))
+            holdings = {}
+            entry_prices = {}
+            entry_dates = {}
+            portfolio_value.iloc[i] = portfolio_value.iloc[i - 1]
+            continue
+
+        # 月度再平衡：重配所有资产
+        if date in rebalance_dates and gate_val > 0:
+            regime = _get_historical_regime(date, cpi_dict, pmi_dict)
+            weights = STRATEGY4_QUADRANT_WEIGHTS.get(regime, STRATEGY4_QUADRANT_WEIGHTS["default"])
+
+            # ── ① A股链内选股 ──
+            date_str = date.strftime("%Y-%m-%d")
+            scores = factor_scores.get(date_str, {})
+            # 筛选可用标的
+            if scores:
+                qualified = {}
+                for sym, sc in scores.items():
+                    if sym in stock_symbols and sym in price_data:
+                        right_side = True
+                        df_hist = price_data[sym][price_data[sym].index <= date]
+                        if len(df_hist) >= 60:
+                            c = df_hist["close"].values
+                            ma60 = float(np.mean(c[-60:]))
+                            ma20 = float(np.mean(c[-20:]))
+                            if c[-1] <= ma60 or ma20 <= ma60:
+                                right_side = False
+                        if right_side:
+                            qualified[sym] = sc
+                if not qualified:
+                    qualified = {sym: sc for sym, sc in scores.items()
+                                 if sym in stock_symbols and sym in price_data}
+                top_stocks = sorted(qualified.items(), key=lambda x: x[1], reverse=True)[:8]
+            else:
+                top_stocks = []
+
+            # ── ② ETF多因子评分 ──
+            stk_etf_scores = _score_etf_pool(STOCK_ETF_POOL, price_data, date)
+            bnd_etf_scores = _score_etf_pool(BOND_ETF_POOL, price_data, date)
+            cmd_etf_scores = _score_etf_pool(COMMODITY_ETF_POOL, price_data, date)
+
+            # 美股/港股（从WATCHLIST加载）
+            us_symbols = [k for k in stock_symbols if not str(k).isdigit() and not str(k).endswith(".HK")]
+            hk_symbols = [k for k in stock_symbols if str(k).endswith(".HK")]
+
+            # ── ③ 构建组合 ──
+            new_holdings: Dict[str, float] = {}
+            asset_weight = weights.get("a_share", 0.25)
+            if top_stocks:
+                per_stock = asset_weight / len(top_stocks)
+                for sym, _ in top_stocks:
+                    new_holdings[sym] = per_stock
+
+            # 股票ETF
+            etf_w = weights.get("stock_etf", 0.15)
+            if stk_etf_scores:
+                total_sc = sum(stk_etf_scores.values())
+                if total_sc > 0:
+                    for sym, sc in stk_etf_scores.items():
+                        new_holdings[sym] = etf_w * (sc / total_sc)
+
+            # 债券ETF
+            bnd_w = weights.get("bond_etf", 0.15)
+            if bnd_etf_scores:
+                total_sc = sum(bnd_etf_scores.values())
+                if total_sc > 0:
+                    for sym, sc in bnd_etf_scores.items():
+                        new_holdings[sym] = bnd_w * (sc / total_sc)
+
+            # 商品ETF
+            cmd_w = weights.get("commodity_etf", 0.15)
+            if cmd_etf_scores:
+                total_sc = sum(cmd_etf_scores.values())
+                if total_sc > 0:
+                    for sym, sc in cmd_etf_scores.items():
+                        new_holdings[sym] = cmd_w * (sc / total_sc)
+
+            # 美股（等权）
+            us_w = weights.get("us_stock", 0.15)
+            if us_symbols:
+                per_us = us_w / len(us_symbols)
+                for sym in us_symbols:
+                    new_holdings[sym] = per_us
+
+            # 港股（等权）
+            hk_w = weights.get("hk_stock", 0.10)
+            if hk_symbols:
+                per_hk = hk_w / len(hk_symbols)
+                for sym in hk_symbols:
+                    new_holdings[sym] = per_hk
+
+            # 记录交易
+            exited = set(holdings) - set(new_holdings)
+            entered = set(new_holdings) - set(holdings)
+            for sym in exited:
+                if sym in price_data:
+                    curr_idx = price_data[sym].index[price_data[sym].index <= date]
+                    if len(curr_idx) > 0:
+                        exit_p = float(price_data[sym].loc[curr_idx[-1], "close"])
+                        entry_p = entry_prices.get(sym, exit_p)
+                        pnl = (exit_p - entry_p) / entry_p
+                        trades.append(Trade(
+                            sym, entry_dates.get(sym, ""), entry_p,
+                            date.strftime("%Y-%m-%d"), exit_p, "rebalance", pnl
+                        ))
+            for sym in entered:
+                if sym in price_data:
+                    curr_idx = price_data[sym].index[price_data[sym].index <= date]
+                    if len(curr_idx) > 0:
+                        entry_prices[sym] = float(price_data[sym].loc[curr_idx[-1], "close"])
+                        entry_dates[sym] = date.strftime("%Y-%m-%d")
+            for sym in exited:
+                entry_prices.pop(sym, None)
+                entry_dates.pop(sym, None)
+
+            holdings = new_holdings
+
+            # 交易摩擦
+            churn = (len(entered) + len(exited)) / max(len(holdings) + len(exited), 1)
+            portfolio_value.iloc[i - 1] *= (1 - 0.002 * churn)
+
+        # 每日净值更新
+        if not holdings:
+            portfolio_value.iloc[i] = portfolio_value.iloc[i - 1]
+            continue
+
+        daily_ret = 0.0
+        total_w = sum(holdings.values())
+        for sym, w in holdings.items():
+            if sym not in price_data:
+                continue
+            df = price_data[sym]
+            prev_idx = df.index[df.index <= dates[i - 1]]
+            curr_idx = df.index[df.index <= date]
+            if len(prev_idx) > 0 and len(curr_idx) > 0:
+                prev_p = float(df.loc[prev_idx[-1], "close"])
+                curr_p = float(df.loc[curr_idx[-1], "close"])
+                daily_ret += (w / total_w) * (curr_p / prev_p - 1) if prev_p > 0 else 0
+
+        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret * gate_val)
+
+    equity = portfolio_value.dropna()
+    metrics = _calc_metrics(equity, benchmark)
+    exclude = {"monthly_returns", "yearly_returns", "drawdown_series"}
+    result = BacktestResult(
+        strategy_name=strategy_name,
+        start_date=start,
+        end_date=end,
+        equity_curve=equity,
+        benchmark_curve=benchmark,
+        trades=trades,
+        gate_closed_pct=gate_closed_days / max(total_days, 1),
+        **{k: v for k, v in metrics.items() if k not in exclude},
+    )
+    result.monthly_returns = metrics.get("monthly_returns", pd.Series())
+    result.yearly_returns = metrics.get("yearly_returns", {})
+    result.drawdown_series = metrics.get("drawdown_series", pd.Series())
+    return result
+
+
 def generate_mock_factor_scores(symbols: List[str], start: str, end: str,
                                  price_data: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, float]]:
     """
@@ -648,7 +966,23 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
             print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
 
     etf_symbols = list(ALLWEATHER_WEIGHTS.keys())
-    all_symbols = list(set(symbols + etf_symbols + ["000300"]))
+    all_symbols = list(set(symbols + etf_symbols + ALL_ETF_POOL + ["000300"]))
+
+    # 添加WATCHLIST中的美股和港股
+    try:
+        from investment_system.config import WATCHLIST
+        us_hk = [k for k in WATCHLIST.keys() if any(c in str(k) for c in ["NVDA", "TSLA", "TSM", "GOOGL", "MSFT", "AMZN", "INTC", "VST", "CEG", "EQIX", "DLR", ".HK"])]
+        all_symbols = list(set(all_symbols + us_hk))
+    except Exception:
+        pass
+
+    # 策略四需要完整WATCHLIST（含美股/港股）
+    all_watchlist = symbols.copy()
+    try:
+        from investment_system.config import WATCHLIST
+        all_watchlist = [str(k) for k in WATCHLIST.keys()]
+    except Exception:
+        pass
 
     print(f"[backtest] 加载价格数据: {len(all_symbols)} 只...")
     price_data = _load_price_data(all_symbols, start, end)
@@ -705,12 +1039,15 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
         gate_series = pd.Series(1, index=pd.date_range(start, end, freq="B"))
     r3 = run_multifactor_stock(price_data, factor_scores, start, end, benchmark, True, gate_series)
 
-    return [r1, r2, r3]
+    print("[backtest] 策略四：宏观驱动跨资产配置+双门...")
+    r4 = run_strategy4(price_data, factor_scores, all_watchlist, start, end, benchmark, gate_series)
+
+    return [r1, r2, r3, r4]
 
 
 def print_report(results: List[BacktestResult]):
     print("\n" + "=" * 80)
-    print("回测报告 — 三策略对比（2018-2024）")
+    print("回测报告 — 四策略对比（2018-2024）")
     print("=" * 80)
     headers = ["策略", "年化收益", "最大回撤", "夏普", "卡玛", "月度胜率(vs基准)", "双门关闭"]
     rows = []
