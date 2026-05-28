@@ -286,23 +286,18 @@ def _get_latest_known_value(data_dict: Dict[str, float], date) -> Optional[float
 
 
 def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict[str, List[dict]]:
-    """
-    从baostock拉取历史财务数据（季度ROE+营收增速）。
-    加45天报告滞后，避免前视偏差。
-    baostock超时时返回空字典，回测fallback到纯价格因子。
-    返回格式：{symbol: [{report_date, available_date, roe, rev_growth}]}
-    """
     result = {}
     try:
         import baostock as bs
         import socket
-        socket.setdefaulttimeout(4)  # 4s超时避免卡死
+        socket.setdefaulttimeout(8)
         bs.login()
         for sym in symbols:
             code = f"sh.{sym}" if sym.startswith(("5", "6")) else f"sz.{sym}"
-            records = []
+            growth_by_period: Dict[str, dict] = {}
             for year in range(int(start[:4]) - 1, int(end[:4]) + 1):
                 for quarter in [1, 2, 3, 4]:
+                    period_key = f"{year}q{quarter}"
                     try:
                         rs = bs.query_growth_data(code=code, year=year, quarter=quarter)
                         if rs.error_code != "0":
@@ -310,22 +305,56 @@ def _fetch_fundamental_history(symbols: List[str], start: str, end: str) -> Dict
                         while rs.next():
                             r = rs.get_row_data()
                             try:
-                                report_date_str = f"{year}-{quarter * 3:02d}-30"
-                                available_date = (
-                                    datetime.strptime(report_date_str, "%Y-%m-%d") + timedelta(days=45)
-                                ).strftime("%Y-%m-%d")
                                 roe = float(r[3]) * 100 if r[3] and r[3].strip() else None
                                 rev_growth = float(r[4]) * 100 if r[4] and r[4].strip() else None
+                                profit_growth = float(r[5]) * 100 if len(r) > 5 and r[5] and r[5].strip() else None
                                 if roe is not None:
-                                    records.append({
-                                        "available_date": available_date,
+                                    growth_by_period[period_key] = {
+                                        "year": year, "quarter": quarter,
                                         "roe": roe,
                                         "rev_growth": rev_growth or 0.0,
-                                    })
+                                        "profit_growth": profit_growth or 0.0,
+                                    }
                             except Exception:
                                 pass
                     except Exception:
                         pass
+
+            dupont_by_period: Dict[str, dict] = {}
+            for year in range(int(start[:4]) - 1, int(end[:4]) + 1):
+                for quarter in [1, 2, 3, 4]:
+                    period_key = f"{year}q{quarter}"
+                    try:
+                        rs = bs.query_dupont_data(code=code, year=year, quarter=quarter)
+                        if rs.error_code != "0":
+                            continue
+                        while rs.next():
+                            r = rs.get_row_data()
+                            try:
+                                gross_margin = float(r[4]) * 100 if len(r) > 4 and r[4] and r[4].strip() else None
+                                if gross_margin is not None:
+                                    dupont_by_period[period_key] = {"gross_margin": gross_margin}
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+            records = []
+            for period_key, gd in growth_by_period.items():
+                year, quarter = gd["year"], gd["quarter"]
+                report_date_str = f"{year}-{quarter * 3:02d}-30"
+                available_date = (
+                    datetime.strptime(report_date_str, "%Y-%m-%d") + timedelta(days=45)
+                ).strftime("%Y-%m-%d")
+                rec = {
+                    "available_date": available_date,
+                    "roe": gd["roe"],
+                    "rev_growth": gd["rev_growth"],
+                    "profit_growth": gd["profit_growth"],
+                    "gross_margin": dupont_by_period.get(period_key, {}).get("gross_margin", 0.0),
+                }
+                records.append(rec)
+
             if records:
                 result[sym] = sorted(records, key=lambda x: x["available_date"])
         bs.logout()
@@ -416,13 +445,23 @@ def build_historical_scores_from_prices(
 
             s_quality = 5.0
             s_growth = 5.0
+            s_gross_margin = 5.0
+            has_fundamentals = False
             if sym in fundamental_data:
                 fd = _get_latest_fundamental(fundamental_data[sym], date)
                 if fd:
+                    has_fundamentals = True
                     roe = fd.get("roe", 0) or 0
                     rev = fd.get("rev_growth", 0) or 0
-                    s_quality = max(1, min(10, 1 + 9 * min(abs(roe), 40) / 40))
-                    s_growth = max(1, min(10, 1 + 9 * min(abs(rev), 60) / 60))
+                    profit_g = fd.get("profit_growth", 0) or 0
+                    gm = fd.get("gross_margin", 0) or 0
+                    s_roe = max(1, min(10, 1 + 9 * min(abs(roe), 40) / 40))
+                    s_ocf = max(1, min(10, 1 + 9 * min(abs(gm), 60) / 60))
+                    s_quality = round(s_roe * 0.6 + s_ocf * 0.4, 2)
+                    s_rev = max(1, min(10, 1 + 9 * min(abs(rev), 60) / 60))
+                    s_profit = max(1, min(10, 1 + 9 * min(abs(profit_g), 80) / 80))
+                    s_growth = round(s_rev * 0.45 + s_profit * 0.55, 2)
+                    s_gross_margin = max(1, min(10, 1 + 9 * min(abs(gm), 55) / 55))
 
             try:
                 from investment_system.analysis.factor_scanner import FactorScanner
@@ -433,10 +472,10 @@ def build_historical_scores_from_prices(
                 s_profit_pool = 5.0
                 perez_mult = 1.0
 
-            if use_fundamentals and sym in fundamental_data:
-                score = (s_quality * 0.20 + s_growth * 0.10 +
-                         s_momentum * 0.20 + s_lowvol * 0.15 + s_tech * 0.10 +
-                         s_profit_pool * 0.25)
+            if use_fundamentals and has_fundamentals:
+                score = (s_quality * 0.20 + s_growth * 0.15 + s_gross_margin * 0.05 +
+                         s_momentum * 0.18 + s_lowvol * 0.12 + s_tech * 0.10 +
+                         s_profit_pool * 0.20)
             else:
                 score = (s_momentum * 0.35 + s_lowvol * 0.20 + s_tech * 0.15 +
                          s_profit_pool * 0.30)
