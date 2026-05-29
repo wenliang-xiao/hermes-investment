@@ -1093,7 +1093,7 @@ def _build_keyword_summary(news_list: List[Dict]) -> str:
 
 def summarize_news(news_list: List[Dict], use_llm: bool = True,
                    stock_context: Optional[List[Dict]] = None) -> str:
-    if not news_list:
+    if not news_list and not stock_context:
         return "📰 今日无重大新闻信号"
 
     news_list = classify_impact(news_list)
@@ -1258,7 +1258,7 @@ def get_news_with_impact(
             return news_list, summary
 
     news_list = fetch_news(window_days=window_days)
-    if not news_list:
+    if not news_list and not stock_context:
         return [], "📰 今日无重大新闻信号"
 
     news_list = classify_impact(news_list)
