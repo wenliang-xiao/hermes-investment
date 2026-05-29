@@ -304,6 +304,10 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
+    # ─── 板块3.5：ETF/债券组合推荐 ───
+    rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed, session=session)
+    log("ETF portfolio done")
+
     # ─── 板块4：链路摘要Hook ───
     w.write(doc_id, [('divider', ''), ('h2', '🔗 四、链路摘要')])
 

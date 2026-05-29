@@ -2016,6 +2016,267 @@ def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
     w.write(doc_id, [("text", w.ref("五、风控监控·四重确认"))])
 
 # ═══════════════════════════════════
+# 板块 7.5: ETF/债券组合推荐
+# ═══════════════════════════════════
+def build_etf_portfolio_section(w, doc_id, macro=None, dual_closed=True, session="收盘后"):
+    """ETF/债券组合推荐板块 — 择时版 + 非择时版 + LDS全天候参考"""
+    regime = macro.get("regime", "复苏期") if macro else "复苏期"
+    cpi = macro.get("macro_data", {}).get("cpi", "?") if macro else "?"
+    trend_temp = macro.get("trend_temp", "?") if macro else "?"
+
+    w.write(doc_id, [("divider", ""), ("h2", "📦 四、ETF/债券组合推荐")])
+    w.write(doc_id, [("text", f"宏观象限: {regime} | CPI={cpi}% | 趋势={trend_temp} | 双门{'关闭→观望' if dual_closed else '开启→可操作'}")])
+    w.write(doc_id, [("text", w.ref("二、ETF全景（三维数据驱动 + LDS组合对照）"))])
+
+    # ── 获取ETF价格数据 ──
+    import pandas as pd, numpy as np, time
+    from datetime import datetime
+
+    A_ETF_PRICES = {}
+    US_ETF_PRICES = {}
+
+    def _fetch_a_etf(code):
+        """从baostock获取A股ETF日线"""
+        import baostock as bs
+        try:
+            lg = bs.login()
+            full = "sh." + code if code.startswith("5") else "sz." + code
+            rs = bs.query_history_k_data_plus(
+                full, "date,close,volume",
+                start_date="2026-01-01", end_date=datetime.now().strftime("%Y-%m-%d"),
+                frequency="d", adjustflag="3")
+            rows = []
+            while rs.error_code == "0" and rs.next():
+                rows.append(rs.get_row_data())
+            if len(rows) >= 10:
+                df = pd.DataFrame(rows, columns=["date","close","volume"])
+                df["close"] = pd.to_numeric(df["close"])
+                return df
+        except:
+            pass
+        return None
+
+    def _calc_metrics(df):
+        if df is None or len(df) < 5:
+            return {}
+        c = df["close"].values
+        r = {"price": float(f"{c[-1]:.3f}") if c[-1] < 100 else float(f"{c[-1]:.2f}")}
+        if len(c) >= 2:
+            r["pct_1d"] = round(float((c[-1]/c[-2]-1)*100), 2)
+        if len(c) >= 5:
+            r["pct_5d"] = round(float((c[-1]/c[-5]-1)*100), 2)
+        if len(c) >= 20:
+            r["pct_20d"] = round(float((c[-1]/c[-20]-1)*100), 2)
+            r["ma20"] = round(float(c[-20:].mean()), 3)
+        if len(c) >= 60:
+            r["ma60"] = round(float(c.mean()), 3)
+            r["ma60_dev"] = round(float((c[-1]/c.mean()-1)*100), 1)
+        return r
+
+    # 预定义ETF信息
+    A_ETF_INFO = {
+        "510300": ("沪深300ETF", "宽基"), "588000": ("科创50ETF", "科技"),
+        "512480": ("半导体ETF", "科技成长"), "512890": ("红利低波ETF", "红利"),
+        "159915": ("创业板ETF", "成长"), "510050": ("上证50ETF", "宽基"),
+        "510500": ("中证500ETF", "宽基"), "159845": ("中证1000ETF", "宽基"),
+        "159949": ("创业板50ETF", "成长"), "510880": ("红利ETF", "红利"),
+        "515180": ("红利低波100ETF", "红利"), "563180": ("高股息ETF", "红利"),
+        "512660": ("军工ETF", "行业"), "511520": ("政金债券ETF", "债券"),
+        "518880": ("黄金ETF", "商品"), "159985": ("豆粕ETF", "商品"),
+        "513100": ("纳指ETF", "海外科技"), "513050": ("中概互联ETF", "海外中国"),
+        "513500": ("标普500ETF", "海外宽基"), "159509": ("纳指科技ETF", "海外科技"),
+        "513330": ("恒生互联ETF", "海外中国"), "513520": ("日经ETF", "海外宽基"),
+        "159605": ("中概互联30ETF", "海外中国"),
+    }
+    US_ETF_INFO = {
+        "QQQ": ("纳斯达克100", "海外科技"), "SPY": ("标普500", "海外宽基"),
+        "GLD": ("黄金ETF", "商品"), "TLT": ("20年+美债", "债券"),
+        "XLU": ("公用事业ETF", "防守"), "GDX": ("黄金矿业ETF", "商品"),
+    }
+
+    # 获取A股ETF价格
+    for code in list(A_ETF_INFO.keys()):
+        df = _fetch_a_etf(code)
+        if df is not None:
+            A_ETF_PRICES[code] = _calc_metrics(df)
+        time.sleep(0.15)
+
+    # 获取美股ETF价格
+    try:
+        from investment_system.data.yf_data_layer import get_price_data
+        for sym in list(US_ETF_INFO.keys()):
+            df = get_price_data(sym, period="6mo")
+            if df is not None and len(df) >= 10:
+                close = df["Close"].values if "Close" in df.columns else df.iloc[:,3].values
+                c_pd = pd.DataFrame({"close": close})
+                US_ETF_PRICES[sym] = _calc_metrics(c_pd)
+            time.sleep(1.5)
+    except:
+        pass
+
+    # ── 复苏期ETF宏观匹配得分 ──
+    # 复苏期: 宽基(8) 红利(7) 科技/成长(7) 行业(6) 海外科技(7) 债券(5) 商品(5) 防守(4)
+    MACRO_SCORE = {
+        "宽基": 8, "成长": 7, "科技": 7, "科技成长": 7, "红利": 7, "行业": 6,
+        "海外科技": 7, "海外宽基": 6, "海外中国": 4,
+        "债券": 5, "商品": 5, "防守": 4,
+    }
+    if regime == "扩张期":
+        MACRO_SCORE.update({"宽基": 9, "成长": 9, "科技": 10, "科技成长": 9, "红利": 5, "商品": 4, "债券": 3})
+    elif regime == "过热期":
+        MACRO_SCORE.update({"宽基": 5, "成长": 4, "科技": 4, "红利": 8, "商品": 9, "债券": 2, "防守": 6})
+    elif regime == "衰退期":
+        MACRO_SCORE.update({"宽基": 3, "科技": 3, "红利": 7, "商品": 6, "债券": 9, "防守": 9})
+
+    # ── 评级函数 ──
+    def _score_etf(info, pd_info):
+        code, (name, theme) = info
+        macro_fit = MACRO_SCORE.get(theme, 5)
+        if not pd_info:
+            return macro_fit, "N/A", "N/A", "无数据"
+        p20d = pd_info.get("pct_20d")
+        mom_score = 5.0
+        if p20d is not None:
+            if p20d > 10: mom_score = 9
+            elif p20d > 5: mom_score = 7
+            elif p20d > 0: mom_score = 6
+            elif p20d > -5: mom_score = 4
+            else: mom_score = 2
+        total = macro_fit * 0.40 + mom_score * 0.35 + 5 * 0.15 + 5 * 0.10
+        direction = "🟢积极" if total >= 6.5 else ("🟡中性" if total >= 4.5 else "🔴回避")
+        score_str = f"{total:.1f}"
+        return total, score_str, direction, f"宏观{macro_fit}/10 动量{int(p20d or 0):+d}%"
+
+    # ── 分类 + 评分 ──
+    all_etfs = [(k, v) for k, v in A_ETF_INFO.items()]
+    scored = []
+    for item in all_etfs:
+        pd_info = A_ETF_PRICES.get(item[0], {})
+        total, s_str, dir_str, detail = _score_etf(item, pd_info)
+        scored.append((total, item[0], item[1][0], item[1][1], s_str, dir_str, detail, pd_info))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # ── 非择时组合（定投版）──
+    w.write(doc_id, [("h3", "💼 非择时组合（定投版）")])
+    w.write(doc_id, [("text", "基于LDS全天候框架+宏观象限调整，月度再平衡。无需择时判断，适合定投。")])
+
+    # 复苏期配比建议
+    dca_portfolio = []
+    if regime in ("复苏期", "default"):
+        dca_portfolio = [
+            (25, "红利低波ETF", "512890", "复苏期红利低波>纯红利，低波过滤高波动"),
+            (30, "纳指100ETF", "513100", "全球科技龙头，QDII核心配置"),
+            (15, "政金债券ETF", "511520", "CPI<1%通缩，债券提供防御"),
+            (15, "创业板ETF", "159915", "A股成长动量，20d+" + str(A_ETF_PRICES.get("159915",{}).get("pct_20d","?")) + "%"),
+            (15, "豆粕ETF", "159985", "与股债低相关，对冲作用"),
+        ]
+    elif regime == "扩张期":
+        dca_portfolio = [
+            (20, "半导体ETF", "512480", "扩张期科技最强"),
+            (30, "纳指100ETF", "513100", "全球科技龙头"),
+            (15, "中证500ETF", "510500", "扩张期中小盘弹性"),
+            (15, "创业板ETF", "159915", "成长动量"),
+            (10, "政金债券ETF", "511520", "防守底仓"),
+            (10, "黄金ETF", "518880", "通胀对冲"),
+        ]
+    elif regime == "过热期":
+        dca_portfolio = [
+            (20, "红利低波ETF", "512890", "过热期防御首选"),
+            (25, "黄金ETF", "518880", "实际利率下行受益"),
+            (15, "豆粕ETF", "159985", "商品上行"),
+            (15, "纳指100ETF", "513100", "核心QDII仓位维持"),
+            (15, "政金债券ETF", "511520", "防御底仓"),
+            (10, "公用事业ETF", "XLU", "防守型资产"),
+        ]
+    elif regime == "衰退期":
+        dca_portfolio = [
+            (30, "政金债券ETF", "511520", "衰退期债券王者"),
+            (20, "30年国债ETF", "—", "长久期债弹性最大"),
+            (15, "红利低波ETF", "512890", "红利防御属性"),
+            (15, "黄金ETF", "518880", "避险需求"),
+            (10, "纳指100ETF", "513100", "维持QDII底仓"),
+            (10, "货币/短债", "—", "流动性保留"),
+        ]
+
+    for pct, name, code, logic in dca_portfolio:
+        pd_info = {}
+        if code and code != "—":
+            pd_info = A_ETF_PRICES.get(code, {}) or US_ETF_PRICES.get(code, {})
+        price_str = ("¥" + str(pd_info.get('price','—')) if pd_info.get("price") and isinstance(pd_info.get("price"), (int,float)) and pd_info["price"] < 1000 
+                     else "$" + str(pd_info.get('price','—')) if pd_info.get("price") else "—")
+        chg_str = f" 20d:{pd_info.get('pct_20d','?')}%" if pd_info else ""
+        code_disp = code or "?"
+        w.write(doc_id, [("bullet", f"**{name}**({code_disp}) {pct}% | {price_str}{chg_str} | {logic}")])
+
+    w.write(doc_id, [("text", f"📋 月度再平衡标准: 单品类偏离>5%触发调回。总计100%。")])
+
+    # ── 择时组合（主动版）──
+    w.write(doc_id, [("h3", "🎯 择时组合（主动版）")])
+
+    if dual_closed:
+        max_pos = 40
+        w.write(doc_id, [("bold", f"🔒 双门关闭 → 仓位上限{max_pos}%，观望为主。")])
+    else:
+        max_pos = 80
+        w.write(doc_id, [("bold", f"✅ 双门开启 → 仓位上限{max_pos}%，正常操作。")])
+
+    timing_portfolio = []
+    if dual_closed:
+        timing_portfolio = [
+            (12, "政金债券ETF", "511520", "防御底仓", f"¥{A_ETF_PRICES.get('511520',{}).get('price','—')} 20d:{A_ETF_PRICES.get('511520',{}).get('pct_20d','?')}%"),
+            (10, "纳指100ETF", "513100", "QDII核心", f"¥{A_ETF_PRICES.get('513100',{}).get('price','—')} 20d:{A_ETF_PRICES.get('513100',{}).get('pct_20d','?')}%"),
+            (10, "创业板ETF", "159915", "减仓持有", f"¥{A_ETF_PRICES.get('159915',{}).get('price','—')} 20d:{A_ETF_PRICES.get('159915',{}).get('pct_20d','?')}%"),
+            (8, "红利低波ETF", "512890", "防御配置", f"¥{A_ETF_PRICES.get('512890',{}).get('price','—')} 20d:{A_ETF_PRICES.get('512890',{}).get('pct_20d','?')}%"),
+        ]
+    else:
+        timing_portfolio = [
+            (20, "半导体ETF", "512480", "科创板科技强动量", f"¥{A_ETF_PRICES.get('512480',{}).get('price','—')} 20d:{A_ETF_PRICES.get('512480',{}).get('pct_20d','?')}%"),
+            (20, "创业板ETF", "159915", "成长龙头", f"¥{A_ETF_PRICES.get('159915',{}).get('price','—')} 20d:{A_ETF_PRICES.get('159915',{}).get('pct_20d','?')}%"),
+            (20, "纳指100ETF", "513100", "QDII核心", f"¥{A_ETF_PRICES.get('513100',{}).get('price','—')} 20d:{A_ETF_PRICES.get('513100',{}).get('pct_20d','?')}%"),
+            (15, "政金债券ETF", "511520", "防御底仓", f"¥{A_ETF_PRICES.get('511520',{}).get('price','—')} 20d:{A_ETF_PRICES.get('511520',{}).get('pct_20d','?')}%"),
+            (10, "红利低波ETF", "512890", "复苏期红利", f"¥{A_ETF_PRICES.get('512890',{}).get('price','—')} 20d:{A_ETF_PRICES.get('512890',{}).get('pct_20d','?')}%"),
+            (15, "中证500ETF", "510500", "中小盘弹性", f"¥{A_ETF_PRICES.get('510500',{}).get('price','—')} 20d:{A_ETF_PRICES.get('510500',{}).get('pct_20d','?')}%"),
+        ]
+
+    total_pct = sum(x[0] for x in timing_portfolio)
+    for pct, name, code, logic, price_str in timing_portfolio:
+        code_disp = code or "?"
+        w.write(doc_id, [("bullet", f"**{name}**({code_disp}) {pct}%/{max_pos}% max | {price_str} | {logic}")])
+    w.write(doc_id, [("text", f"总仓位: {total_pct}%/{max_pos}% max | 剩余{max_pos-total_pct}%仓位保留现金/短债")])
+    w.write(doc_id, [("text", "操作纪律: 跌破20日均线减半仓; 双门变绿灯加满至80%; 北向持续流出>30亿不加仓")])
+
+    # ── LDS全天候参考 ──
+    w.write(doc_id, [("h3", "📊 LDS全天候参考组合（基准）")])
+    try:
+        from investment_system.analysis.etf_bond_scorer import get_lds_allweather_status
+        lds = get_lds_allweather_status(macro or {})
+        w.write(doc_id, [("text", f"当前象限: {lds['regime']} | 原则: 不押单一方向，低相关联动对冲。月度偏离>5%触发。")])
+        for c in lds["components"]:
+            price_info = A_ETF_PRICES.get(c["code"], {})
+            price_str = f"¥{price_info.get('price','?')}" if price_info else "?"
+            chg_str = f" 20d:{price_info.get('pct_20d','?')}%" if price_info else ""
+            w.write(doc_id, [("bullet",
+                f"**{c['name']}**({c['code']}) 基准{c['weight']:.0%}→建议{c['regime_suggested_weight']:.0%} | {price_str}{chg_str} | {c['theme']}")])
+    except Exception:
+        pass
+
+    # ── 全量ETF评分表（top 10）──
+    w.write(doc_id, [("h3", "📈 ETF快扫（动量·宏观加速排序）")])
+    if not scored:
+        w.write(doc_id, [("text", "⚠️ 数据获取受限，请稍后重试")])
+    else:
+        for rank, (total, code, name, theme, score_str, direction, detail, pd_info) in enumerate(scored[:12], 1):
+            p20d = pd_info.get("pct_20d") if pd_info else None
+            p20d_str = f"{p20d:+.1f}%" if p20d is not None else "N/A"
+            price_str = f"¥{pd_info.get('price','?')}" if pd_info else "?"
+            w.write(doc_id, [("bullet",
+                f"{direction} **{name}**({code}) {price_str} | 评分{score_str}分 {detail} | 20d:{p20d_str}")])
+
+    w.write(doc_id, [("text", w.ref("二、ETF全景（三维数据驱动 + LDS组合对照）"))])
+
+
+# ═══════════════════════════════════
 # 板块 8: 调仓建议
 # ═══════════════════════════════════
 def build_action_section(w, doc_id, macro, section_prefix="八"):
