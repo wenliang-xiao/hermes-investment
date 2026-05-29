@@ -354,7 +354,64 @@ try:
                     f"{track_tag} **{c['name']}**({c['symbol']}) {price_str} {ma_str} | {c['chain']} | {reasons}"
                 )])
     else:
-        w.write(doc_id, [('text', "⚠️ 周报尚未生成，请先运行 run_weekly.py")])
+        # fallback: 无周报时从链定义直出摘要
+        w.write(doc_id, [('text', "⏳ 周报尚未运行 → 展示产业链基本面摘要（链定义数据）")])
+        try:
+            from investment_system.domain import OPPORTUNITY_THEMES, INDUSTRY_CHAINS, WATCHLIST
+            # 统计各链当前持仓数
+            chain_stocks = {}
+            for code, info in WATCHLIST.items():
+                c = info.get("chain", "")
+                if c:
+                    chain_stocks.setdefault(c, []).append(info["name"])
+            # 主题机会摘要（取前4条最重要的）
+            theme_items = []
+            for tn, td in sorted(OPPORTUNITY_THEMES.items(), key=lambda x: len(x[1].get("key_catalysts",[])), reverse=True)[:4]:
+                stage = td.get("perez_stage", "")
+                logic = td.get("logic", "")[:80]
+                catalysts = " / ".join(td.get("key_catalysts", [])[:3])
+                stocks_in = []
+                for a in td.get("a_stocks_focus", []):
+                    if a in WATCHLIST:
+                        stocks_in.append(WATCHLIST[a]["name"])
+                for us in td.get("us_stocks_focus", []):
+                    if us in WATCHLIST:
+                        stocks_in.append(WATCHLIST[us]["name"])
+                for hk in td.get("hk_stocks_focus", []):
+                    if hk in WATCHLIST:
+                        stocks_in.append(WATCHLIST[hk]["name"])
+                stock_tag = f"🔗 {'/'.join(stocks_in[:3])}" if stocks_in else ""
+                theme_items.append(f"**{tn}**【{stage}】{logic[:60]}… | 催化: {catalysts} {stock_tag}")
+            if theme_items:
+                w.write(doc_id, [('bold', '🏭 机会主题（面基概念链）')])
+                for ti in theme_items:
+                    w.write(doc_id, [('bullet', ti)])
+            # 产业链利润池摘要
+            chain_items = []
+            for cn, cd in INDUSTRY_CHAINS.items():
+                desc = cd.get("description", "")[:80]
+                perez = cd.get("perez_stage", "")
+                ml = cd.get("meso_layer", {})
+                lifecycle = ml.get("lifecycle", "")
+                valuation = ml.get("valuation", "")[:60]
+                lds_logic = cd.get("lds_logic", "")[:100]
+                stocks_in = chain_stocks.get(cn, [])
+                stock_tag = f"📊 {'/'.join(stocks_in[:4])}" if stocks_in else ""
+                chain_items.append(f"**{cn}** | {perez} | {lifecycle} | {desc}")
+                if valuation:
+                    chain_items.append(f"· 估值: {valuation}")
+                if lds_logic:
+                    chain_items.append(f"· LDS逻辑: {lds_logic}…")
+                if stock_tag:
+                    chain_items.append(f"· {stock_tag}")
+            if chain_items:
+                w.write(doc_id, [('bold', '🔬 产业链核心追踪')])
+                for ci in chain_items[:12]:
+                    w.write(doc_id, [('bullet', ci)])
+                w.write(doc_id, [('text', '→ 完整研究请等待本周周报运行')])
+        except Exception as e:
+            w.write(doc_id, [('bullet', f"⚠️ 链定义加载失败: {str(e)[:60]}")
+            ])
     log("Chain hooks done")
 
     # ─── 板块5：今日情报（异动解读优先）───
@@ -396,6 +453,11 @@ try:
     try:
         from investment_system.analysis.news_engine import _calc_sentiment_score, classify_impact
         nl = classify_impact(news_list[:20]) if news_list else []
+        # fallback: 如果RSS空，用个股新闻标题做情绪打分
+        if not nl and stock_context:
+            ctx_news = [{"title": t} for sc in stock_context for t in sc.get("recent_news", []) if sc.get("recent_news")]
+            if ctx_news:
+                nl = classify_impact(ctx_news[:20])
         sent = _calc_sentiment_score(nl)
         w.write(doc_id, [('bullet', f"市场情绪: {sent.get('overall','?')} | 利好{sent.get('bullish',0)}条 利空{sent.get('bearish',0)}条")])
     except Exception:
@@ -404,6 +466,43 @@ try:
 
     # ─── 板块6：调仓建议 ───
     rpt.build_action_section(w, doc_id, macro, section_prefix="六")
+
+    # ── 今日具体行动（基于今日实际信号）──
+    w.write(doc_id, [('h3', '🎯 今日具体行动')])
+    try:
+        today_movers = []
+        for a in (anomaly_stocks_for_news or []):
+            today_movers.append(f"{a['name']}({a.get('symbol','')}) {a.get('chg',0):+.1f}%")
+        if dual_closed:
+            w.write(doc_id, [('bullet', '🔒 双门关闭，不开新仓。持有票检查trailing stop。')])
+            if today_movers:
+                w.write(doc_id, [('bullet',
+                    f"⚠️ 异动股{' / '.join(today_movers)} → 双门关闭期内大涨不可追，检查是否触发止盈线"
+                )])
+            nb_val = locals().get('nb_net')
+            if nb_val is not None:
+                w.write(doc_id, [('bullet',
+                    f"💨 北向资金{'流出' if nb_val < -10 else '中性'} {nb_val:+.1f}亿 → 与双门信号一致，不做任何加仓"
+                )])
+            w.write(doc_id, [('bullet',
+                f"⏰ 转绿条件: CPI≥1.5%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})"
+            )])
+        else:
+            w.write(doc_id, [('bullet', f"✅ 双门开启 → 正常操作。优先进攻方向: {'/'.join(favored[:3] or ['均衡'])}")])
+            if today_movers and len(today_movers) <= 3:
+                w.write(doc_id, [('bullet',
+                    f"💡 {today_movers[0].split('(')[0]}今日异动 → 检查是否有催化事件，如双门开启可逐步建仓"
+                )])
+            nb_val = locals().get('nb_net')
+            if nb_val is not None and nb_val > 30:
+                w.write(doc_id, [('bullet', f"🟢 北向大幅流入 {nb_val:+.1f}亿，与双门信号共振 → 积极关注")])
+        if 'flagged' in dir() or 'flagged' in locals():
+            f_stocks = [x for x in locals().get('flagged', [])[:3]]
+            if f_stocks and not dual_closed:
+                w.write(doc_id, [('bullet', f"📌 关注今日有信号的票: {', '.join(x[2].split('**')[1] for x in f_stocks if len(x[2].split('**'))>1)} — 优先选趋势右侧+ROE>15%的")])
+        log("Today actions written")
+    except Exception as e:
+        log(f"Today actions failed (non-critical): {e}")
     log("Action done")
 
     log(f"URL: https://bytedance.feishu.cn/docx/{doc_id}")

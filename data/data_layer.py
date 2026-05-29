@@ -663,7 +663,19 @@ def get_northbound_flow() -> dict:
         if hist_fn is None:
             raise AttributeError("AKShare stock_hsgt_hist_em 不存在，请升级akshare>=1.14")
 
-        df_hist = hist_fn(symbol="北向资金")
+        df_hist = None
+        for attempt in range(3):
+            try:
+                df_hist = hist_fn(symbol="北向资金")
+                if df_hist is not None and not df_hist.empty:
+                    break
+                time.sleep(1)
+            except Exception as e:
+                print(f"[data_layer] AKShare北向资金第{attempt+1}次失败: {str(e)[:60]}")
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                else:
+                    raise
         if df_hist is None or df_hist.empty:
             result["note"] = "stock_hsgt_hist_em 返回空数据"
             return result
