@@ -60,7 +60,50 @@ try:
                      macro.get('dual_gate', {}).get('trend_gate') in ('红灯', '黄灯'))
     lds = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
     bonds_data = scan_bonds()
-    news_list, summary_text = get_news_with_impact()
+    stock_context = []
+    try:
+        from investment_system.domain import WATCHLIST
+        from investment_system.analysis.anomaly_news import fetch_stock_news
+        core_codes = [k for k, v in WATCHLIST.items()
+                      if str(k).isdigit() and v.get("tier") == "核心"][:15]
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+        def _fetch_one(code):
+            try:
+                items = fetch_stock_news(code, max_items=3)
+                return code, [it.get("title", "") for it in items if it.get("title")]
+            except Exception:
+                return code, []
+        with ThreadPoolExecutor(max_workers=5) as _pool:
+            _futs = {_pool.submit(_fetch_one, c): c for c in core_codes}
+            core_news_map = {}
+            for _f in _as_completed(_futs, timeout=30):
+                c, titles = _f.result(timeout=10)
+                if titles:
+                    core_news_map[c] = titles
+        for code, info in WATCHLIST.items():
+            if code not in core_codes:
+                continue
+            pd_info = prices.get(code, {}) if 'prices' in dir() else {}
+            chg_val = pd_info.get("chg")
+            rsi_val = pd_info.get("rsi")
+            sig = ""
+            if chg_val and abs(chg_val) >= 5:
+                sig = f"大涨跌{chg_val:+.1f}%"
+            elif rsi_val and rsi_val < 25:
+                sig = f"超卖RSI{rsi_val:.0f}"
+            stock_context.append({
+                "code": code,
+                "name": info.get("name", code),
+                "chg": chg_val,
+                "signal": sig,
+                "recent_news": core_news_map.get(code, []),
+            })
+    except Exception as _e:
+        log(f"个股新闻预拉取失败(不影响日报): {_e}")
+
+    news_list, summary_text = get_news_with_impact(
+        window_days=1, stock_context=stock_context if stock_context else None
+    )
     log("Data loaded")
 
     w = rpt.FeishuWriter()
@@ -193,14 +236,19 @@ try:
             price_str = f"¥{price:.2f}" if isinstance(price, (int,float)) else "—"
             chg_str = f"{_arrow(chg)}{_fmt(chg)}" if chg is not None else ""
 
+            is_etf = not str(code).isdigit() or str(code).startswith(("5", "51", "15"))
             signal_tags = []
             has_signal = False
             if rsi is not None:
-                if rsi > 80: signal_tags.append(f"🔴超买RSI{rsi:.0f}"); has_signal = True
-                elif rsi < 25: signal_tags.append(f"💡超卖RSI{rsi:.0f}"); has_signal = True
+                if rsi > 80:
+                    signal_tags.append(f"🔴超买RSI{rsi:.0f}"); has_signal = not dual_closed
+                elif rsi < 25:
+                    if not dual_closed and not is_etf:
+                        signal_tags.append(f"💡超卖RSI{rsi:.0f}"); has_signal = True
             if ma60_dev is not None:
                 if ma60_dev > 40: signal_tags.append(f"⚠️偏MA60+{ma60_dev:.0f}%"); has_signal = True
-                elif ma60_dev < -15: signal_tags.append(f"📉偏MA60{ma60_dev:.0f}%"); has_signal = True
+                elif ma60_dev < -15 and not is_etf:
+                    signal_tags.append(f"📉偏MA60{ma60_dev:.0f}%"); has_signal = True
             if abs(chg or 0) >= 5:
                 signal_tags.append(f"{'📈大涨' if chg > 0 else '📉大跌'}{abs(chg):.1f}%"); has_signal = True
 

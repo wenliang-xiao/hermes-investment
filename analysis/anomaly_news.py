@@ -301,3 +301,14 @@ def format_anomaly_analysis_for_report(results: List[Dict]) -> List[tuple]:
                 lines.append(("bullet", "  ℹ️ 暂未找到相关新闻，建议手动检索驱动因素"))
 
     return lines
+
+
+def fetch_stock_news(symbol: str, max_items: int = 5) -> List[Dict]:
+    name = symbol
+    try:
+        from investment_system.domain import WATCHLIST
+        name = WATCHLIST.get(symbol, {}).get("name", symbol)
+    except Exception:
+        pass
+    items = _fetch_stock_news_ak(symbol, name)
+    return items[:max_items]

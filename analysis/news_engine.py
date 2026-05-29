@@ -903,14 +903,37 @@ def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
         return None
 
 
-def _build_llm_prompt(news_items: List[Dict]) -> str:
+def _build_llm_prompt(news_items: List[Dict],
+                      stock_context: Optional[List[Dict]] = None) -> str:
     items_text = "\n".join(
         f"{i+1}. [{item.get('source_name','?')}][{item.get('pub_date','')[:10]}] {item.get('title','')}"
         + (f" — {item.get('description','')[:150]}" if item.get('description') else "")
         for i, item in enumerate(news_items)
     )
     chains = "算力芯片、半导体制造、半导体国产替代、存储/HBM、AI应用/Agent、AI网络+数据中心、机器人/自动化、军工、医药创新、AI电力、新能源、消费电子、苹果产业链、新能源汽车、全球宏观、中国政策、地缘政治"
+
+    stock_section = ""
+    if stock_context:
+        lines = ["【当日观察池关键信号（优先分析这些票）】"]
+        for s in stock_context:
+            code = s.get("code", "")
+            name = s.get("name", "")
+            chg = s.get("chg")
+            signal = s.get("signal", "")
+            news_titles = s.get("recent_news", [])
+            line = f"- {name}({code})"
+            if chg is not None:
+                line += f" 今日{chg:+.1f}%"
+            if signal:
+                line += f" 信号:{signal}"
+            if news_titles:
+                line += f" | 个股新闻: {'; '.join(news_titles[:2])}"
+            lines.append(line)
+        stock_section = "\n".join(lines) + "\n\n"
+
     return f"""你是一名投资研究助理，不是新闻编辑。你的唯一目标是：识别哪些事件会改变资产定价，而不是总结发生了什么。
+
+{stock_section}
 
 过去30天新闻（共{len(news_items)}条，已去重排序）：
 {items_text}
@@ -1068,7 +1091,8 @@ def _build_keyword_summary(news_list: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def summarize_news(news_list: List[Dict], use_llm: bool = True) -> str:
+def summarize_news(news_list: List[Dict], use_llm: bool = True,
+                   stock_context: Optional[List[Dict]] = None) -> str:
     if not news_list:
         return "📰 今日无重大新闻信号"
 
@@ -1076,7 +1100,7 @@ def summarize_news(news_list: List[Dict], use_llm: bool = True) -> str:
 
     if use_llm:
         system_prompt = "你是一位专业的A股/港股/美股投资分析师，熟悉面基播客的产业链分析框架和LDS实战体系。请用中文回复，格式严谨，观点犀利。"
-        prompt = _build_llm_prompt(news_list[:25])
+        prompt = _build_llm_prompt(news_list[:25], stock_context=stock_context)
         summary = _call_llm(prompt, system_prompt)
         if summary:
             sentiment = _calc_sentiment_score(news_list)
@@ -1222,34 +1246,23 @@ def load_cached_news(max_age: int = CACHE_TTL) -> Optional[List[Dict]]:
 def get_news_with_impact(
     use_cache: bool = True,
     use_llm: bool = True,
+    window_days: int = 1,
+    stock_context: Optional[List[Dict]] = None,
 ) -> Tuple[List[Dict], str]:
-    """
-    一站式接口：获取新闻+链影响标注+LLM总结。
-    
-    Args:
-        use_cache: 是否使用缓存
-        use_llm: 是否尝试LLM总结
-    
-    Returns:
-        (news_list, summary_text)
-    """
-    # 尝试缓存
-    if use_cache:
+    if use_cache and window_days == NEWS_WINDOW_DAYS:
         cached = load_cached_news()
         if cached:
             print("[新闻引擎] 使用缓存（{} 条）".format(len(cached)))
             news_list = classify_impact(cached)
-            summary = summarize_news(cached, use_llm=use_llm)
+            summary = summarize_news(cached, use_llm=use_llm, stock_context=stock_context)
             return news_list, summary
-    
-    # 重新抓取
-    news_list = fetch_news()
+
+    news_list = fetch_news(window_days=window_days)
     if not news_list:
         return [], "📰 今日无重大新闻信号"
-    
+
     news_list = classify_impact(news_list)
-    summary = summarize_news(news_list, use_llm=use_llm)
-    
+    summary = summarize_news(news_list, use_llm=use_llm, stock_context=stock_context)
     return news_list, summary
 
 
