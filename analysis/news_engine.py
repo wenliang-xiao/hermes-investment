@@ -32,6 +32,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from typing import Dict, List, Optional, Tuple
 
 socket.setdefaulttimeout(8)  # 全局socket超时8秒，防止外部API挂死
@@ -1143,33 +1144,29 @@ def fetch_news(
     if sources is None:
         sources = ["google", "xueqiu", "caixin", "cls", "sina"]
 
+    source_funcs = {
+        "google":  _fetch_google_news_rss,
+        "xueqiu":  _fetch_xueqiu_hot,
+        "caixin":  _fetch_caixin_rss,
+        "cls":     _fetch_cls_flash,
+        "sina":    _fetch_sina_flash,
+    }
+    active = {k: v for k, v in source_funcs.items() if k in sources}
+
     all_items = []
-
-    if "google" in sources:
-        print("[新闻引擎] 抓取 Google News RSS...")
-        items = _fetch_google_news_rss()
-        all_items.extend(items)
-        print(f"  Google RSS 合计: {len(items)} 条")
-
-    if "xueqiu" in sources:
-        print("[新闻引擎] 抓取雪球热帖...")
-        items = _fetch_xueqiu_hot()
-        all_items.extend(items)
-
-    if "caixin" in sources:
-        print("[新闻引擎] 抓取财新RSS...")
-        items = _fetch_caixin_rss()
-        all_items.extend(items)
-
-    if "cls" in sources:
-        print("[新闻引擎] 抓取财联社重点电报...")
-        items = _fetch_cls_flash()
-        all_items.extend(items)
-
-    if "sina" in sources:
-        print("[新闻引擎] 抓取新浪财经快讯...")
-        items = _fetch_sina_flash()
-        all_items.extend(items)
+    print(f"[新闻引擎] 并行抓取 {len(active)} 个源...")
+    with ThreadPoolExecutor(max_workers=len(active)) as pool:
+        futures = {pool.submit(fn): name for name, fn in active.items()}
+        for fut in as_completed(futures, timeout=60):
+            name = futures[fut]
+            try:
+                items = fut.result(timeout=30)
+                all_items.extend(items)
+                print(f"  {name}: {len(items)} 条")
+            except FuturesTimeout:
+                print(f"  {name}: 超时跳过")
+            except Exception as e:
+                print(f"  {name}: 失败({e})")
 
     print(f"[新闻引擎] 原始抓取: {len(all_items)} 条")
 
