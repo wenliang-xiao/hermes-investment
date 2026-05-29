@@ -309,7 +309,7 @@ try:
     log("ETF portfolio done")
 
     # ─── 板块4：链路摘要Hook ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔗 四、链路摘要')])
+    w.write(doc_id, [('divider', ''), ('h2', '🔗 五、链路摘要')])
 
     SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
     chain_summary = None
@@ -419,7 +419,7 @@ try:
     log("Chain hooks done")
 
     # ─── 板块5：今日情报（异动解读优先）───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 五、今日情报')])
+    w.write(doc_id, [('divider', ''), ('h2', '📰 六、今日情报')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -480,7 +480,7 @@ try:
     log("News done")
 
     # ─── 板块6：调仓建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="六")
+    rpt.build_action_section(w, doc_id, macro, section_prefix="七")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
