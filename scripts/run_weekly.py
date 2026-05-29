@@ -295,6 +295,16 @@ try:
                 ('h2', '十四、🎯 本周链内候选（动态扫描）'),
                 ('quote', f"四段筛选+双轨评分 | 脱钩方向独立于双门 | {len(candidates)}只候选"),
             ])
+
+            candidate_syms = [c['symbol'] for c in candidates if c.get('symbol')]
+            research_map = {}
+            try:
+                from investment_system.analysis.research_report import batch_research_summary, format_research_line
+                research_map = batch_research_summary(candidate_syms, days=30)
+                log(f"研报数据获取: {sum(1 for v in research_map.values() if v)} / {len(candidate_syms)} 只有数据")
+            except Exception as e:
+                log(f"研报数据获取失败(不影响主报告): {e}")
+
             for c in candidates:
                 track = c.get("score_detail", {}).get("track", "")
                 track_tag = "🔵脱钩方向" if "脱钩" in track else "🟡宏观敏感"
@@ -303,7 +313,6 @@ try:
                 ma60 = c.get("ma60")
                 rsi = c.get("rsi")
                 ma60_dev = c.get("ma60_dev")
-                roe = c.get("roe")
                 price_str = f"¥{price:.2f}" if price else "?"
                 ma_str = f"MA20¥{ma20:.2f} MA60¥{ma60:.2f}" if ma20 and ma60 else ""
                 w.write(doc_id, [
@@ -317,6 +326,9 @@ try:
                     ('bullet', f"触发: {c.get('trigger_condition','')}"),
                     ('bullet', f"失效: {c.get('invalidation','')}"),
                 ])
+                rr_line = format_research_line(research_map.get(c.get('symbol', '')))
+                if rr_line:
+                    w.write(doc_id, [('bullet', rr_line)])
             log(f"候选扫描完成: {len(candidates)} 只")
     except Exception as e:
         log(f"候选扫描失败(不影响主报告): {e}")

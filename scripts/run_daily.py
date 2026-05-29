@@ -174,6 +174,7 @@ try:
         prices = _fetch_watchlist_prices(list(WATCHLIST.keys()))
 
         flagged, core_no_signal = [], []
+        flagged_codes = []
         for code, info in WATCHLIST.items():
             tier = info.get('tier', '关注')
             name = info.get('name', code)
@@ -203,7 +204,6 @@ try:
             if abs(chg or 0) >= 5:
                 signal_tags.append(f"{'📈大涨' if chg > 0 else '📉大跌'}{abs(chg):.1f}%"); has_signal = True
 
-            # MA20/MA60具体价格作为买点参考
             buypoint_str = ""
             if ma20 and ma60:
                 buypoint_str = f" | MA20¥{ma20:.2f} MA60¥{ma60:.2f}"
@@ -214,14 +214,26 @@ try:
             line += f" [{chain}]"
 
             if has_signal:
-                flagged.append((tier, line))
+                flagged.append((tier, code, line))
+                flagged_codes.append(code)
             elif tier in ('核心', '底仓'):
                 core_no_signal.append((tier, line))
 
+        research_map = {}
+        if flagged_codes:
+            try:
+                from investment_system.analysis.research_report import batch_research_summary, format_research_line
+                research_map = batch_research_summary(flagged_codes, days=30)
+            except Exception:
+                pass
+
         if flagged:
             w.write(doc_id, [('bold', '⭐ 今日有信号')])
-            for tier, line in sorted(flagged, key=lambda x: {'核心':0,'底仓':1,'关注':2,'追踪':3}.get(x[0],4)):
+            for tier, code, line in sorted(flagged, key=lambda x: {'核心':0,'底仓':1,'关注':2,'追踪':3}.get(x[0],4)):
                 w.write(doc_id, [('bullet', line)])
+                rr_line = format_research_line(research_map.get(code)) if research_map else ""
+                if rr_line:
+                    w.write(doc_id, [('bullet', rr_line)])
         if core_no_signal:
             w.write(doc_id, [('bold', '📋 核心/底仓（无特殊信号）')])
             for _, line in core_no_signal[:10]:
