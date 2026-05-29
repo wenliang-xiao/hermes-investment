@@ -437,10 +437,21 @@ try:
 
     if summary_text and len(summary_text.strip()) > 50:
         w.write(doc_id, [('bold', '📡 市场情报（AI分析）')])
-        for line in summary_text.strip().split('\n')[:12]:
+        import re as _re
+        clean_lines = []
+        for line in summary_text.strip().split('\n')[:15]:
             line = line.strip()
+            # 去掉markdown标题符号
+            line = _re.sub(r'^#{1,4}\s*', '', line)
+            # 去掉blockquote符号
+            line = _re.sub(r'^>\s*', '', line)
+            # 去掉LLM自带的"情绪得分"行（我们有独立的）
+            if '情绪得分' in line or '利好0' in line or '利空0' in line:
+                continue
             if line:
-                w.write(doc_id, [('bullet', line[:250])])
+                clean_lines.append(line[:250])
+        for line in clean_lines:
+            w.write(doc_id, [('bullet', line)])
     elif news_list:
         w.write(doc_id, [('bold', '📡 今日快讯')])
         for n in sorted(news_list, key=lambda x: len(x.get('impacts', [])), reverse=True)[:5]:
