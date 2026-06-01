@@ -87,7 +87,23 @@ class FeishuWriter:
                 time.sleep(0.5)
         print(f"  [API FAIL] {method} {path}: {last_err}", file=sys.stderr)
         return None
+    def _find_existing_doc(self, title):
+        """Check if a doc with the same title already exists in the folder.
+        Returns doc_id if found, None otherwise."""
+        url = f"/drive/v1/files?folder_token={FOLDER_TOKEN}&page_size=100"
+        resp = self._api(url)
+        if not resp:
+            return None
+        for f in resp.get("data", {}).get("files", []):
+            if f.get("name") == title:
+                return f.get("token")
+        return None
+
     def create_doc(self, title):
+        existing = self._find_existing_doc(title)
+        if existing:
+            print(f"  [DEDUP] 文档已存在: {title} → {existing}", file=sys.stderr)
+            return existing
         resp = self._api("/docx/v1/documents", "POST", {"title": title, "folder_token": FOLDER_TOKEN})
         if resp:
             doc_id = resp["data"]["document"]["document_id"]

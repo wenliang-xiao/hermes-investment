@@ -1,0 +1,182 @@
+{
+  "复苏期_True_20260531": [
+    {
+      "symbol": "300757",
+      "name": "罗博特科",
+      "chain": "机器人/自动化链",
+      "is_decoupling": false,
+      "perez_stage": "导入期（Perez第1阶段）——技术创新涌现、资本涌入",
+      "score": 7.36,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 7.36,
+        "trend_strength": 10,
+        "quality": 7.0,
+        "valuation": 5.0,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 639.3,
+      "rsi": 68.1,
+      "ma20": 557.17,
+      "ma60": 472.31,
+      "ma60_dev": 35.4,
+      "vol_90d": 87.1,
+      "max_dd_90": -23.1,
+      "trend_up": true,
+      "roe": 66.0836,
+      "rev_growth": 53.9689,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=68不过热",
+        "ROE=66.1%达LDS质量门槛(≥15%)",
+        "营收增速54%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥557.17)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:52"
+    },
+    {
+      "symbol": "300502",
+      "name": "新易盛",
+      "chain": "数据/云计算链",
+      "is_decoupling": false,
+      "perez_stage": "展开期——AI驱动数据中心大规模建设",
+      "score": 6.62,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.62,
+        "trend_strength": 10,
+        "quality": 7.2,
+        "valuation": 1,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 706.45,
+      "rsi": 71.4,
+      "ma20": 606.28,
+      "ma60": 516.41,
+      "ma60_dev": 36.8,
+      "vol_90d": 71.2,
+      "max_dd_90": -18.0,
+      "trend_up": true,
+      "roe": 115.20939999999999,
+      "rev_growth": 110.989,
+      "entry_reasons": [
+        "ROE=115.2%达LDS质量门槛(≥15%)",
+        "营收增速111%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥606.28)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:53"
+    },
+    {
+      "symbol": "688256",
+      "name": "寒武纪",
+      "chain": "机器人/自动化链",
+      "is_decoupling": false,
+      "perez_stage": "导入期（Perez第1阶段）——技术创新涌现、资本涌入",
+      "score": 6.61,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.61,
+        "trend_strength": 10,
+        "quality": 7.2,
+        "valuation": 1,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 1310.0,
+      "rsi": 57.0,
+      "ma20": 1267.39,
+      "ma60": 937.87,
+      "ma60_dev": 39.7,
+      "vol_90d": 67.2,
+      "max_dd_90": -35.7,
+      "trend_up": true,
+      "roe": 118.27250000000001,
+      "rev_growth": 100.0311,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=57不过热",
+        "ROE=118.3%达LDS质量门槛(≥15%)",
+        "营收增速100%超LDS成长门槛"
+      ],
+      "trigger_condition": "技术面已具备，等财报/催化剂验证基本面",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:52"
+    },
+    {
+      "symbol": "688183",
+      "name": "生益电子",
+      "chain": "英伟达算力链",
+      "is_decoupling": false,
+      "perez_stage": "导入期→金融泡沫阶段（Perez第1-2阶段）",
+      "score": 6.59,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.59,
+        "trend_strength": 10,
+        "quality": 6.1,
+        "valuation": 1,
+        "chain_match": 7.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 138.05,
+      "rsi": 71.9,
+      "ma20": 111.78,
+      "ma60": 98.05,
+      "ma60_dev": 40.8,
+      "vol_90d": 69.6,
+      "max_dd_90": -21.1,
+      "trend_up": true,
+      "roe": 34.455000000000005,
+      "rev_growth": 46.2275,
+      "entry_reasons": [
+        "ROE=34.5%达LDS质量门槛(≥15%)",
+        "营收增速46%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥111.78)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:46"
+    },
+    {
+      "symbol": "002475",
+      "name": "立讯精密",
+      "chain": "苹果产业链",
+      "is_decoupling": false,
+      "perez_stage": "展开期——AI成为成熟消费电子的增量催化剂",
+      "score": 6.38,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.38,
+        "trend_strength": 8.5,
+        "quality": 4.0,
+        "valuation": 5.8,
+        "chain_match": 7.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 73.29,
+      "rsi": 45.1,
+      "ma20": 72.34,
+      "ma60": 60.03,
+      "ma60_dev": 22.1,
+      "vol_90d": 49.7,
+      "max_dd_90": -20.1,
+      "trend_up": true,
+      "roe": 22.4935,
+      "rev_growth": 36.952600000000004,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=45不过热",
+        "ROE=22.5%达LDS质量门槛(≥15%)",
+        "营收增速37%超LDS成长门槛"
+      ],
+      "trigger_condition": "技术面已具备，等财报/催化剂验证基本面",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:54"
+    }
+  ]
+}

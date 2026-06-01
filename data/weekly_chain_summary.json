@@ -1,0 +1,294 @@
+{
+  "generated_at": "2026-05-31 18:45",
+  "doc_url": "https://bytedance.feishu.cn/docx/BB90dt6P0oSPpfx27aQcLCzsnVf",
+  "regime": "复苏期",
+  "bw_quadrant": "Q4_增长↓_通胀↓",
+  "dual_open": true,
+  "chains": {
+    "GPU/AI芯片": {
+      "perez_stage": "frenzy(狂热期)→synergy过渡",
+      "profit_pool": "expanding—上游GPU环节利润池最厚，但ASIC定制化分流在加速",
+      "gap_direction": "缩小中（CoWoS扩产+ASIC分流）",
+      "is_conditional": false,
+      "lead_ticker": "NVDA"
+    },
+    "先进制程+先进封装": {
+      "perez_stage": "synergy(协同期)",
+      "profit_pool": "peaking→设备上游迁移—代工利润池见顶，CoWoS/先进封装成为新利润池增长点",
+      "gap_direction": "扩大中（2nm+CoWoS需求超预期，设备交期>12月）",
+      "is_conditional": false,
+      "lead_ticker": "TSM"
+    },
+    "存储/HBM": {
+      "perez_stage": "synergy(协同期)",
+      "profit_pool": "expanding—HBM是存储行业利润池最大的细分",
+      "gap_direction": "持续扩大（GPU功耗每代翻倍→HBM位宽需求非线性增长）",
+      "is_conditional": false,
+      "lead_ticker": "MU"
+    },
+    "AI电力": {
+      "perez_stage": "irruption(导入期)",
+      "profit_pool": "expanding—独立电力商(IPP)是利润池最大受益者，PPA合同锁定10-20年现金流",
+      "gap_direction": "持续扩大（AI数据中心电力需求增速远超电网扩容速度）",
+      "is_conditional": false,
+      "lead_ticker": "VST"
+    },
+    "AI网络+云计算": {
+      "perez_stage": "irruption→synergy过渡",
+      "profit_pool": "expanding—网络设备+光模块是AI基础设施的新利润池；云平台是AI推理的必经枢纽",
+      "gap_direction": "扩大中（AI集群规模扩大→光模块+交换机需求超线性增长）",
+      "is_conditional": false,
+      "lead_ticker": "ANET"
+    },
+    "AI应用/Agent": {
+      "perez_stage": "irruption→frenzy过渡",
+      "profit_pool": "expanding—应用层利润池即将爆发，Agent是SaaS之后最大软件浪潮",
+      "gap_direction": "即将出现（Agent需求爆发但企业IT预算审批滞后→2026H2释放）",
+      "is_conditional": false,
+      "lead_ticker": "MSFT"
+    },
+    "网络安全/国产替代": {
+      "perez_stage": "synergy(协同期)",
+      "profit_pool": "expanding—网安是IT支出中最刚性的部分，AI时代从成本中心变为业务使能者",
+      "gap_direction": "持续扩大（AI攻击复杂度指数级增长→传统防御失效→AI原生安全需求爆发）",
+      "is_conditional": false,
+      "lead_ticker": "CRWD"
+    },
+    "机器人": {
+      "perez_stage": "irruption(导入期)",
+      "profit_pool": "nascent—利润池尚未形成，当前是Capex投入期",
+      "gap_direction": "即将出现（Optimus量产初期供不应求确定性高，但时间不确定）",
+      "is_conditional": false,
+      "lead_ticker": "TSLA"
+    },
+    "消费电子": {
+      "perez_stage": "maturity→synergy(AI注入)",
+      "profit_pool": "stable—品牌终端利润池稳定，AI创造增量",
+      "gap_direction": "稳定（AI手机催化换机需求，但整体市场饱和）",
+      "is_conditional": true,
+      "lead_ticker": "AAPL"
+    },
+    "新能源车": {
+      "perez_stage": "synergy(协同期)→maturity过渡",
+      "profit_pool": "migrating—从整车→电池/智驾上游迁移，整车利润池承压",
+      "gap_direction": "收窄中（国内产能过剩→价格战压缩利润，海外关税壁垒升高）",
+      "is_conditional": true,
+      "lead_ticker": "TSLA"
+    },
+    "半导体国产替代": {
+      "perez_stage": "synergy(协同期)—国产化率加速提升阶段",
+      "profit_pool": "expanding—设备厂利润率40-55%是链上最厚，国产替代提供额外溢价",
+      "gap_direction": "扩大中（出口管制倒逼国产替代加速，设备每年新增需求>300亿）",
+      "is_conditional": false,
+      "lead_ticker": "688041"
+    },
+    "医药创新": {
+      "perez_stage": "irruption→synergy—创新药从me-too向first-in-class突破",
+      "profit_pool": "expanding—创新药毛利率70-95%，CXO30-45%，器械50-70%",
+      "gap_direction": "扩大中（AI制药+GLP-1新适应症+器械国产替代三线驱动）",
+      "is_conditional": false,
+      "lead_ticker": "603259"
+    },
+    "数据中心/云计算": {
+      "perez_stage": "irruption→synergy—AI驱动液冷从0→1渗透",
+      "profit_pool": "expanding—液冷35-45%，IDC25-35%，云服务30-50%",
+      "gap_direction": "扩大中（AI集群功耗每代翻倍→液冷渗透加速）",
+      "is_conditional": false,
+      "lead_ticker": "002453"
+    },
+    "苹果产业链": {
+      "perez_stage": "maturity→synergy（AI注入成熟产品创造增量）",
+      "profit_pool": "stable—品牌端利润稳定，A股供应商是β而非α",
+      "gap_direction": "稳定→温和扩大（AI功能推动换机需求，但整体市场已饱和）",
+      "is_conditional": true,
+      "lead_ticker": "AAPL"
+    },
+    "新能源汽车": {
+      "perez_stage": "synergy→maturity过渡—整车成熟，智驾S2爆发",
+      "profit_pool": "migrating—从整车→智驾/电池上游迁移，整车利润池承压",
+      "gap_direction": "整车收窄（产能过剩）| 智驾扩大（渗透率仍低）",
+      "is_conditional": true,
+      "lead_ticker": "TSLA"
+    }
+  },
+  "candidates": [
+    {
+      "symbol": "300757",
+      "name": "罗博特科",
+      "chain": "机器人/自动化链",
+      "is_decoupling": false,
+      "perez_stage": "导入期（Perez第1阶段）——技术创新涌现、资本涌入",
+      "score": 7.36,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 7.36,
+        "trend_strength": 10,
+        "quality": 7.0,
+        "valuation": 5.0,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 639.3,
+      "rsi": 68.1,
+      "ma20": 557.17,
+      "ma60": 472.31,
+      "ma60_dev": 35.4,
+      "vol_90d": 87.1,
+      "max_dd_90": -23.1,
+      "trend_up": true,
+      "roe": 66.0836,
+      "rev_growth": 53.9689,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=68不过热",
+        "ROE=66.1%达LDS质量门槛(≥15%)",
+        "营收增速54%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥557.17)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:52"
+    },
+    {
+      "symbol": "300502",
+      "name": "新易盛",
+      "chain": "数据/云计算链",
+      "is_decoupling": false,
+      "perez_stage": "展开期——AI驱动数据中心大规模建设",
+      "score": 6.62,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.62,
+        "trend_strength": 10,
+        "quality": 7.2,
+        "valuation": 1,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 706.45,
+      "rsi": 71.4,
+      "ma20": 606.28,
+      "ma60": 516.41,
+      "ma60_dev": 36.8,
+      "vol_90d": 71.2,
+      "max_dd_90": -18.0,
+      "trend_up": true,
+      "roe": 115.20939999999999,
+      "rev_growth": 110.989,
+      "entry_reasons": [
+        "ROE=115.2%达LDS质量门槛(≥15%)",
+        "营收增速111%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥606.28)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:53"
+    },
+    {
+      "symbol": "688256",
+      "name": "寒武纪",
+      "chain": "机器人/自动化链",
+      "is_decoupling": false,
+      "perez_stage": "导入期（Perez第1阶段）——技术创新涌现、资本涌入",
+      "score": 6.61,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.61,
+        "trend_strength": 10,
+        "quality": 7.2,
+        "valuation": 1,
+        "chain_match": 5.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 1310.0,
+      "rsi": 57.0,
+      "ma20": 1267.39,
+      "ma60": 937.87,
+      "ma60_dev": 39.7,
+      "vol_90d": 67.2,
+      "max_dd_90": -35.7,
+      "trend_up": true,
+      "roe": 118.27250000000001,
+      "rev_growth": 100.0311,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=57不过热",
+        "ROE=118.3%达LDS质量门槛(≥15%)",
+        "营收增速100%超LDS成长门槛"
+      ],
+      "trigger_condition": "技术面已具备，等财报/催化剂验证基本面",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:52"
+    },
+    {
+      "symbol": "688183",
+      "name": "生益电子",
+      "chain": "英伟达算力链",
+      "is_decoupling": false,
+      "perez_stage": "导入期→金融泡沫阶段（Perez第1-2阶段）",
+      "score": 6.59,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.59,
+        "trend_strength": 10,
+        "quality": 6.1,
+        "valuation": 1,
+        "chain_match": 7.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 138.05,
+      "rsi": 71.9,
+      "ma20": 111.78,
+      "ma60": 98.05,
+      "ma60_dev": 40.8,
+      "vol_90d": 69.6,
+      "max_dd_90": -21.1,
+      "trend_up": true,
+      "roe": 34.455000000000005,
+      "rev_growth": 46.2275,
+      "entry_reasons": [
+        "ROE=34.5%达LDS质量门槛(≥15%)",
+        "营收增速46%超LDS成长门槛"
+      ],
+      "trigger_condition": "等待回踩MA20(¥111.78)附近，RSI回落至50-60",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:46"
+    },
+    {
+      "symbol": "002475",
+      "name": "立讯精密",
+      "chain": "苹果产业链",
+      "is_decoupling": false,
+      "perez_stage": "展开期——AI成为成熟消费电子的增量催化剂",
+      "score": 6.38,
+      "score_detail": {
+        "track": "B_宏观敏感",
+        "total": 6.38,
+        "trend_strength": 8.5,
+        "quality": 4.0,
+        "valuation": 5.8,
+        "chain_match": 7.0,
+        "lowvol": null,
+        "chain_certainty": null
+      },
+      "price": 73.29,
+      "rsi": 45.1,
+      "ma20": 72.34,
+      "ma60": 60.03,
+      "ma60_dev": 22.1,
+      "vol_90d": 49.7,
+      "max_dd_90": -20.1,
+      "trend_up": true,
+      "roe": 22.4935,
+      "rev_growth": 36.952600000000004,
+      "entry_reasons": [
+        "趋势健康: MA20>MA60>MA120，RSI=45不过热",
+        "ROE=22.5%达LDS质量门槛(≥15%)",
+        "营收增速37%超LDS成长门槛"
+      ],
+      "trigger_condition": "技术面已具备，等财报/催化剂验证基本面",
+      "invalidation": "跌破MA60且成交量放大，或行业链景气逆转",
+      "scanned_at": "2026-05-31 18:54"
+    }
+  ]
+}
