@@ -466,7 +466,7 @@ def get_macro_data() -> dict:
     # 默认值
     result = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "cpi":       1.5,    "cpi_trend": "flat",
+        "cpi":       1.5,    "cpi_trend": "flat", "cpi_prev": 1.5, "cpi_delta": 0.0, "cpi_momentum_3m": 0.0,
         "pmi":       50.3,   "pmi_trend": "flat",
         "m2":        315.0,  "m2_growth": 7.2,
         "shibor":    1.75,   "shibor_10y": 2.85,
@@ -483,8 +483,18 @@ def get_macro_data() -> dict:
             cpi_row = cpi_df.dropna(subset=["今值"]).iloc[-1]
             result["cpi"] = float(cpi_row["今值"])
             prev = float(cpi_row.get("前值", 0) or 0)
-            result["cpi_trend"] = "up" if result["cpi"] > prev else ("down" if result["cpi"] < prev else "flat")
+            result["cpi_prev"] = prev
+            result["cpi_delta"] = round(result["cpi"] - prev, 2)
+            result["cpi_trend"] = "up" if result["cpi_delta"] > 0.05 else ("down" if result["cpi_delta"] < -0.05 else "flat")
             result["cpi_date"] = str(cpi_row["日期"])
+            # 3-month momentum: try iloc[-4] (3 months ago in monthly data)
+            try:
+                rows = cpi_df.dropna(subset=["今值"])
+                if len(rows) >= 4:
+                    cpi_3m = float(rows.iloc[-4]["今值"])
+                    result["cpi_momentum_3m"] = round(result["cpi"] - cpi_3m, 2)
+            except Exception:
+                result["cpi_momentum_3m"] = result["cpi_delta"]  # fallback to 1-month
         except Exception as e:
             print(f"  [cpi] {e}")
         

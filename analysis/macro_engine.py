@@ -212,16 +212,37 @@ class MacroEngine:
             self.dual_detail = "宏观数据不完整，维持现有仓位"
             return
         
-        # 宏观门：CPI<2 + PMI≥50 = 绿灯；CPI≥2.5 = 红灯
-        if cpi < 1.0:
-            macro_gate = "黄灯"  # 通缩风险，谨慎
-            macro_detail = f"CPI{cpi}%<1%，通缩风险，降息空间有限"
+        cpi_momentum = md.get("cpi_momentum_3m", md.get("cpi_delta", 0)) or 0
+        cpi_delta = md.get("cpi_delta", 0) or 0
+        
+        # 宏观门：CPI绝对值 × 动量修正
+        if cpi < 0.5:
+            if cpi_momentum > 0.3:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%严重通缩，但3月动量+{cpi_momentum:.2f}%快速改善→待确认"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%严重通缩，无改善信号，降息空间有限"
+        elif cpi < 1.0:
+            if cpi_momentum > 0.3:
+                macro_gate = "绿灯"
+                macro_detail = f"CPI{cpi}%轻度通缩，3月动量+{cpi_momentum:.2f}%显著改善→绿灯"
+            elif cpi_delta > 0.1:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%轻度通缩，月度改善+{cpi_delta:.2f}%→待确认"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%<1%，通缩风险，降息空间有限"
         elif cpi < 2.0:
             macro_gate = "绿灯"
             macro_detail = f"CPI{cpi}%，无通胀压力"
         elif cpi < 3.0:
-            macro_gate = "黄灯"
-            macro_detail = f"CPI{cpi}%≥2%，通胀抬头"
+            if cpi_momentum > 1.0 or cpi_delta > 0.5:
+                macro_gate = "红灯"
+                macro_detail = f"CPI{cpi}%通胀加速+{cpi_momentum:.2f}%，警惕杀估值"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%≥2%，通胀抬头"
         else:
             macro_gate = "红灯"
             macro_detail = f"CPI{cpi}%≥3%，高通胀杀估值"
@@ -268,18 +289,29 @@ class MacroEngine:
     def get_factor_weights(self):
         return self.factor_weights
 
-    # ═══ ④ CPI驱动策略开关（LDS核心） ═══
+    # ═══ ④ CPI驱动策略开关（LDS核心 + 动量修正） ═══
     def _calc_strategy_switch(self):
         md = self.macro_data
         cpi = md.get("cpi")
+        cpi_momentum = md.get("cpi_momentum_3m", md.get("cpi_delta", 0)) or 0
 
         if cpi is not None:
             if cpi < 1.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_falling_below1"]
+                if cpi_momentum > 0.3:
+                    mapping = config.CPI_STRATEGY_MAP.get(
+                        "cpi_below1_improving",
+                        {"switch": "on", "reason": f"CPI{cpi}%通缩但3月动量+{cpi_momentum:.2f}%显著改善→恢复操作",
+                         "caption": "60%"})
             elif cpi < 2.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_1_to_2"]
             elif cpi < 3.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_2_to_3"]
+                if cpi_momentum > 1.0:
+                    mapping = config.CPI_STRATEGY_MAP.get(
+                        "cpi_2_to_3_accelerating",
+                        {"switch": "limited", "reason": f"CPI{cpi}%通胀加速+{cpi_momentum:.2f}%→减仓防御",
+                         "caption": "40%"})
             else:
                 mapping = config.CPI_STRATEGY_MAP["cpi_above3"]
         else:
@@ -324,7 +356,8 @@ class MacroEngine:
             "suggested_position": round(self.suggested_position, 2),
             "macro_data": {k: v for k, v in self.macro_data.items()
                           if k in ("cpi", "pmi", "m2_growth", "shibor", "cny_usd",
-                                   "cpi_trend", "pmi_trend", "cpi_date", "pmi_date",
+                                   "cpi_trend", "cpi_prev", "cpi_delta", "cpi_momentum_3m",
+                                   "pmi_trend", "cpi_date", "pmi_date",
                                    "social_financing_growth")},
             "credit_signal_source": getattr(self, "_credit_signal_source", ""),
             "guoyun": {

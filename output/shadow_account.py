@@ -3,14 +3,13 @@ Shadow Account（Vibe-Trading概念）
 模拟盘追踪：记录信号→模拟建仓→跟踪盈亏→纪律执行
 """
 import json, os
-from datetime import datetime
+from datetime import datetime, timedelta
 from investment_system import config
 
 SHADOW_FILE = config.DATA_DIR / "shadow_account.json"
 
 
 def load_shadow():
-    """加载模拟盘"""
     if os.path.exists(SHADOW_FILE):
         try:
             with open(SHADOW_FILE) as f:
@@ -25,27 +24,25 @@ def save_shadow(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def entry(symbol: str, name: str, action: str, price: float, reason: str):
-    """模拟盘记录一条交易"""
+def entry(symbol: str, name: str, action: str, price: float, reason: str,
+          quantity: int = 100, pct: float = 0.02):
     book = load_shadow()
-    entry = {
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "symbol": symbol, "name": name,
-        "action": action, "price": price,
-        "reason": reason,
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry_record = {
+        "time": now, "symbol": symbol, "name": name,
+        "action": action, "price": price, "reason": reason,
     }
-    book["history"].append(entry)
-    book["history"] = book["history"][-200:]  # 只保留最近200条
+    book["history"].append(entry_record)
+    book["history"] = book["history"][-200:]
 
     if action in ("买入", "加仓"):
         book["positions"][symbol] = {
             "name": name, "entry_price": price,
-            "entry_time": entry["time"],
-            "quantity": 0, "current_price": price,
-            "pct": 0.02,  # 默认2%
-            "stop_loss": price * 0.92,
-            "take_profit_1": price * 1.15,
-            "take_profit_2": price * 1.30,
+            "entry_time": now,
+            "quantity": quantity, "current_price": price,
+            "peak_price": price, "peak_time": now,
+            "pct": pct,
+            "entry_date": datetime.now().strftime("%Y-%m-%d"),
         }
     elif action in ("卖出", "减仓"):
         book["positions"].pop(symbol, None)
@@ -55,69 +52,107 @@ def entry(symbol: str, name: str, action: str, price: float, reason: str):
 
 
 def update_prices(symbol_price_map: dict):
-    """批量更新模拟盘持仓价格"""
     book = load_shadow()
     for sym, price in symbol_price_map.items():
         if sym in book["positions"]:
-            book["positions"][sym]["current_price"] = price
+            pos = book["positions"][sym]
+            pos["current_price"] = price
+            if pos.get("peak_price", 0) < price:
+                pos["peak_price"] = price
+                pos["peak_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     save_shadow(book)
     return book
 
 
 def check_stops() -> list:
-    """检查8%硬止损"""
     book = load_shadow()
     alerts = []
     for sym, pos in book["positions"].items():
         current = pos.get("current_price", 0)
         entry_price = pos.get("entry_price", 0)
+        peak_price = pos.get("peak_price", entry_price)
         if entry_price == 0:
             continue
-        change = (current - entry_price) / entry_price * 100
-        name = pos.get("name", "")
-        if change <= -8:
-            alerts.append({
-                "symbol": sym, "name": name,
-                "type": "STOP_LOSS",
-                "entry": entry_price, "current": current,
-                "loss": round(change, 1),
-            })
-        elif change >= 15 and change < 30:
-            alerts.append({
-                "symbol": sym, "name": name,
-                "type": "TAKE_PROFIT_T1",
-                "entry": entry_price, "current": current,
-                "profit": round(change, 1),
-            })
-        elif change >= 30:
-            alerts.append({
-                "symbol": sym, "name": name,
-                "type": "TAKE_PROFIT_T2",
-                "entry": entry_price, "current": current,
-                "profit": round(change, 1),
-            })
+
+        entry_date_str = pos.get("entry_date", "")
+        hold_days = 0
+        try:
+            entry_dt = datetime.strptime(entry_date_str, "%Y-%m-%d")
+            hold_days = (datetime.now() - entry_dt).days
+        except:
+            pass
+
+        pnl_pct = (current - entry_price) / entry_price
+        dd_from_peak = (current - peak_price) / peak_price if peak_price else 0
+
+        if hold_days < 10:
+            if pnl_pct <= -0.08:
+                alerts.append({
+                    "symbol": sym, "name": pos.get("name", ""),
+                    "type": "STOP_LOSS_HARD",
+                    "entry": entry_price, "current": current,
+                    "loss": round(pnl_pct * 100, 1),
+                    "note": f"持仓{hold_days}天<10天，触发-8%硬止损"
+                })
+        else:
+            if pnl_pct >= 0.30:
+                threshold = -0.12
+                label = "T3(-12%)"
+            elif pnl_pct >= 0.10:
+                threshold = -0.15
+                label = "T2(-15%)"
+            else:
+                threshold = -0.20
+                label = "T1(-20%)"
+
+            if dd_from_peak <= threshold:
+                alerts.append({
+                    "symbol": sym, "name": pos.get("name", ""),
+                    "type": f"TRAILING_STOP_{label}",
+                    "entry": entry_price, "current": current,
+                    "peak": peak_price,
+                    "dd_from_peak": round(dd_from_peak * 100, 1),
+                    "pnl": round(pnl_pct * 100, 1),
+                    "note": f"持仓{hold_days}天，峰值回撤{abs(dd_from_peak)*100:.1f}%触发trailing stop"
+                })
     return alerts
 
 
 def get_shadow_summary() -> dict:
-    """模拟盘概况"""
     book = load_shadow()
     positions = book["positions"]
     total_value = book["cash"]
-    pnl = 0
 
     items = []
     for sym, pos in positions.items():
-        change = ((pos.get("current_price", 0) - pos["entry_price"]) / pos["entry_price"]) * 100
+        current = pos.get("current_price", pos.get("entry_price", 0))
+        entry = pos["entry_price"]
+        change = ((current - entry) / entry * 100) if entry else 0
+        peak = pos.get("peak_price", current) or current
+        dd_peak = (current - peak) / peak * 100 if peak else 0
+
+        entry_date_str = pos.get("entry_date", pos.get("entry_time", "")[:10])
+        hold_days = 0
+        try:
+            entry_dt = datetime.strptime(entry_date_str, "%Y-%m-%d")
+            hold_days = (datetime.now() - entry_dt).days
+        except:
+            pass
+
+        quantity = pos.get("quantity", 0)
+        position_value = current * quantity if quantity else total_value * pos.get("pct", 0.02)
+        total_value += position_value
+
         items.append({
             "symbol": sym, "name": pos.get("name", ""),
-            "entry": pos["entry_price"], "current": pos.get("current_price", pos["entry_price"]),
+            "entry": entry, "current": current,
             "change": round(change, 1),
-            "stop_loss": pos["stop_loss"],
+            "peak": round(peak, 2),
+            "dd_from_peak": round(dd_peak, 1),
+            "hold_days": hold_days,
+            "stop_loss": pos.get("stop_loss", entry * 0.92) if "stop_loss" in pos else entry * 0.92,
             "status": "✅" if change >= 0 else "📉",
         })
-        position_value = pos.get("current_price", 0) * pos.get("quantity", 0) or total_value * pos.get("pct", 0.02)
-        total_value += position_value
 
     return {
         "positions": items,

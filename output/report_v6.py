@@ -102,8 +102,9 @@ class FeishuWriter:
     def create_doc(self, title):
         existing = self._find_existing_doc(title)
         if existing:
-            print(f"  [DEDUP] 文档已存在: {title} → {existing}", file=sys.stderr)
-            return existing
+            # 标题冲突 → 追加秒级时间戳创建新文档，防止 append 导致内容重复
+            title = f"{title} ({time.strftime('%H:%M:%S')})"
+            print(f"  [DEDUP] 文档已存在，创建新文档: {title}", file=sys.stderr)
         resp = self._api("/docx/v1/documents", "POST", {"title": title, "folder_token": FOLDER_TOKEN})
         if resp:
             doc_id = resp["data"]["document"]["document_id"]
@@ -1551,14 +1552,33 @@ def _calc_tech_signal(closes: list) -> dict:
 
     if len(c) >= 35:
         s = list(c)
-        from statistics import mean
-        ema12 = s[-1]
-        ema26 = s[-1]
-        for v in s[-35:]:
-            ema12 = ema12 * (1 - 2/13) + v * (2/13)
-            ema26 = ema26 * (1 - 2/27) + v * (2/27)
+        k12, k26 = 2/13, 2/27
+        ema12 = ema26 = s[0]
+        for v in s[1:]:
+            ema12 = ema12 * (1 - k12) + v * k12
+            ema26 = ema26 * (1 - k26) + v * k26
         macd = ema12 - ema26
         signal["macd_positive"] = macd > 0
+        signal["macd"] = round(macd, 4)
+        # MACD 趋势：连续上升/下降
+        if len(c) >= 45:
+            s2 = list(c)
+            ema12_p, ema26_p = s2[0], s2[0]
+            for v in s2[1:-10]:
+                ema12_p = ema12_p * (1 - k12) + v * k12
+                ema26_p = ema26_p * (1 - k26) + v * k26
+            macd_prev = ema12_p - ema26_p
+            signal["macd_rising"] = macd > macd_prev
+
+    # 价量背离检测
+    if len(c) >= 20 and signal.get("chg") is not None:
+        chg_abs = abs(signal["chg"])
+        if "volume_ratio" in signal:
+            vol_ratio = signal["volume_ratio"]
+            if chg_abs > 3 and vol_ratio < 0.8:
+                signal["vol_divergence"] = "📉无量涨跌-信号弱"
+            elif chg_abs > 3 and vol_ratio > 2.0:
+                signal["vol_divergence"] = "📊放量异动-关注"
 
     score = 5.0
     if signal.get("above_ma20"):
@@ -1567,10 +1587,16 @@ def _calc_tech_signal(closes: list) -> dict:
         score += 1.5
     if signal.get("macd_positive"):
         score += 1.0
+    if signal.get("macd_rising"):
+        score += 0.5
     rsi_val = signal.get("rsi", 50)
-    if 40 <= rsi_val <= 65:
+    if 30 <= rsi_val <= 70:
         score += 1.5
-    elif rsi_val > 70:
+    elif rsi_val > 80:
+        score -= 1.5
+    elif rsi_val < 20:
+        score += 0.5
+    if signal.get("vol_divergence") and "无量" in signal["vol_divergence"]:
         score -= 1.0
     signal["tech_score"] = round(min(10, max(1, score)), 1)
 
@@ -2355,13 +2381,19 @@ def build_action_section(w, doc_id, macro, section_prefix="八"):
         if "Q4" in bw_q:
             w.write(doc_id, [("bullet",
                 "象限4(增长↓通胀↓): 建长债底仓(511010/159926)，黄金维持，"
-                "等CPI回升至1.5%+再看股票"
+                "等CPI回升至1.0%+或通缩改善再看股票"
             )])
         cpi = macro.get("macro_data", {}).get("cpi")
+        cpi_mom = macro.get("macro_data", {}).get("cpi_momentum_3m") or macro.get("macro_data", {}).get("cpi_delta", 0) or 0
         trend = macro.get("trend_temp", "?")
-        w.write(doc_id, [("bullet",
-            f"双门转绿条件: CPI回升≥1.5% (当前={cpi}%) + 趋势温度≥温 (当前={trend})"
-        )])
+        if isinstance(cpi, (int, float)) and cpi < 1.0:
+            w.write(doc_id, [("bullet",
+                f"双门转绿条件: CPI≥1.0%或通缩改善(当前={cpi}%, 3月动量={cpi_mom:+.2f}%) + 趋势温度≥温 (当前={trend})"
+            )])
+        else:
+            w.write(doc_id, [("bullet",
+                f"双门转绿条件: CPI≥1.0% (当前={cpi}%) + 趋势温度≥温 (当前={trend})"
+            )])
     else:
         w.write(doc_id, [("bold", "✅ 双门开启 → 正常操作")])
         w.write(doc_id, [("bullet", f"优先进攻方向: {favor}")])
@@ -2524,63 +2556,3 @@ def build_concept_section(w, doc_id):
         w.write(doc_id, [("bullet", f"{title}: {desc}")])
     
     w.write(doc_id, [("text", w.ref("零、核心哲学"))])
-
-# ═══════════════════════════════════
-# 主流程
-# ═══════════════════════════════════
-def main():
-    print("📊 面基三源融合日报 v6.1 — 全量信息·引用体系")
-    print("=" * 60)
-    
-    # 初始化
-    w = FeishuWriter()
-    scanner = FactorScanner()
-    macro_engine = MacroEngine()
-    
-    # 宏观刷新
-    print("  🔄 宏观引擎...")
-    macro = macro_engine.refresh()
-    
-    # 扫描
-    print("  🔍 A股因子扫描...")
-    scanner.MAX_SCAN = 20  # 日报量：20只覆盖主要板块
-    scanner.scan_market(top_n=20)
-    
-    # 创建文档
-    today = datetime.now().strftime("%Y年%m月%d日")
-    title = f"📊 {SAN_YUAN_NAME}日报·{today}"
-    doc_id = w.create_doc(title)
-    if not doc_id:
-        print("❌ 创建文档失败"); return
-    
-    print(f"  📄 文档: {doc_id}")
-    
-    # 封面
-    w.write(doc_id, [
-        ("bold", f"{SAN_YUAN_NAME}·日报"),
-        ("text", f"日期: {datetime.now().strftime('%Y/%m/%d')} | v6.1 全量·引用体系"),
-        ("text", "结构：LDS双门→全球市场→ETF→房价→10链→新票→新闻→追踪→调仓→概念"),
-        ("text", f"📋 所有静态框架引用 [知识体系总纲]({KNOWLEDGE_DOC_URL})"),
-    ])
-    
-    # 各板块
-    build_gate_section(w, doc_id, macro)       # 0
-    build_market_snapshot(w, doc_id)            # 1
-    build_etf_section(w, doc_id, macro)         # 2
-    # build_housing_section(w, doc_id)            # 3 — 已移至月报
-    build_chain_section(w, doc_id, scanner, macro) # 4
-    build_discovery_section(w, doc_id, scanner, macro) # 5
-    build_news_section(w, doc_id)               # 6
-    build_tracking_section(w, doc_id, scanner, macro) # 7
-    build_action_section(w, doc_id, macro)      # 8
-    build_concept_section(w, doc_id)             # 9
-    
-    doc_url = f"https://bytedance.feishu.cn/docx/{doc_id}"
-    print(f"\n✅ 日报完成: {doc_url}")
-    
-    # 推送
-    push_to_group(doc_url, f"v6.1 全量日报 | LDS双门={macro.get('dual_gate',{}).get('action','?')} | 宏观={macro.get('regime','?')}")
-    print("  📤 已推送到群")
-
-if __name__ == "__main__":
-    main()

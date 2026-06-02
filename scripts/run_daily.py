@@ -19,6 +19,7 @@ from investment_system.output.fund_tracker import track_lds_portfolio_v2
 from investment_system.analysis.news_engine import get_news_with_impact
 from investment_system.data.yf_data_layer import get_global_market_snapshot
 from investment_system.data.data_layer import get_northbound_flow
+from investment_system.analysis.factor_scanner import FactorScanner
 
 LF = '/tmp/report_daily_log.txt'
 with open(LF, 'w') as f: f.write('')
@@ -60,6 +61,10 @@ try:
                      macro.get('dual_gate', {}).get('trend_gate') in ('红灯', '黄灯'))
     lds = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
     bonds_data = scan_bonds()
+
+    scanner = FactorScanner()
+    scanner.macro = macro_engine
+    log("Scanner ready")
     stock_context = []
     try:
         from investment_system.domain import WATCHLIST
@@ -108,8 +113,11 @@ try:
 
     w = rpt.FeishuWriter()
     today = time.strftime('%Y/%m/%d')
+    today_short = time.strftime('%m-%d')
     weekday = ['一','二','三','四','五','六','日'][time.localtime().tm_wday]
-    doc_id = w.create_doc(f"{rpt.SAN_YUAN_NAME}·{session}决策简报 {today}(周{weekday})")
+    now_time = time.strftime('%H:%M')
+    label = "盘前简报" if session == "开盘前" else "收盘简报"
+    doc_id = w.create_doc(f"面基·{label} {today_short}({weekday}) {now_time}")
     log(f"Doc: {doc_id}")
 
     dual_gate = macro.get('dual_gate', {})
@@ -126,7 +134,7 @@ try:
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
     w.write(doc_id, [
-        ('h1', f"{'🌅' if session == '开盘前' else '🌆'} {today}(周{weekday}) · {session}决策简报"),
+        ('h1', f"{'🌅' if session == '开盘前' else '🌆'} 面基·{label} {today_short}({weekday}) {now_time}"),
         ('divider', ''),
     ])
 
@@ -197,14 +205,19 @@ try:
     # 凯利开关
     if dual_closed:
         w.write(doc_id, [('bold', f"🔒 凯利f*关闭 → 不开新仓 | 止损线检查: 成本×0.92")])
-        w.write(doc_id, [('bullet', f"双门转绿条件: CPI≥1.5%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})")])
+        cpi_mom = macro.get('macro_data', {}).get('cpi_momentum_3m') or macro.get('macro_data', {}).get('cpi_delta', 0) or 0
+        if isinstance(cpi, (int, float)) and cpi < 1.0:
+            mom_str = f"3月动量{'已改善' if cpi_mom > 0.2 else '需改善'}(+{cpi_mom:.2f}%)"
+            w.write(doc_id, [('bullet', f"双门转绿条件: CPI≥1.0%(当前={cpi}%) | {mom_str} + 趋势温度回暖(当前={trend_temp})")])
+        else:
+            w.write(doc_id, [('bullet', f"双门转绿条件: CPI≥1.0%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})")])
     else:
         w.write(doc_id, [('bold', f"✅ 可操作 | 单票≤2%仓位 | 8%硬止损")])
 
     log("Panel done")
 
     # ─── 板块2：持仓风控 ───
-    rpt.build_tracking_section(w, doc_id, scanner=None, macro=macro, section_prefix="二")
+    rpt.build_tracking_section(w, doc_id, scanner=scanner, macro=macro, section_prefix="二")
     log("Tracking done")
 
     # ─── 板块3：观察池今日信号 ───
@@ -304,7 +317,38 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
-    # ─── 板块3.5：ETF/债券组合推荐 ───
+    # ─── 板块3.5：今日扫描发现 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔍 三点五、今日扫描发现')])
+    w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
+    try:
+        scanner.MAX_SCAN = 30
+        scan_results = scanner.scan_market(top_n=10)
+        if scan_results:
+            w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} 综合排名')])
+            for rank, s in enumerate(scan_results[:10], 1):
+                name = s.get("name", s.get("symbol", "?"))
+                sym = s.get("symbol", "?")
+                score = s.get("score", 0)
+                sector = s.get("sector", "")
+                chg = s.get("change_pct")
+                chg_s = f"{_arrow(chg)}{_fmt(chg)}" if chg is not None else ""
+                reasons = []
+                if s.get("pe_percentile") is not None:
+                    reasons.append(f"PE分位{s['pe_percentile']:.0f}%")
+                if s.get("roe"):
+                    reasons.append(f"ROE{s['roe']:.0f}%")
+                r_str = ' | '.join(reasons[:2]) if reasons else ''
+                w.write(doc_id, [('bullet',
+                    f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}{' | '+r_str if r_str else ''}"
+                )])
+        else:
+            w.write(doc_id, [('text', '⏳ 扫描数据未就绪（数据源延迟或市场休市）')])
+    except Exception as scan_err:
+        w.write(doc_id, [('bullet', f'⚠️ 扫描跳过: {str(scan_err)[:60]}')])
+        log(f"Scanner failed (non-critical): {scan_err}")
+    log("Scanner section done")
+
+    # ─── 板块4：ETF/债券组合推荐 ───
     rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed, session=session)
     log("ETF portfolio done")
 
@@ -500,7 +544,7 @@ try:
                     f"💨 北向资金{'流出' if nb_val < -10 else '中性'} {nb_val:+.1f}亿 → 与双门信号一致，不做任何加仓"
                 )])
             w.write(doc_id, [('bullet',
-                f"⏰ 转绿条件: CPI≥1.5%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})"
+                f"⏰ 转绿条件: CPI≥1.0%(当前={cpi}%){' 或通缩持续改善' if isinstance(cpi, (int,float)) and cpi < 1.0 else ''} + 趋势温度回暖(当前={trend_temp})"
             )])
         else:
             w.write(doc_id, [('bullet', f"✅ 双门开启 → 正常操作。优先进攻方向: {'/'.join(favored[:3] or ['均衡'])}")])

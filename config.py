@@ -57,13 +57,15 @@ PROFIT_POOL_SCORES = {
     "物理AI链":        {"数字孪生/仿真": 1.0, "3D视觉/传感器": 0.9, "AI视觉算法": 0.8, "AI SoC/芯片": 0.7, "工控/HMI": 0.5, "执行层(机器人)": 0.3},
 }
 
-# ─── CPI驱动策略开关（LDS核心）───
+# ─── CPI驱动策略开关（LDS核心 + 动量修正）───
 CPI_STRATEGY_MAP = {
-    "cpi_falling_below1": {"switch": "limited", "reason": "CPI<1%通缩风险，限制风险敞口", "caption": "50%"},
-    "cpi_1_to_2":         {"switch": "on",      "reason": "CPI 1-2%温和通胀，正常操作",    "caption": "75%"},
-    "cpi_2_to_3":         {"switch": "on",      "reason": "CPI 2-3%温和偏高，高景气行业",   "caption": "65%"},
-    "cpi_above3":         {"switch": "limited", "reason": "CPI>3%通货膨胀，减仓防御",       "caption": "30%"},
-    "default":            {"switch": "on",      "reason": "CPI数据不足，按默认执行",         "caption": "50%"},
+    "cpi_falling_below1":  {"switch": "limited", "reason": "CPI<1%通缩风险，限制风险敞口", "caption": "50%"},
+    "cpi_below1_improving": {"switch": "on", "reason": "CPI<1%通缩但动量显著改善→恢复操作", "caption": "60%"},
+    "cpi_1_to_2":          {"switch": "on",      "reason": "CPI 1-2%温和通胀，正常操作",    "caption": "75%"},
+    "cpi_2_to_3":          {"switch": "on",      "reason": "CPI 2-3%温和偏高，高景气行业",   "caption": "65%"},
+    "cpi_2_to_3_accelerating": {"switch": "limited", "reason": "CPI 2-3%通胀加速→减仓防御", "caption": "40%"},
+    "cpi_above3":          {"switch": "limited", "reason": "CPI>3%通货膨胀，减仓防御",       "caption": "30%"},
+    "default":             {"switch": "on",      "reason": "CPI数据不足，按默认执行",         "caption": "50%"},
 }
 
 # ─── LDS趋势温度参数 ───
@@ -864,7 +866,7 @@ INDUSTRY_CHAINS = {
         "perez_stage": "展开期→成熟期过渡（Perez第3→4阶段）——整车产能过剩，智驾处于S2爆发期",
         "chain_type": "conditional",
         "active": True,
-        "activate_condition": "CPI>1.5% 或 行业出清信号出现（小厂停产/龙头份额提升）",
+        "activate_condition": "CPI>1.0%或通缩改善 或 行业出清信号出现（小厂停产/龙头份额提升）",
         "meso_layer": {
             "lifecycle": "分化格局：整车成熟期 | 智驾/芯片爆发期 | 材料出清期",
             "demand_boom": "全球新能源渗透率~25%→40%+ | 智驾渗透率从10%→40%(2027E) | 出海（东南亚/欧洲）",

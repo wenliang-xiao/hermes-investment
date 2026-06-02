@@ -39,11 +39,8 @@ schedule: "0 18 * * 0"  # 每周日 18:00
 command: python /home/admin/.hermes/investment_system/scripts/run_weekly.py
 ```
 
-### 旧的入口（保持兼容，可以继续用）
+### 旧入口已移除（v5.6）
 
-旧的 `run_report_v7.py` 和 `run_report_v8.py` 仍然存在，不影响。
-如果 Hermes 里已经配置了这两个脚本的 cron，建议：
-1. 保留 `run_report_v8.py` 的 cron（兜底用）
-2. 新增 `run_daily.py` 的两个时间点
-3. 新增 `run_weekly.py` 的周日时间点
-4. 逐步停用 `run_report_v7.py`（周报功能已被 run_weekly.py 覆盖）
+`run_report_v7.py`、`run_report_v8.py`、`run_brief.py`、`run_detail.py`、
+`run_weekly_fast.py`、`run_weekly_lite.py`、`morning_brief.py` 已删除。
+请确保 ECS Hermes YAML skill 文件只使用上表中的标准化入口。

@@ -21,40 +21,51 @@ hermes-investment/
 ├── output/             # Output abstraction
 │   └── __init__.py     # get_feishu_writer(), create_report_doc()
 ├── scripts/
-│   ├── run_brief.py    # NEW — 5-min daily brief (delegates to run_report_v8.py)
-│   ├── run_detail.py   # NEW — full detail daily report (delegates to run_report_v7.py)
-│   ├── run_research.py # NEW — on-demand stock research (delegates to deep_research.py)
-│   ├── run_report_v7.py  # PRESERVED — still works directly
-│   └── run_report_v8.py  # PRESERVED — still works directly
+│   ├── run_daily.py    # Canonical daily brief (08:30 + 18:00 weekdays)
+│   ├── run_weekly.py   # Canonical weekly deep research (Sun 18:00)
+│   ├── run_research.py # On-demand stock research (delegates to deep_research.py)
+│   ├── deep_research.py          # Deep research engine
+│   ├── stock_analyzer.py         # Stock analysis library
+│   ├── portfolio_monitor.py      # Portfolio tracking library
+│   ├── verify_stock_codes.py     # Stock code integrity checker
+│   └── physical_ai_search.py     # One-off baostock search tool
 └── [all existing files unchanged]
+
+> **v5.6**: Removed legacy scripts (run_brief, run_detail, run_report_v7, run_report_v8,
+> run_weekly_fast, run_weekly_lite, morning_brief) — all superseded by run_daily.py / run_weekly.py.
 ```
 
-## Entry Point Changes
+## Entry Point Changes (v5.6 — cleanup)
 
-| Old Command | New Command | Notes |
-|---|---|---|
-| `python scripts/run_report_v8.py` | `python scripts/run_brief.py` | Identical output |
-| `python scripts/run_report_v7.py` | `python scripts/run_detail.py` | Identical output |
-| `python deep_research.py --symbol 603986` | `python scripts/run_research.py --symbol 603986` | Identical output |
+Legacy wrappers (`run_brief.py`, `run_detail.py`) and deprecated scripts (`run_report_v7.py`,
+`run_report_v8.py`, `run_weekly_fast.py`, `run_weekly_lite.py`, `morning_brief.py`) have
+been removed. Use the canonical entry points directly:
 
-**Old commands still work — backward compatible.**
+| Use Case | Command |
+|---|---|
+| Daily report (08:30 + 18:00) | `python scripts/run_daily.py` |
+| Weekly report (Sun 18:00) | `python scripts/run_weekly.py` |
+| On-demand deep research | `python scripts/run_research.py --symbol <code>` |
 
 ## Hermes YAML Skill File Updates
 
-Update your Hermes skill YAML files to use the canonical new entry points:
+Update your Hermes skill YAML files to use the canonical entry points:
 
 ```yaml
-# Before
-command: python /home/admin/.hermes/investment_system/scripts/run_report_v8.py
+# Daily morning (weekdays 08:30)
+command: python /home/admin/.hermes/investment_system/scripts/run_daily.py
 
-# After (preferred — stable name)
-command: python /home/admin/.hermes/investment_system/scripts/run_brief.py
+# Daily evening (weekdays 18:00)
+command: python /home/admin/.hermes/investment_system/scripts/run_daily.py
 
-# Deep research
+# Weekly (Sunday 18:00)
+command: python /home/admin/.hermes/investment_system/scripts/run_weekly.py
+
+# Deep research (on-demand)
 command: python /home/admin/.hermes/investment_system/scripts/run_research.py --symbol {{symbol}}
 ```
 
-The old commands still work if you don't update them immediately.
+Ensure only ONE set of YAML skill files exists on ECS — no duplicate cron entries.
 
 ## What's in domain/__init__.py
 

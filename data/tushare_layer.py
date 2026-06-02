@@ -245,6 +245,16 @@ def get_macro_data_ts() -> dict:
                 cpi_yoy = df_cpi["nt_yoy"].iloc[0]
                 if cpi_yoy is not None and not (isinstance(cpi_yoy, float) and np.isnan(cpi_yoy)):
                     result["cpi"] = round(float(cpi_yoy), 2)
+                if len(df_cpi) >= 2:
+                    prev_yoy = df_cpi["nt_yoy"].iloc[1]
+                    if prev_yoy is not None and not (isinstance(prev_yoy, float) and np.isnan(prev_yoy)):
+                        result["cpi_prev"] = round(float(prev_yoy), 2)
+                        result["cpi_delta"] = round(result["cpi"] - float(prev_yoy), 2)
+                        result["cpi_trend"] = "up" if result["cpi_delta"] > 0.05 else ("down" if result["cpi_delta"] < -0.05 else "flat")
+                if len(df_cpi) >= 4:
+                    cpi_3m = df_cpi["nt_yoy"].iloc[3]
+                    if cpi_3m is not None and not (isinstance(cpi_3m, float) and np.isnan(cpi_3m)):
+                        result["cpi_momentum_3m"] = round(result["cpi"] - float(cpi_3m), 2)
         except Exception as e:
             logger.debug("[Tushare] cn_cpi 失败: %s", e)
 

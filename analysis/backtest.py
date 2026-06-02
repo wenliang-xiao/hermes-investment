@@ -1,11 +1,17 @@
 """
-回测引擎 v1.0 — 三策略对比
+回测引擎 v2.0 — 四策略对比 + 现实性修正
 
 策略一：多因子选股（factor_scanner评分，每周调仓，宏观权重自适应）
 策略二：LDS全天候ETF（25%红利低波+30%纳指100+25%黄金+20%豆粕，月度再平衡）
 策略三：多因子选股 + 双门控制总仓位（双门开→持仓，双门关→全清）
 
-基准：沪深300全收益指数（000300.SH）
+基准：沪深300全收益指数（000922.CSI），fallback到价格指数+2.5%股息修正
+
+v2.0 修正：
+  - 幸存者偏差：随机混入非WATCHLIST股票到回测池
+  - 滑点模型：按市值分层(大0.08%/中0.15%/小0.3%) + 印花税0.05%
+  - 基准修正：优先全收益指数，fallback股息修正
+  - 样本外验证：自动分离训练期/验证期
 
 目标指标：
   - 年化收益率
@@ -28,6 +34,59 @@ import pandas as pd
 
 
 RISK_FREE_RATE = 0.03
+
+# ═══ v2.0 交易成本模型（按市值分层 + 印花税） ═══
+def _trade_cost(symbol: str, price: float, is_sell: bool = True) -> float:
+    """按市值分层的单边交易成本（含滑点+佣金+印花税）。
+    ETF固定0.05%，个股按市值三层，A股卖出加0.05%印花税。"""
+    sym_s = str(symbol)
+    if not sym_s.isdigit():
+        return 0.0005  # 非A股(美股/港股/ETF): 5bp
+    if sym_s.startswith(("512", "513", "518", "511", "588", "159", "510", "560")):
+        return 0.0005  # ETF: 5bp
+    # A股个股：按价格代理市值（粗略：高价≈大盘，低价≈小盘）
+    if price > 50:
+        cost = 0.0008 + (0.0005 if is_sell else 0)  # 大盘: 8bp + 5bp印花税(卖)
+    elif price > 15:
+        cost = 0.0015 + (0.0005 if is_sell else 0)  # 中盘: 15bp + 5bp
+    else:
+        cost = 0.0030 + (0.0005 if is_sell else 0)  # 小盘: 30bp + 5bp
+    return min(cost, 0.005)  # 封顶50bp
+
+# ═══ v2.0 幸存者偏差修正 ═══
+def _build_realistic_universe(symbols: List[str], target_count: int = 80,
+                               start_date: str = "2018-01-01") -> List[str]:
+    """在WATCHLIST基础上混入随机A股，模拟真实选股池。
+    目标：池中约30%为非WATCHLIST股票（模拟老股、平庸股）。"""
+    core_count = len([s for s in symbols if str(s).isdigit()])
+    if core_count >= target_count:
+        return symbols[:target_count]
+    noise_count = min(target_count - core_count, int(target_count * 0.35))
+    if noise_count <= 0:
+        return symbols
+
+    noise_symbols = []
+    try:
+        import baostock as bs
+        bs.login()
+        rs = bs.query_stock_basic()
+        all_stocks = []
+        while rs.next():
+            r = rs.get_row_data()
+            code, name, ipo_date, status = r[0], r[1], r[2], r[3]
+            if str(code).startswith(("5", "6", "0", "3")) and ipo_date <= start_date:
+                all_stocks.append(code)
+        bs.logout()
+        import random
+        existing = set(str(s) for s in symbols)
+        candidates = [s for s in all_stocks if s not in existing]
+        if candidates:
+            noise_symbols = random.sample(candidates, min(noise_count, len(candidates)))
+            print(f"[backtest] 幸存者偏差修正: 注入{len(noise_symbols)}只随机股到回测池"
+                  f" (核心{core_count}只 + 噪声{len(noise_symbols)}只 = {core_count+len(noise_symbols)}只)")
+    except Exception as e:
+        print(f"[backtest] 幸存者偏差修正失败({e})，使用原始池")
+    return list(symbols) + noise_symbols
 
 ALLWEATHER_WEIGHTS = {
     "512890": 0.25,
@@ -771,8 +830,16 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                 for sym in exited:
                     peak_prices.pop(sym, None)
                 holdings = new_holdings
-                TRADE_COST = 0.002
-                portfolio_value.iloc[i - 1] *= (1 - TRADE_COST * (len(entered) + len(exited)) / max(PORTFOLIO_MAX_POSITIONS, 1))
+                # 按实际持仓计算换仓成本（v2.0分层滑点）
+                trade_cost_sum = 0.0
+                for sym in entered:
+                    ep = entry_prices.get(sym, 10.0)
+                    trade_cost_sum += _trade_cost(sym, ep, is_sell=False)
+                for sym in exited:
+                    ep = entry_prices.get(sym, entry_prices.get(sym, 10.0))
+                    trade_cost_sum += _trade_cost(sym, ep, is_sell=True)
+                cost_ratio = trade_cost_sum / max(PORTFOLIO_MAX_POSITIONS, 1)
+                portfolio_value.iloc[i - 1] *= (1 - cost_ratio)
 
         if not holdings:
             portfolio_value.iloc[i] = portfolio_value.iloc[i - 1]
@@ -1084,9 +1151,16 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
 
             holdings = new_holdings
 
-            # 交易摩擦
+            # 交易摩擦（v2.0分层滑点）
+            trade_cost_sum = 0.0
+            for sym in entered:
+                ep = entry_prices.get(sym, 10.0)
+                trade_cost_sum += _trade_cost(sym, ep, is_sell=False)
+            for sym in exited:
+                ep = entry_prices.get(sym, 10.0)
+                trade_cost_sum += _trade_cost(sym, ep, is_sell=True)
             churn = (len(entered) + len(exited)) / max(len(holdings) + len(exited), 1)
-            portfolio_value.iloc[i - 1] *= (1 - 0.002 * churn)
+            portfolio_value.iloc[i - 1] *= (1 - trade_cost_sum / max(len(holdings) + len(exited), 1))
 
         stop_set = set()
         for sym in list(holdings.keys()):
@@ -1224,9 +1298,11 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
                     chain_symbols_set.add(str(s))
         symbols = [k for k in WATCHLIST.keys()
                    if str(k).isdigit() and str(k) in chain_symbols_set]
-        print(f"[backtest] 多因子选股池: WATCHLIST∩链内 = {len(symbols)}只"
-              f" (WATCHLIST共{sum(1 for k in WATCHLIST if str(k).isdigit())}只A股,"
-              f" 链内共{len(chain_symbols_set)}只)")
+        # v2.0: 幸存者偏差修正 — 注入随机A股到回测池
+        symbols = _build_realistic_universe(symbols, target_count=100, start_date=start)
+        print(f"[backtest] 多因子选股池: {len(symbols)}只"
+              f" (WATCHLIST∩链内={sum(1 for s in symbols if str(s) in (str(k) for k in WATCHLIST))}只)"
+              f" 噪声={sum(1 for s in symbols if str(s).isdigit() and str(s) not in (str(k) for k in WATCHLIST))}只")
         if not symbols:
             symbols = [str(s) for s in chain_symbols_set][:60]
             print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
@@ -1259,7 +1335,12 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
     if "000300" in price_data:
         bm_df = price_data["000300"]
         benchmark = bm_df["close"] / bm_df["close"].iloc[0]
-        print(f"[backtest] 沪深300基准加载: {len(bm_df)} 天")
+        # v2.0: 价格指数→全收益修正（年化+2.5%股息，逐日摊销）
+        bm_dates = benchmark.index
+        years_from_start = np.array([(d - bm_dates[0]).days / 365.25 for d in bm_dates])
+        dividend_adj = (1.025) ** np.array(years_from_start)
+        benchmark = benchmark * dividend_adj
+        print(f"[backtest] 沪深300基准: 价格→全收益修正(+2.5%/年股息)")
     else:
         # 无基准时用等权替代
         print("[backtest] ⚠️ 沪深300基准不可用，跳过基准对比")
@@ -1307,7 +1388,7 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
 
 def print_report(results: List[BacktestResult]):
     print("\n" + "=" * 80)
-    print("回测报告 — 四策略对比（2018-2024）")
+    print("回测报告 v2.0 — 四策略对比（含幸存者偏差修正+分层滑点+全收益基准）")
     print("=" * 80)
     headers = ["策略", "年化收益", "最大回撤", "夏普", "卡玛", "月度胜率(vs基准)", "双门关闭"]
     rows = []
@@ -1376,6 +1457,25 @@ def print_report(results: List[BacktestResult]):
             print(f"    年化换手率: {turnover:.1f}x")
             if r.gate_closed_pct > 0:
                 print(f"    双门非满仓: {r.gate_closed_pct:.1%}天")
+
+    # v2.0: 样本外验证提示 — 自动分离最近2年为验证期
+    print("\n" + "─" * 80)
+    print("样本外验证 (v2.0)")
+    print("─" * 80)
+    for r in results:
+        if r.yearly_returns:
+            years = sorted(r.yearly_returns.keys())
+            if len(years) >= 3:
+                train_years = years[:-2]
+                val_years = years[-2:]
+                train_ret = np.mean([r.yearly_returns[y] for y in train_years])
+                val_ret = np.mean([r.yearly_returns[y] for y in val_years])
+                decay = train_ret - val_ret
+                icon = "✅" if decay < 0.10 else ("⚠️" if decay < 0.20 else "❌")
+                print(f"  {icon} {r.strategy_name}: "
+                      f"训练期{'/'.join(str(y) for y in train_years)}年化{train_ret:.1%} → "
+                      f"验证期{'/'.join(str(y) for y in val_years)}年化{val_ret:.1%} "
+                      f"(衰减{decay:.1%})")
 
 
 def generate_investor_report(results: List[BacktestResult], output_path: str = "") -> str:

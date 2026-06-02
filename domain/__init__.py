@@ -788,7 +788,7 @@ INDUSTRY_CHAINS = {
         "perez_stage": "展开期→成熟期过渡（Perez第3→4阶段）——整车产能过剩，智驾处于S2爆发期",
         "chain_type": "conditional",
         "active": True,
-        "activate_condition": "CPI>1.5% 或 行业出清信号出现（小厂停产/龙头份额提升）",
+        "activate_condition": "CPI>1.0%或通缩改善 或 行业出清信号出现（小厂停产/龙头份额提升）",
         "meso_layer": {
             "lifecycle": "分化格局：整车成熟期 | 智驾/芯片爆发期 | 材料出清期",
             "demand_boom": "全球新能源渗透率~25%→40%+ | 智驾渗透率从10%→40%(2027E) | 出海（东南亚/欧洲）",
