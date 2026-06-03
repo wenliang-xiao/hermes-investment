@@ -99,16 +99,13 @@ def save_macro_gate(date_str: str, macro_gate: str, trend_gate: str):
 
 
 def load_macro_gate_series(start: str, end: str) -> pd.Series:
-    """
-    加载历史双门状态序列（1=开，0=关）。
-    如果历史文件不存在，则用CPI/PMI数据重建。
-    """
     if MACRO_HISTORY_FILE.exists():
         try:
             with open(MACRO_HISTORY_FILE) as f:
                 history = json.load(f)
             dates = pd.date_range(start, end, freq="B")
             gate_vals = []
+            hit_count = 0
             for d in dates:
                 date_str = d.strftime("%Y-%m-%d")
                 entry = history.get(date_str)
@@ -117,13 +114,18 @@ def load_macro_gate_series(start: str, end: str) -> pd.Series:
                     entry = history.get(prev.strftime("%Y-%m-%d"))
                 if entry:
                     gate_vals.append(0 if entry.get("dual_closed") else 1)
+                    hit_count += 1
                 else:
                     gate_vals.append(1)
-            return pd.Series(gate_vals, index=dates)
+            coverage = hit_count / max(len(dates), 1)
+            if coverage >= 0.2:
+                print(f"[score_history] 缓存双门覆盖率{coverage:.0%}，直接使用")
+                return pd.Series(gate_vals, index=dates)
+            print(f"[score_history] 缓存覆盖率仅{coverage:.0%}<20%，改用宏观数据重建")
         except Exception as e:
-            print(f"[score_history] 加载历史双门失败: {e}")
+            print(f"[score_history] 加载历史双门失败({e})，改用宏观数据重建")
 
-    print("[score_history] 无历史双门记录，尝试从宏观数据重建...")
+    print("[score_history] 从宏观数据重建双门序列...")
     return _rebuild_gate_from_macro(start, end)
 
 

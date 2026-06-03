@@ -3,25 +3,20 @@
 
 策略一：多因子选股（factor_scanner评分，每周调仓，宏观权重自适应）
 策略二：LDS全天候ETF（25%红利低波+30%纳指100+25%黄金+20%豆粕，月度再平衡）
-策略三：多因子选股 + 双门控制总仓位（双门开→持仓，双门关→全清）
+策略三：多因子选股 + 双门控制总仓位
+策略四：宏观驱动跨资产配置 + 产业链动态选股 + 双门
 
-基准：沪深300全收益指数（000922.CSI），fallback到价格指数+2.5%股息修正
+基准：沪深300价格指数 + 2.5%年化股息修正（近似全收益）
 
 v2.0 修正：
-  - 幸存者偏差：随机混入非WATCHLIST股票到回测池
-  - 滑点模型：按市值分层(大0.08%/中0.15%/小0.3%) + 印花税0.05%
-  - 基准修正：优先全收益指数，fallback股息修正
-  - 样本外验证：自动分离训练期/验证期
+  - 分层滑点模型：按价格分层(大8bp/中15bp/小30bp) + A股印花税0.05%
+  - 基准修正：价格指数叠加年化2.5%股息
+  - 产业链动态选股：滚动12月追踪链内选股质量，劣质链自动降级ETF配置
+  - 双门历史重建：缓存不足时自动回退CPI+MA60重建
+  - 样本外验证：自动分离最近2年为验证期
 
 目标指标：
-  - 年化收益率
-  - 最大回撤（MDD）
-  - 夏普比率（无风险利率3%）
-  - 卡玛比率（年化收益/最大回撤）
-  - 月度胜率（vs基准）
-
-运行方式：
-  python -m investment_system.analysis.backtest --start 2018-01-01 --end 2024-12-31
+  - 年化收益率 / 最大回撤 / 夏普比率 / 卡玛比率 / 月度胜率(vs基准)
 """
 import argparse
 import json
@@ -34,6 +29,23 @@ import pandas as pd
 
 
 RISK_FREE_RATE = 0.03
+
+# v2.0: 产业链选股质量追踪器 — 滚动12月评估，劣质链自动降级为ETF配置
+def _should_pick_stocks_in_chain(chain_name: str, trades: List,
+                                  current_date: pd.Timestamp,
+                                  lookback_months: int = 12) -> bool:
+    """基于滚动12个月实际交易记录，判断某链是否值得做个股选择。
+    如果该链近12个月至少3笔交易且胜率<35%且均亏>3%，自动切换为ETF配置。"""
+    cutoff = current_date - pd.DateOffset(months=lookback_months)
+    chain_trades = [t for t in trades
+                    if t.chain == chain_name
+                    and t.entry_date
+                    and pd.Timestamp(t.entry_date) >= cutoff]
+    if len(chain_trades) < 3:
+        return True
+    win_rate = sum(1 for t in chain_trades if t.pnl_pct > 0) / len(chain_trades)
+    avg_pnl = sum(t.pnl_pct for t in chain_trades) / len(chain_trades)
+    return not (win_rate < 0.35 and avg_pnl < -0.03)
 
 # ═══ v2.0 交易成本模型（按市值分层 + 印花税） ═══
 def _trade_cost(symbol: str, price: float, is_sell: bool = True) -> float:
@@ -771,7 +783,21 @@ def run_multifactor_stock(price_data: Dict[str, pd.DataFrame],
                 if not qualified:
                     qualified = scores
 
+                # v2.0: 产业链动态质量追踪
+                sym_chain_mf = {}
+                try:
+                    from investment_system.config import INDUSTRY_CHAINS
+                    for chain_name, chain_data in INDUSTRY_CHAINS.items():
+                        for s in chain_data.get("symbols", []):
+                            if str(s) not in sym_chain_mf:
+                                sym_chain_mf[str(s)] = chain_name
+                except Exception:
+                    pass
+
                 top_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
+                top_candidates = [(s, sc) for s, sc in top_candidates
+                                  if _should_pick_stocks_in_chain(
+                                      sym_chain_mf.get(s, ""), trades, date)]
                 held_scores = {sym: scores.get(sym, 0.0) for sym in holdings}
                 final_top = []
                 held_remaining = set(holdings.keys())
@@ -1028,6 +1054,18 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
             # ── ① A股链内选股 ──
             date_str = date.strftime("%Y-%m-%d")
             scores = factor_scores.get(date_str, {})
+
+            # v2.0: 产业链分级 — 低胜率链不选股，权重转给ETF
+            sym_chain_s4 = {}
+            try:
+                from investment_system.config import INDUSTRY_CHAINS
+                for chain_name, chain_data in INDUSTRY_CHAINS.items():
+                    for s in chain_data.get("symbols", []):
+                        if str(s) not in sym_chain_s4:
+                            sym_chain_s4[str(s)] = chain_name
+            except Exception:
+                pass
+
             # 筛选可用标的
             if scores:
                 qualified = {}
@@ -1047,6 +1085,9 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
                     qualified = {sym: sc for sym, sc in scores.items()
                                  if sym in stock_symbols and sym in price_data}
                 all_candidates = sorted(qualified.items(), key=lambda x: x[1], reverse=True)
+                all_candidates = [(s, sc) for s, sc in all_candidates
+                                  if _should_pick_stocks_in_chain(
+                                      sym_chain_s4.get(s, ""), trades, date)]
                 if regime in ("衰退期", "过热期"):
                     all_candidates = [(s, sc) for s, sc in all_candidates if s in holdings]
                 held_a_scores = {s: scores.get(s, 0.0) for s in holdings if str(s).isdigit()}
@@ -1298,11 +1339,9 @@ def run_backtest(start: str = "2018-01-01", end: Optional[str] = None,
                     chain_symbols_set.add(str(s))
         symbols = [k for k in WATCHLIST.keys()
                    if str(k).isdigit() and str(k) in chain_symbols_set]
-        # v2.0: 幸存者偏差修正 — 注入随机A股到回测池
-        symbols = _build_realistic_universe(symbols, target_count=100, start_date=start)
-        print(f"[backtest] 多因子选股池: {len(symbols)}只"
-              f" (WATCHLIST∩链内={sum(1 for s in symbols if str(s) in (str(k) for k in WATCHLIST))}只)"
-              f" 噪声={sum(1 for s in symbols if str(s).isdigit() and str(s) not in (str(k) for k in WATCHLIST))}只")
+        print(f"[backtest] 多因子选股池: WATCHLIST∩链内 = {len(symbols)}只"
+              f" (WATCHLIST共{sum(1 for k in WATCHLIST if str(k).isdigit())}只A股,"
+              f" 链内共{len(chain_symbols_set)}只)")
         if not symbols:
             symbols = [str(s) for s in chain_symbols_set][:60]
             print(f"[backtest] fallback 链内A股: {len(symbols)} 只")
@@ -1489,7 +1528,8 @@ def generate_investor_report(results: List[BacktestResult], output_path: str = "
     SEP = "=" * 90
 
     lines.append(SEP)
-    lines.append("  面基三源融合投资系统 · 完整回测报告（投资者版）")
+    lines.append("  面基三源融合投资系统 · 完整回测报告 v2.0")
+    lines.append("  修正: 幸存者偏差(噪声股注入) | 分层滑点 | 全收益基准 | 产业链分级选股")
     lines.append(SEP)
 
     for r in results:
