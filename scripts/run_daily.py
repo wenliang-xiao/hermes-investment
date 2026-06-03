@@ -145,35 +145,28 @@ try:
 
     # ═══ HEADER: 实事求是 三层嵌套 ═══
     lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位，精选标的" if macro_gate=="黄灯" else "正常操作")
-    action_icon = "🔒" if dual_closed else "✅"
     w.write(doc_id, [
-        ('bold', f" {action_icon} 双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% 3月动量{cpi_mom:+.2f}%"),
-        ('text', f"趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%{' | 建议仓位≤40%' if dual_closed else ''}"),
-        ('divider', ''),
-        ('text', f"短期(价格): 待加载 | 中期(共识): {regime}叙事 → {'/'.join(favored[:3])}偏好"),
-        ('text', f"长期(规律): 康波萧条期 → 追赶国红利 → 国产替代+军工"),
-        ('text', f"LDS判断: 「宏观{'偏空' if macro_gate in ('红灯','黄灯') else '正常'}+趋势{trend_temp}→{lds_judgment}」"),
+        ('bold', f"🔒 双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% 3月动量{cpi_mom:+.2f}% | 趋势{trend_temp} | 国运线偏离{guoyun_dev}%"),
+        ('text', f"LDS: 「宏观{'偏空' if macro_gate in ('红灯','黄灯') else '正常'}+趋势{trend_temp}→{lds_judgment}」"),
         ('divider', ''),
     ])
 
-    # ═══ 一、实事求是 — 数据替代观点 ═══
+    # ═══ 一、实事求是 + 谁在赢 ═══
     w.write(doc_id, [('h2', '一、⚡ 实事求是 — 数据替代观点')])
     
     change_lines = []
     if isinstance(cpi, (int, float)) and cpi < 1.0:
-        change_lines.append(f"CPI={cpi}% 通缩中 | 3月动量{cpi_mom:+.2f}% {'✅边际改善' if cpi_mom > 0.2 else '→需持续观察'}")
+        change_lines.append(f"CPI={cpi}% 通缩中 | 3月动量{cpi_mom:+.2f}% {'✅边际改善' if cpi_mom > 0.2 else '→持续观察'}")
     
     try:
         snap = get_global_market_snapshot()
-        idx = snap.get('indices', {})
+        idx_data = snap.get('indices', {})
         for name in ['标普500', '纳斯达克', '恒生']:
-            d = idx.get(name)
+            d = idx_data.get(name)
             if d:
                 p = d.get('price') if isinstance(d, dict) else d
                 if p:
-                    chg = d.get('change', 0) if isinstance(d, dict) else 0
-                    arrow = "↑" if chg > 0 else ("↓" if chg < 0 else "→")
-                    change_lines.append(f"{name}:{p:,.0f} {arrow}")
+                    change_lines.append(f"{name}:{p:,.0f}")
     except Exception:
         pass
     
@@ -182,26 +175,43 @@ try:
         if nb.get('data_ok'):
             nb_net = nb.get('today_net', 0)
             nb_5d = nb.get('5d_cumulative', 0)
-            change_lines.append(f"北向资金: {nb_net:+.1f}亿 | 5日{nb_5d:+.1f}亿")
+            change_lines.append(f"北向资金: {nb_net:+.1f}亿 (5日{nb_5d:+.1f}亿)")
     except Exception:
         pass
     
-    change_lines.append(f"趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%")
     change_lines.append(f"LDS全天候: 今日{_fmt(lds.get('portfolio_ret_1d'))} | YTD{_fmt(lds.get('portfolio_ytd'))}")
     
     for line in change_lines:
         w.write(doc_id, [('bullet', line)])
     
     if dual_closed:
-        w.write(doc_id, [('bold', f"LDS: 「宏观偏空+趋势平 → 不开新仓，只研究」")])
-        if isinstance(cpi, (int, float)) and cpi < 1.0:
-            w.write(doc_id, [('bullet', f"转绿条件: CPI≥1.0%(当前{cpi}%){' + 3月动量>+0.3%已改善' if cpi_mom > 0.2 else ''} + 趋势温度回暖(当前{trend_temp})")])
+        cpi_mom_str = f"{'已改善' if cpi_mom > 0.2 else '需继续'}"
+        w.write(doc_id, [('bold', f"LDS: 不开新仓，只研究 | 转绿需: CPI≥1.0% + 3月动量>{cpi_mom_str} + 趋势≥温")])
     else:
-        w.write(doc_id, [('bold', f"LDS: 「可操作 | 单票≤2% | 四重确认入场」")])
+        w.write(doc_id, [('bold', f"LDS: 可操作 | 单票≤2% | 四重确认入场")])
 
-    # ═══ 二、谁在赢 — 价格是最贵的信号 ═══
-    w.write(doc_id, [('h2', '二、🎯 谁在赢 — 价格是最贵的信号')])
-    w.write(doc_id, [('text', '涨价了才有信心，涨价了才有共识。数据替代观点。')])
+    # 谁在赢 — 今日领涨/领跌
+    try:
+        leaders = []
+        laggards = []
+        for code, info in WATCHLIST.items():
+            if not str(code).isdigit(): continue
+            pd_info = prices.get(code, {})
+            chg = pd_info.get('chg')
+            price = pd_info.get('price')
+            if chg is None or price is None: continue
+            if chg > 3: leaders.append((info.get('name', code), code, chg))
+            elif chg < -3: laggards.append((info.get('name', code), code, chg))
+        leaders.sort(key=lambda x: -x[2])
+        laggards.sort(key=lambda x: x[2])
+        if leaders or laggards:
+            w.write(doc_id, [('bold', '🎯 谁在赢 — 价格是最贵的信号')])
+            if leaders:
+                w.write(doc_id, [('bullet', '🔥 领涨: ' + '  '.join(f"**{n}**({c})+{chg:.1f}%" for n,c,chg in leaders[:5]))])
+            if laggards:
+                w.write(doc_id, [('bullet', '❄️ 领跌: ' + '  '.join(f"**{n}**({c}){chg:.1f}%" for n,c,chg in laggards[:3]))])
+    except Exception:
+        pass
 
     log("Panel done")
 
@@ -238,11 +248,7 @@ try:
         pass
     log("Shadow pre-check done")
 
-    # ─── 板块2：持仓风控 ───
-    rpt.build_tracking_section(w, doc_id, scanner=scanner, macro=macro, section_prefix="二")
-    log("Tracking done")
-
-    # ─── 板块3：观察池今日信号 ───
+    # ═══ 观察池信号 ═══
     w.write(doc_id, [('divider', ''), ('h2', '👁️ 三、观察池今日信号')])
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
 
@@ -521,11 +527,12 @@ try:
         from investment_system.config import DOMESTIC_SUB_THEMES
         themes = sorted(DOMESTIC_SUB_THEMES.items(), key=lambda x: x[1].get('localization_rate', 100))
         for tn, td in themes[:5]:
-            lr = td.get('localization_rate', '?')
+            lr = td.get('localization_rate', 0)
+            lr_pct = round(lr * 100) if lr < 1 else lr
             score = td.get('decoupling_score', 0)
             stocks = td.get('key_stocks_a', [])[:3]
             w.write(doc_id, [('bullet',
-                f"{'🔴' if lr < 20 else '🟡'} **{tn}**: 国产化率{lr}% | 脱钩评分{score}/10 | {'/'.join(stocks)}"
+                f"{'🔴' if lr_pct < 20 else '🟡'} **{tn}**: 国产化率{lr_pct}% | 脱钩评分{score}/10 | {'/'.join(stocks)}"
             )])
     except Exception:
         w.write(doc_id, [('text', '国产替代数据加载中...')])
