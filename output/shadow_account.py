@@ -25,7 +25,7 @@ def save_shadow(data):
 
 
 def entry(symbol: str, name: str, action: str, price: float, reason: str,
-          quantity: int = 100, pct: float = 0.02):
+          quantity: int = 100, pct: float = 0.02, entry_score: float = None):
     book = load_shadow()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     entry_record = {
@@ -36,7 +36,7 @@ def entry(symbol: str, name: str, action: str, price: float, reason: str,
     book["history"] = book["history"][-200:]
 
     if action in ("买入", "加仓"):
-        book["positions"][symbol] = {
+        pos = {
             "name": name, "entry_price": price,
             "entry_time": now,
             "quantity": quantity, "current_price": price,
@@ -44,6 +44,9 @@ def entry(symbol: str, name: str, action: str, price: float, reason: str,
             "pct": pct,
             "entry_date": datetime.now().strftime("%Y-%m-%d"),
         }
+        if entry_score is not None:
+            pos["entry_score"] = entry_score
+        book["positions"][symbol] = pos
     elif action in ("卖出", "减仓"):
         book["positions"].pop(symbol, None)
 
@@ -161,3 +164,67 @@ def get_shadow_summary() -> dict:
         "cash": book["cash"],
         "latest_entry": book["history"][-1] if book["history"] else None,
     }
+
+
+def exit_position(symbol: str, price: float = None, reason: str = "手动清仓") -> dict:
+    """退出持仓并加入5天冷却期"""
+    book = load_shadow()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    pos = book["positions"].pop(symbol, None)
+
+    entry_record = {
+        "time": now, "symbol": symbol,
+        "name": pos.get("name", symbol) if pos else symbol,
+        "action": "卖出", "price": price or 0,
+        "reason": reason,
+    }
+    book["history"].append(entry_record)
+    book["history"] = book["history"][-200:]
+
+    # 加入冷却期
+    if "cooldown" not in book:
+        book["cooldown"] = {}
+    book["cooldown"][symbol] = datetime.now().strftime("%Y-%m-%d")
+
+    save_shadow(book)
+    return book
+
+
+def is_on_cooldown(symbol: str, days: int = 5) -> bool:
+    """检查某只股票是否在冷却期内（默认5天）"""
+    book = load_shadow()
+    cd = book.get("cooldown", {})
+    exit_date_str = cd.get(symbol)
+    if not exit_date_str:
+        return False
+    try:
+        exit_dt = datetime.strptime(exit_date_str, "%Y-%m-%d")
+        return (datetime.now() - exit_dt).days < days
+    except:
+        return False
+
+
+def get_cooldown_list() -> list:
+    """返回当前仍在冷却期的股票列表"""
+    book = load_shadow()
+    cd = book.get("cooldown", {})
+    now = datetime.now()
+    result = []
+    for sym, ds in cd.items():
+        try:
+            dt = datetime.strptime(ds, "%Y-%m-%d")
+            remaining = 5 - (now - dt).days
+            if remaining > 0:
+                result.append({"symbol": sym, "exit_date": ds, "remaining_days": remaining})
+        except:
+            pass
+    return result
+
+
+def clean_cooldown(max_days: int = 30):
+    """清理30天前的冷却期记录"""
+    book = load_shadow()
+    cd = book.get("cooldown", {})
+    cutoff = (datetime.now() - timedelta(days=max_days)).strftime("%Y-%m-%d")
+    book["cooldown"] = {k: v for k, v in cd.items() if v >= cutoff}
+    save_shadow(book)
