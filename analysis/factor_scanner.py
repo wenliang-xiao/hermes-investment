@@ -393,23 +393,9 @@ class FactorScanner:
     # 全市场扫描（LDS宏观驱动版 v3.3）
     # ═══════════════════════════════════════════
     def scan_market(self, scan_type="small_mid", top_n=30) -> list:
-        dynamic = getattr(self, '_dynamic_universe', None)
-        if dynamic:
-            max_scan = getattr(self, "MAX_SCAN", 50)
-            universe = dynamic[:max_scan]
-            print(f"[scanner] 动态宇宙模式: {len(universe)}只 (全市场筛选)")
-
-            scored = []
-            for i, sym in enumerate(universe):
-                if i >= max_scan: break
-                s = self.score_stock(sym)
-                if s.get("error"): continue
-                s["name"] = self._get_stock_name(sym)
-                scored.append(s)
-                if i % 10 == 0 and i > 0: print(f"  [scanner] {i}/{max_scan}...")
-            scored.sort(key=lambda x: x["score"], reverse=True)
-            return scored[:top_n]
-
+        """排序分位法全市场扫描 — LDS宏观→板块→个股
+        板块轮抽：每个板块取N只，确保行业覆盖均衡。
+        评分排序后取top_n。"""
         from investment_system.domain.stock_universe import ALL_LDS_STOCKS, get_stocks_for_macro, LDS_SECTORS, INDEX_DATA, MACRO_TO_SECTORS
         
         # 获取当前宏观状态

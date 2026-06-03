@@ -65,19 +65,17 @@ try:
     scanner = FactorScanner()
     scanner.macro = macro_engine
     
-    # 动态宇宙: 全市场筛选替代固定LDS_SECTORS
+    # 链内扩展: 构建已知链股票集合, 用于发现不在WATCHLIST但属于同链的新标的
     try:
-        from investment_system.analysis.universe_builder import build_daily_scan_plan
-        scan_plan = build_daily_scan_plan()
-        dynamic_pool = list(set(scan_plan.get('research_universe', []) + scan_plan.get('buy_universe_codes', [])))
-        buy_pool = scan_plan.get('buy_universe_codes', [])
-        log(f"Dynamic universe: research={len(scan_plan.get('research_universe',[]))} buy={len(buy_pool)} total={len(dynamic_pool)}")
-        if dynamic_pool:
-            scanner._dynamic_universe = dynamic_pool
-    except Exception as e:
-        log(f"Dynamic universe failed ({e}), fallback to LDS_SECTORS")
-        dynamic_pool = []
-        buy_pool = []
+        from investment_system.config import INDUSTRY_CHAINS, WATCHLIST as _CFG_WL
+        _chain_stocks = {}  # chain_name → set of codes
+        _watchlist_codes = set(str(k) for k in _CFG_WL if str(k).isdigit())
+        for cn, cd in INDUSTRY_CHAINS.items():
+            _chain_stocks[cn] = set(str(s) for s in cd.get('symbols', []) if str(s).isdigit())
+        log(f"Chain discovery: {len(_chain_stocks)} chains, watchlist {len(_watchlist_codes)} A-shares")
+    except Exception:
+        _chain_stocks = {}
+        _watchlist_codes = set()
     
     log("Scanner ready")
     stock_context = []
@@ -447,6 +445,26 @@ try:
         w.write(doc_id, [('bullet', f'⚠️ 扫描跳过: {str(scan_err)[:60]}')])
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
+
+    # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
+    if scan_results and scan_status == "complete" and _chain_stocks:
+        discoveries = []
+        for s in scan_results:
+            sym = str(s.get('symbol', ''))
+            if not sym or sym in _watchlist_codes: continue
+            score = s.get('score', 0)
+            if score < 6.0: continue
+            # 查找该票属于哪个链
+            for cn, codes in _chain_stocks.items():
+                if sym in codes:
+                    discoveries.append((cn, s))
+                    break
+        if discoveries:
+            w.write(doc_id, [('divider', ''), ('bold', f'🔎 链内新发现: {len(discoveries)}只 (已评分≥6, 同链但不在观察池)')])
+            for cn, s in discoveries[:5]:
+                w.write(doc_id, [('bullet',
+                    f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {cn} | ROE{s.get('roe','?')}%"
+                )])
 
     # ═══ Nick四问 + 四重确认 — 对扫描TOP3做深度分析 ═══
     if scan_results and scan_status == "complete":
