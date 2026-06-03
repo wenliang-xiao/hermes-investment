@@ -350,14 +350,15 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
-    # ─── 板块3.5：今日扫描发现 ───
+    # ─── 板块3.5：今日扫描发现（跨cron分批续扫）───
     w.write(doc_id, [('divider', ''), ('h2', '🔍 三点五、今日扫描发现')])
     w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
     scan_results = []
+    scan_status = ""
     try:
         scanner.MAX_SCAN = 30
-        scan_results = scanner.scan_market(top_n=10)
-        if scan_results:
+        scan_results, scan_status = scanner.scan_market_batch(batch_size=15, top_n=10)
+        if scan_status == "complete":
             w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} 综合排名')])
             for rank, s in enumerate(scan_results[:10], 1):
                 name = s.get("name", s.get("symbol", "?"))
@@ -375,8 +376,23 @@ try:
                 w.write(doc_id, [('bullet',
                     f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}{' | '+r_str if r_str else ''}"
                 )])
+        elif scan_status.startswith("partial:"):
+            prog = scan_status.split(":")[1]
+            w.write(doc_id, [('text', f'⏳ 扫描进行中 ({prog}) — 下次cron续扫剩余批次')])
+            if scan_results:
+                w.write(doc_id, [('bold', f'📊 部分结果（{len(scan_results)}只，待全量后排名）')])
+                for rank, s in enumerate(scan_results[:5], 1):
+                    name = s.get("name", s.get("symbol", "?"))
+                    sym = s.get("symbol", "?")
+                    score = s.get("score", 0)
+                    sector = s.get("sector", "")
+                    chg = s.get("change_pct")
+                    chg_s = f"{_arrow(chg)}{_fmt(chg)}" if chg is not None else ""
+                    w.write(doc_id, [('bullet',
+                        f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}"
+                    )])
         else:
-            w.write(doc_id, [('text', '⏳ 扫描数据未就绪（数据源延迟或市场休市）')])
+            w.write(doc_id, [('text', '⏳ 扫描批次已初始化，下次cron开始评分')])
     except Exception as scan_err:
         w.write(doc_id, [('bullet', f'⚠️ 扫描跳过: {str(scan_err)[:60]}')])
         log(f"Scanner failed (non-critical): {scan_err}")
@@ -385,7 +401,7 @@ try:
     # ─── 模拟盘建仓/清仓（六因子评分驱动）───
     log("Shadow entry/exit engine...")
     try:
-        if scan_results and not dual_closed:
+        if scan_results and not dual_closed and scan_status == "complete":
             _sa_sum = _sa_summary()
             _hold = {p["symbol"] for p in _sa_sum.get("positions", [])}
             _sc_map = {s.get("symbol", ""): s.get("score", 0) for s in scan_results}
@@ -428,6 +444,12 @@ try:
                     if _ep:
                         _sa_exit(_sy, _ep, f"六因子评分降至{_score:.1f}分<4 → 清仓")
                         log(f"🔻 Shadow EXIT {_p['name']}({_sy}): score={_score:.1f}")
+
+        elif scan_results and not dual_closed and scan_status.startswith("partial:"):
+            log(f"Scan partial ({scan_status}): skip entry/exit until full scan completes")
+
+        else:
+            log(f"Shadow entry/exit skipped: results={bool(scan_results)} dual_closed={dual_closed} status={scan_status}")
 
     except Exception as _e:
         log(f"⚠️ Shadow entry/exit: {_e}")

@@ -10,7 +10,9 @@
 """
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+import json
+import os
+from datetime import datetime, timedelta, date
 from investment_system import config
 from investment_system.data.data_layer import (get_stock_daily, get_financial_report,
                          get_financial_history, calc_pe_percentile, get_volume_signal)
@@ -453,6 +455,118 @@ class FactorScanner:
 
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:top_n]
+
+    # ═══════════════════════════════════════════
+    # 跨cron分批续扫（拆分多次，确保全量） v1.0
+    # ═══════════════════════════════════════════
+    def scan_market_batch(self, progress_file=None, batch_size=15, top_n=10):
+        """跨cron分批扫描，每次扫batch_size只，保存进度。
+        返回: (results_list, status_str)
+        status: 'complete' | 'partial' | 'fresh'
+        """
+        from investment_system.domain.stock_universe import LDS_SECTORS, MACRO_TO_SECTORS
+
+        if progress_file is None:
+            from investment_system import config
+            progress_file = os.path.join(config.DATA_DIR, 'scanner_progress.json')
+
+        today = str(date.today())
+        progress = self._load_scanner_progress(progress_file)
+        stale = progress is None or progress.get("date") != today
+
+        # 全完成 → 直接返回
+        if progress and progress.get("completed"):
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        # 过期或新扫描 → 重建universe
+        if stale:
+            regime = self.macro.regime if self.macro and hasattr(self.macro, 'regime') else "default"
+            favored = MACRO_TO_SECTORS.get(regime, MACRO_TO_SECTORS["default"])
+            universe, seen = [], set()
+            max_scan = getattr(self, "MAX_SCAN", 30)
+
+            for sec in favored:
+                cnt = 0
+                for s in LDS_SECTORS.get(sec, []):
+                    if s not in seen and cnt < max(3, max_scan // len(favored)):
+                        seen.add(s); universe.append(s); cnt += 1
+                        if len(universe) >= max_scan: break
+                if len(universe) >= max_scan: break
+            other = [s for s in LDS_SECTORS if s not in favored]
+            for sec in other:
+                cnt = 0
+                for s in LDS_SECTORS.get(sec, []):
+                    if s not in seen and cnt < max(2, max_scan // len(LDS_SECTORS)):
+                        seen.add(s); universe.append(s); cnt += 1
+                        if len(universe) >= max_scan: break
+                if len(universe) >= max_scan: break
+
+            progress = {"date": today, "universe": universe, "scanned": [],
+                        "results": [], "completed": False, "total": len(universe)}
+            self._save_scanner_progress(progress_file, progress)
+            print(f"[scanner] 新批次 | 宏观:{regime} | 池{len(universe)}只")
+
+        # 找下一批未扫的
+        remaining = [s for s in progress["universe"] if s not in progress["scanned"]]
+        if not remaining:
+            progress["completed"] = True
+            self._save_scanner_progress(progress_file, progress)
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        batch = remaining[:batch_size]
+        done = len(progress["scanned"])
+        total = progress["total"]
+        print(f"[scanner] 续扫 | {done}/{total}完成 | 本批{len(batch)}只 | 剩{max(0,total-done-len(batch))}只待扫")
+
+        for sym in batch:
+            s = self.score_stock(sym)
+            if not s.get("error"):
+                s["name"] = self._get_stock_name(sym)
+                s["sector"] = self._get_stock_sector(sym)
+                progress["results"].append(s)
+            progress["scanned"].append(sym)
+
+        self._save_scanner_progress(progress_file, progress)
+        now_done = len(progress["scanned"])
+
+        if now_done >= total:
+            progress["completed"] = True
+            self._save_scanner_progress(progress_file, progress)
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        # 返回当前部分结果 + partial状态
+        partial = sorted(progress["results"], key=lambda x: x.get("score", 0), reverse=True)
+        return partial[:top_n], f"partial:{now_done}/{total}"
+
+    def _load_scanner_progress(self, path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def _save_scanner_progress(self, path, data):
+        import tempfile
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+        os.replace(tmp, path)
+
+    def _rm_progress(self, path):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
 
     def _get_stock_sector(self, symbol: str) -> str:
         """查询股票所属LDS板块"""
