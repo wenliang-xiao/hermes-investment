@@ -329,8 +329,9 @@ try:
                 if rr_line:
                     w.write(doc_id, [('bullet', rr_line)])
         if core_no_signal:
-            w.write(doc_id, [('bold', '📋 核心/底仓（无特殊信号）')])
-            for _, line in core_no_signal[:10]:
+            show_count = min(5, len(core_no_signal))
+            w.write(doc_id, [('bold', f'📋 核心/底仓（无特殊信号，{show_count}/{len(core_no_signal)}只）')])
+            for _, line in core_no_signal[:show_count]:
                 w.write(doc_id, [('bullet', line)])
 
         anomaly_stocks_for_news = []
@@ -358,6 +359,31 @@ try:
     try:
         scanner.MAX_SCAN = 30
         scan_results, scan_status = scanner.scan_market_batch(batch_size=15, top_n=10)
+
+        # 加载上次扫描快照 — 用于显示排名/分数变化
+        prev_scores = {}
+        SNAP_FILE = '/tmp/hermes_scan_snapshot.json'
+        if scan_status == "complete":
+            try:
+                if os.path.exists(SNAP_FILE):
+                    with open(SNAP_FILE) as f:
+                        snap = json.load(f)
+                    for s in snap.get("results", []):
+                        prev_scores[s.get("symbol", "")] = {
+                            "score": s.get("score", 0), "rank": s.get("rank", 0)}
+            except Exception:
+                pass
+            # 保存本次快照供下次对比
+            snap_data = {"date": today, "regime": regime,
+                         "results": [{"symbol": s.get("symbol",""), "name": s.get("name",""),
+                                      "score": s.get("score",0), "rank": i+1}
+                                     for i, s in enumerate(scan_results[:15])]}
+            try:
+                with open(SNAP_FILE, 'w') as f:
+                    json.dump(snap_data, f)
+            except Exception:
+                pass
+
         if scan_status == "complete":
             w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} 综合排名')])
             for rank, s in enumerate(scan_results[:10], 1):
@@ -373,8 +399,20 @@ try:
                 if s.get("roe"):
                     reasons.append(f"ROE{s['roe']:.0f}%")
                 r_str = ' | '.join(reasons[:2]) if reasons else ''
+                # 变化标注
+                delta = ""
+                if sym in prev_scores:
+                    p = prev_scores[sym]
+                    if p["rank"] and rank != p["rank"]:
+                        dr = p["rank"] - rank
+                        delta += f" {'↑' if dr > 0 else '↓'}{abs(dr)}(#{p['rank']}→#{rank})"
+                    ds = score - p["score"]
+                    if abs(ds) > 0.3:
+                        delta += f" 分{'↑' if ds > 0 else '↓'}{abs(ds):.1f}"
+                else:
+                    delta = " 🆕"
                 w.write(doc_id, [('bullet',
-                    f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}{' | '+r_str if r_str else ''}"
+                    f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}{delta}{' | '+r_str if r_str else ''}"
                 )])
         elif scan_status.startswith("partial:"):
             prog = scan_status.split(":")[1]

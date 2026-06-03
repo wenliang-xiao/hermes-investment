@@ -178,12 +178,17 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
 # ═══════════════════════════════════════════
 # 3. 基本面数据（baostock）
 # ═══════════════════════════════════════════
+_FIN_CACHE = {}
+
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→baostock。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→baostock。同进程内缓存。"""
+    if symbol in _FIN_CACHE:
+        return _FIN_CACHE[symbol]
     try:
         from investment_system.data.tushare_layer import get_financial_report_ts
         result = get_financial_report_ts(symbol)
         if result:
+            _FIN_CACHE[symbol] = result
             return result
     except Exception:
         pass
@@ -247,6 +252,7 @@ def get_financial_report(symbol: str) -> dict:
             except:
                 continue
 
+    _FIN_CACHE[symbol] = result
     return result
 
 
@@ -254,8 +260,11 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
     """
     获取多季度财务历史：ROE趋势 + FCF 计算所需数据
     返回按时间倒序的季度列表，用于计算 ROE 趋势和 FCF
-    Tushare→baostock
+    Tushare→baostock。同进程内缓存。
     """
+    key = f"FH_{symbol}_{quarters}"
+    if key in _FIN_CACHE:
+        return _FIN_CACHE[key]
     _bs_login()
     bs_code = _bs_code(symbol)
     history = []
@@ -314,6 +323,7 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
         if len(history) >= quarters:
             break
 
+    _FIN_CACHE[key] = history
     return history
 
 
