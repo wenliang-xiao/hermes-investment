@@ -347,6 +347,34 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
+    # ═══ 3.4 低共识狩猎 — 跌幅大+基本面好的逆向机会 ═══
+    try:
+        contrarian = []
+        for code, info in WATCHLIST.items():
+            if not str(code).isdigit(): continue
+            pd_info = prices.get(code, {})
+            chg = pd_info.get('chg')
+            rsi = pd_info.get('rsi')
+            if chg is None: continue
+            if chg <= -3 and rsi and rsi < 40:
+                roe = pd_info.get('roe') if 'roe' in pd_info else None
+                if not roe:
+                    try:
+                        from investment_system.data.data_layer import get_financial_report
+                        fin = get_financial_report(code)
+                        roe = fin.get('净资产收益率')
+                    except: pass
+                if roe and float(roe) > 15:
+                    contrarian.append((info.get('name', code), code, chg, roe, rsi))
+        if contrarian:
+            w.write(doc_id, [('bold', f'🔎 3.4 低共识狩猎: {len(contrarian)}只 (跌幅>3%+ROE>15%→逆向研究)')])
+            for name, code, chg, roe, rsi in contrarian[:3]:
+                w.write(doc_id, [('bullet',
+                    f"**{name}**({code}) {chg:+.1f}% | ROE{roe:.0f}% | RSI{rsi:.0f} | 市场悲观+基本面强=逆向机会"
+                )])
+    except Exception:
+        pass
+
     # ─── 3.5 今日扫描发现 ───
     w.write(doc_id, [('divider', ''), ('h2', '🔍 3.5 扫描发现')])
     w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
@@ -385,15 +413,31 @@ try:
             top_scores = [s.get('score', 0) for s in scan_results[:10]]
             score_range = max(top_scores) - min(top_scores) if top_scores else 0
             avg_score = sum(top_scores) / len(top_scores) if top_scores else 0
+            
+            # vs前次对比
+            prev_avg = 0
+            try:
+                if os.path.exists(SNAP_FILE):
+                    with open(SNAP_FILE) as f:
+                        prev_snap = json.load(f)
+                    prev_scores_list = [s.get('score', 0) for s in prev_snap.get('results', [])[:10]]
+                    if prev_scores_list:
+                        prev_avg = sum(prev_scores_list) / len(prev_scores_list)
+            except: pass
+            
             if score_range < 1.5 and avg_score < 6.5:
                 quality = "⚠️ 偏低"
-                quality_note = f"分数集中({min(top_scores):.1f}-{max(top_scores):.1f})，因子区分度不足，等待更强信号"
+                quality_note = f"分数集中({min(top_scores):.1f}-{max(top_scores):.1f})均分{avg_score:.1f}"
             elif avg_score >= 6.5:
                 quality = "✅ 良好"
-                quality_note = f"均分{avg_score:.1f}，信号可靠"
+                quality_note = f"均分{avg_score:.1f}"
             else:
                 quality = "→ 一般"
-                quality_note = f"均分{avg_score:.1f}，区间{score_range:.1f}"
+                quality_note = f"均分{avg_score:.1f}区间{score_range:.1f}"
+            
+            if prev_avg > 0:
+                delta = avg_score - prev_avg
+                quality_note += f" | vs前次{delta:+.1f}{'↑改善' if delta > 0.2 else ('↓退步' if delta < -0.2 else '→持平')}"
             
             w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} | 信号质量: {quality} — {quality_note}')])
             for rank, s in enumerate(scan_results[:10], 1):
@@ -502,10 +546,21 @@ try:
         else:
             w.write(doc_id, [('text', '⏳ 扫描数据不足，无法执行四重确认')])
 
-        # 转绿后第一优先级
+        # 转绿后第一优先级 (持久化)
         if top3 and dual_closed:
             top_pick = top3[0]
-            w.write(doc_id, [('bold', f"📌 转绿后第一优先级: {top_pick.get('name','?')}({top_pick.get('symbol','?')}) {top_pick.get('score',0):.1f}分")])
+            priority = {
+                'name': top_pick.get('name', '?'),
+                'symbol': top_pick.get('symbol', '?'),
+                'score': top_pick.get('score', 0),
+                'date': today,
+                'regime': regime
+            }
+            try:
+                with open('/tmp/hermes_top_priority.json', 'w') as f:
+                    json.dump(priority, f)
+            except: pass
+            w.write(doc_id, [('bold', f"📌 转绿后第一优先级: {priority['name']}({priority['symbol']}) {priority['score']:.1f}分")])
             w.write(doc_id, [('text', f"需满足四重确认全部通过 → 首批50%仓位 | 单票≤2% | 止损-8%")])
 
     # ─── 模拟盘建仓/清仓（六因子评分驱动 + 组合风控）───
