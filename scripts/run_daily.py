@@ -151,8 +151,8 @@ try:
         ('divider', ''),
     ])
 
-    # ═══ 一、实事求是 + 谁在赢 ═══
-    w.write(doc_id, [('h2', '一、⚡ 实事求是 — 数据替代观点')])
+    # ═══ 一、实事求是 + 谁在赢 + 前瞻 ═══
+    w.write(doc_id, [('h2', '一、⚡ 实事求是 — 今日变化')])
     
     change_lines = []
     if isinstance(cpi, (int, float)) and cpi < 1.0:
@@ -166,7 +166,8 @@ try:
             if d:
                 p = d.get('price') if isinstance(d, dict) else d
                 if p:
-                    change_lines.append(f"{name}:{p:,.0f}")
+                    obs_tag = " [观测]" if name in ('标普500','纳斯达克') else ""
+                    change_lines.append(f"{name}:{p:,.0f}{obs_tag}")
     except Exception:
         pass
     
@@ -186,11 +187,11 @@ try:
     
     if dual_closed:
         cpi_mom_str = f"{'已改善' if cpi_mom > 0.2 else '需继续'}"
-        w.write(doc_id, [('bold', f"LDS: 不开新仓，只研究 | 转绿需: CPI≥1.0% + 3月动量>{cpi_mom_str} + 趋势≥温")])
+        w.write(doc_id, [('bold', f"LDS: 不开新仓 | 转绿需 CPI≥1.0% + 3月动量{cpi_mom_str} + 趋势≥温")])
     else:
         w.write(doc_id, [('bold', f"LDS: 可操作 | 单票≤2% | 四重确认入场")])
 
-    # 谁在赢 — 今日领涨/领跌
+    # 谁在赢 — 价格信仰
     try:
         leaders = []
         laggards = []
@@ -198,8 +199,7 @@ try:
             if not str(code).isdigit(): continue
             pd_info = prices.get(code, {})
             chg = pd_info.get('chg')
-            price = pd_info.get('price')
-            if chg is None or price is None: continue
+            if chg is None: continue
             if chg > 3: leaders.append((info.get('name', code), code, chg))
             elif chg < -3: laggards.append((info.get('name', code), code, chg))
         leaders.sort(key=lambda x: -x[2])
@@ -207,11 +207,18 @@ try:
         if leaders or laggards:
             w.write(doc_id, [('bold', '🎯 谁在赢 — 价格是最贵的信号')])
             if leaders:
-                w.write(doc_id, [('bullet', '🔥 领涨: ' + '  '.join(f"**{n}**({c})+{chg:.1f}%" for n,c,chg in leaders[:5]))])
+                w.write(doc_id, [('bullet', '🔥 领涨: ' + ' | '.join(f"**{n}**({c})+{chg:.1f}%" for n,c,chg in leaders[:5]))])
             if laggards:
-                w.write(doc_id, [('bullet', '❄️ 领跌: ' + '  '.join(f"**{n}**({c}){chg:.1f}%" for n,c,chg in laggards[:3]))])
+                w.write(doc_id, [('bullet', '❄️ 领跌: ' + ' | '.join(f"**{n}**({c}){chg:.1f}%" for n,c,chg in laggards[:3]))])
+            # 低共识+强趋势 狩猎场
+            hunting = [(n,c,chg) for n,c,chg in leaders if abs(chg) > 3 and abs(chg) < 8]
+            if hunting:
+                w.write(doc_id, [('bullet', f"📊 低共识+强趋势候选: {' | '.join(f'{n}({c})' for n,c,_ in hunting[:3])}")])
     except Exception:
         pass
+
+    # 前瞻 — 转绿后第一优先级
+    w.write(doc_id, [('text', '等待扫描完成后确定 — 基于六因子综合评分，四重确认全部通过后按排名建仓')])
 
     log("Panel done")
 
@@ -380,7 +387,21 @@ try:
                 pass
 
         if scan_status == "complete":
-            w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} 综合排名')])
+            # 信号质量评估
+            top_scores = [s.get('score', 0) for s in scan_results[:10]]
+            score_range = max(top_scores) - min(top_scores) if top_scores else 0
+            avg_score = sum(top_scores) / len(top_scores) if top_scores else 0
+            if score_range < 1.5 and avg_score < 6.5:
+                quality = "⚠️ 偏低"
+                quality_note = f"分数集中({min(top_scores):.1f}-{max(top_scores):.1f})，因子区分度不足，等待更强信号"
+            elif avg_score >= 6.5:
+                quality = "✅ 良好"
+                quality_note = f"均分{avg_score:.1f}，信号可靠"
+            else:
+                quality = "→ 一般"
+                quality_note = f"均分{avg_score:.1f}，区间{score_range:.1f}"
+            
+            w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} | 信号质量: {quality} — {quality_note}')])
             for rank, s in enumerate(scan_results[:10], 1):
                 name = s.get("name", s.get("symbol", "?"))
                 sym = s.get("symbol", "?")
@@ -466,6 +487,12 @@ try:
                 ])
         else:
             w.write(doc_id, [('text', '⏳ 扫描数据不足，无法执行四重确认')])
+
+        # 转绿后第一优先级
+        if top3 and dual_closed:
+            top_pick = top3[0]
+            w.write(doc_id, [('bold', f"📌 转绿后第一优先级: {top_pick.get('name','?')}({top_pick.get('symbol','?')}) {top_pick.get('score',0):.1f}分")])
+            w.write(doc_id, [('text', f"需满足四重确认全部通过 → 首批50%仓位 | 单票≤2% | 止损-8%")])
 
     # ─── 模拟盘建仓/清仓（六因子评分驱动 + 组合风控）───
     log("Shadow entry/exit engine...")
