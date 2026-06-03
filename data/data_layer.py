@@ -19,14 +19,36 @@ logger = logging.getLogger(__name__)
 # ─── Baostock 连接管理 ───
 _bs_logged_in = False
 
+def _bs_logout(force_close=True):
+    """注销并重置baostock连接，修复死socket问题"""
+    global _bs_logged_in
+    try:
+        import baostock.common.context as _bs_ctx
+        if hasattr(_bs_ctx, "default_socket"):
+            _sock = getattr(_bs_ctx, "default_socket")
+            if _sock is not None:
+                try:
+                    _sock.close()
+                except OSError:
+                    pass
+        # 清除全局socket引用
+        setattr(_bs_ctx, "default_socket", None)
+    except Exception:
+        pass
+    _bs_logged_in = False
+
 def _bs_login():
     global _bs_logged_in
     if not _bs_logged_in:
-        lg = bs.login()
-        if lg.error_code == "0":
-            _bs_logged_in = True
-        else:
-            print(f"[data] baostock login failed: {lg.error_msg}")
+        try:
+            lg = bs.login()
+            if lg.error_code == "0":
+                _bs_logged_in = True
+            else:
+                print(f"[data] baostock login failed: {lg.error_msg}")
+        except Exception as e:
+            print(f"[data] baostock login exception: {e}")
+            _bs_logged_in = False
 
 def _bs_code(symbol: str) -> str:
     """转换为baostock代码: sz.300502 / sh.600519"""
@@ -149,6 +171,7 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
         return df
     except Exception as e:
         print(f"[data] {symbol} baostock失败({e})，切AKShare回退")
+        _bs_logout()  # 重置连接，下次重连
         return _get_stock_daily_akshare(symbol, days)
 
 
