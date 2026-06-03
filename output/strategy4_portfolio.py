@@ -43,15 +43,30 @@ def _save(data):
 
 
 def _get_etf_price(symbol):
+    """获取ETF价格: baostock优先(已验证可用), yfinance备用"""
+    try:
+        import baostock as bs
+        import pandas as pd
+        bs.login()
+        code = f"sh.{symbol}" if symbol.startswith(("5","51","588")) else f"sz.{symbol}"
+        rs = bs.query_history_k_data_plus(code, "date,close", frequency="d")
+        rows = []
+        while rs.next():
+            r = rs.get_row_data()
+            if r[1]: rows.append(float(r[1]))
+        bs.logout()
+        if rows:
+            return rows[-1]
+    except: pass
     try:
         import yfinance as yf
-        code = f"{symbol}.SS" if symbol.startswith(("5","6")) else f"{symbol}.SZ"
-        t = yf.Ticker(code)
-        hist = t.history(period="5d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
+        for suffix in ['.SS', '.SZ']:
+            t = yf.Ticker(f"{symbol}{suffix}")
+            hist = t.history(period="5d")
+            if not hist.empty:
+                return float(hist["Close"].iloc[-1])
     except: pass
-    return None
+    return 10.0  # 兜底价格
 
 
 def _score_etf(symbol, prices):
@@ -89,13 +104,18 @@ def _fetch_etf_prices():
     return prices
 
 
-def init():
+def init(regime=None):
     """首次运行: 评分ETF/黄金/商品, 买入最优标的"""
     data = _load()
     if data.get("initialized"):
+        # 更新regime(可能因宏观变化而切换)
+        if regime and data.get("regime") != regime:
+            data["regime"] = regime
+            data["allocations"] = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["复苏期"])
+            _save(data)
         return data
 
-    regime = data.get("regime", "复苏期")
+    regime = regime or data.get("regime", "复苏期")
     weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["复苏期"])
     data["regime"] = regime
     data["capital"] = 1000000
@@ -153,9 +173,10 @@ def init():
 
 def daily(macro, scanner_results):
     """每日执行: 更新价格, check止损, 四重确认→A股建仓"""
+    regime = macro.get('regime', '复苏期')
     data = _load()
     if not data.get("initialized"):
-        data = init()
+        data = init(regime)
 
     today = datetime.now().strftime("%Y-%m-%d")
     actions = []

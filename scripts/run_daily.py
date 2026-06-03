@@ -632,7 +632,7 @@ try:
     w.write(doc_id, [('divider', ''), ('h2', '💼 4. 策略四多资产模拟盘')])
     try:
         from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
-        _s4_init()
+        _s4_init(regime)
         _s4_daily(macro, scan_results if scan_results else [])
         snap = _s4_snap()
 
