@@ -64,6 +64,21 @@ try:
 
     scanner = FactorScanner()
     scanner.macro = macro_engine
+    
+    # 动态宇宙: 全市场筛选替代固定LDS_SECTORS
+    try:
+        from investment_system.analysis.universe_builder import build_daily_scan_plan
+        scan_plan = build_daily_scan_plan()
+        dynamic_pool = list(set(scan_plan.get('research_universe', []) + scan_plan.get('buy_universe_codes', [])))
+        buy_pool = scan_plan.get('buy_universe_codes', [])
+        log(f"Dynamic universe: research={len(scan_plan.get('research_universe',[]))} buy={len(buy_pool)} total={len(dynamic_pool)}")
+        if dynamic_pool:
+            scanner._dynamic_universe = dynamic_pool
+    except Exception as e:
+        log(f"Dynamic universe failed ({e}), fallback to LDS_SECTORS")
+        dynamic_pool = []
+        buy_pool = []
+    
     log("Scanner ready")
     stock_context = []
     try:
