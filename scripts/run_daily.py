@@ -431,6 +431,42 @@ try:
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
 
+    # ═══ Nick四问 + 四重确认 — 对扫描TOP3做深度分析 ═══
+    if scan_results and scan_status == "complete":
+        w.write(doc_id, [('divider', ''), ('h2', '🔬 Nick四问 + 四重确认 — 入场审核')])
+        top3 = [s for s in scan_results[:3] if s.get('score', 0) > 0]
+        if top3:
+            for rank, s in enumerate(top3, 1):
+                sym = s.get('symbol', '?')
+                name = s.get('name', sym)
+                score = s.get('score', 0)
+                chain = s.get('sector', '?')
+                chg = s.get('change_pct') or 0
+                roe = s.get('roe')
+                pe_pct = s.get('pe_percentile')
+
+                # Nick四问
+                q1 = "✅ 扫描TOP{0}".format(rank) if score >= 5 else "⚠️ 分数偏低"
+                q2 = "✅" if chg > 0 else ("⚠️ 下跌" if chg < -2 else "→ 平稳")
+                q3_score = sum(1 for rd in flagged if rd[1] == sym) if 'flagged' in dir() else 0
+                q3 = "🔴 高共识" if abs(chg) >= 5 else ("🟡 有信号" if q3_score > 0 else "🟢 无异常共识")
+                q4 = "⚠️ 偏MA60" if s.get('ma60_dev', 0) > 40 else "✅"
+
+                # 四重确认
+                check_macro = "❌ CPI<1%" if isinstance(cpi, (int,float)) and cpi < 1.0 else "✅"
+                check_trend = "✅" if trend_temp in ('温','热') else ("⚠️ 平" if trend_temp == '平' else "❌")
+                check_logic = "✅" if chain and chain not in ('?','') else "⚠️"
+                check_tech = "✅" if score >= 5 else "⚠️"
+                passes = sum(1 for c in [check_macro, check_trend, check_logic, check_tech] if c.startswith('✅'))
+                
+                w.write(doc_id, [
+                    ('bold', f"#{rank} {name}({sym}) {score:.1f}分 | {chain}"),
+                    ('text', f"  Q1紧迫度:{q1} | Q2趋势:{q2} | Q3共识:{q3} | Q4拥挤度:{q4}"),
+                    ('text', f"  四重确认: 宏观{check_macro} 趋势{check_trend} 逻辑{check_logic} 技术{check_tech} → {'✅通过' if passes==4 else f'⚠️ {passes}/4 不通过'}"),
+                ])
+        else:
+            w.write(doc_id, [('text', '⏳ 扫描数据不足，无法执行四重确认')])
+
     # ─── 模拟盘建仓/清仓（六因子评分驱动 + 组合风控）───
     log("Shadow entry/exit engine...")
     try:
