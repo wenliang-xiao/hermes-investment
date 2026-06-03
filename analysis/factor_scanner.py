@@ -472,6 +472,7 @@ class FactorScanner:
 
         today = str(date.today())
         progress = self._load_scanner_progress(progress_file)
+        max_scan = getattr(self, "MAX_SCAN", 30)
         stale = progress is None or progress.get("date") != today
 
         # 全完成 → 直接返回
@@ -481,12 +482,17 @@ class FactorScanner:
             self._rm_progress(progress_file)
             return results[:top_n], "complete"
 
+        # MAX_SCAN变更 → 重建（防止测试报污染生产）
+        if progress and progress.get("date") == today and len(progress.get("universe", [])) != max_scan:
+            print(f"[scanner] MAX_SCAN变更 {len(progress['universe'])}→{max_scan}，重建universe")
+            stale = True
+
         # 过期或新扫描 → 重建universe
         if stale:
             regime = self.macro.regime if self.macro and hasattr(self.macro, 'regime') else "default"
             favored = MACRO_TO_SECTORS.get(regime, MACRO_TO_SECTORS["default"])
             universe, seen = [], set()
-            max_scan = getattr(self, "MAX_SCAN", 30)
+            # max_scan already set above
 
             for sec in favored:
                 cnt = 0
@@ -598,22 +604,19 @@ class FactorScanner:
         return scored
 
     def _get_stock_name(self, symbol: str) -> str:
-        """获取股票名称（带缓存）"""
+        """获取股票名称（带缓存） — 经data_layer路由，保证baostock连接有效"""
         if symbol in self._cache:
             return self._cache[symbol]
         try:
-            import baostock as bs
-            bs_code = f"sz.{symbol.zfill(6)}" if not symbol.startswith("6") else f"sh.{symbol.zfill(6)}"
-            rs = bs.query_stock_basic(code=bs_code)
-            if rs.error_code == "0":
-                while rs.next():
-                    r = rs.get_row_data()
-                    name = r[1] if len(r) > 1 else ""
-                    self._cache[symbol] = name
-                    return name
+            from investment_system.data.data_layer import get_stock_info
+            info = get_stock_info(symbol)
+            name = info.get("name", "")
+            if name and name != symbol:
+                self._cache[symbol] = name
+                return name
         except:
             pass
-        return ""
+        return symbol
 
     @staticmethod
     def _baostock_code(symbol: str) -> str:

@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""
+Patched daily report - skips slow ETF section, continues from the existing doc.
+"""
+import sys, time, json, os, traceback
+sys.path.insert(0, '/home/admin/.hermes')
+import investment_system.output.report_v6 as rpt
+from investment_system.analysis.news_engine import get_news_with_impact
+from investment_system.data.yf_data_layer import get_global_market_snapshot
+from investment_system.data.data_layer import get_northbound_flow
+
+LF = '/tmp/report_daily_log.txt'
+def log(msg):
+    with open(LF, 'a') as f:
+        f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+
+# Reuse the doc that was already created
+doc_id = "AxKSd71tho0KlcxJbA6cnZqonSb"
+session = "开盘前"
+
+try:
+    # Restore variables from the first run
+    macro_engine = rpt.MacroEngine()
+    macro = macro_engine.refresh()
+    
+    from investment_system import config as cfg_sys
+    regime = macro.get('regime', 'default')
+    rotation = cfg_sys.MACRO_SECTOR_ROTATION.get(regime, cfg_sys.MACRO_SECTOR_ROTATION['default'])
+    macro['favored_sectors'] = rotation['favored']
+    macro['avoided_sectors'] = rotation.get('unfavorabled', [])
+    
+    from investment_system.output.full_asset_scanner import determine_bridgewater_quadrant
+    bw = determine_bridgewater_quadrant(macro.get('macro_data', {}))
+    bw_q = bw.get('current_quadrant', '') if isinstance(bw, dict) else ''
+    dual_open = not (macro.get('dual_gate', {}).get('macro_gate') in ('红灯', '黄灯') and
+                     macro.get('dual_gate', {}).get('trend_gate') in ('红灯', '黄灯'))
+    
+    from investment_system.output.fund_tracker import track_lds_portfolio_v2
+    lds = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
+    
+    cpi = macro.get('macro_data', {}).get('cpi', '?')
+    trend_temp = macro.get('trend_temp', '?')
+    dual_gate = macro.get('dual_gate', {})
+    macro_gate = dual_gate.get('macro_gate', '?')
+    trend_gate = dual_gate.get('trend_gate', '?')
+    action = dual_gate.get('action', '?')
+    favored = macro.get('favored_sectors', [])
+    dual_closed = macro_gate in ("红灯", "黄灯") and trend_gate in ("红灯", "黄灯")
+    
+    w = rpt.FeishuWriter()
+    
+    # ─── ETF/债券组合推荐（简化版，不逐个抓取ETF数据）───
+    log("Writing ETF section (simplified)...")
+    w.write(doc_id, [('divider', ''), ('h2', '📦 四、ETF/债券组合推荐')])
+    w.write(doc_id, [('text', f"宏观象限: {regime} | CPI={cpi}% | 趋势={trend_temp} | 双门{'关闭→观望' if dual_closed else '开启→可操作'}")])
+    
+    # Non-timing portfolio
+    w.write(doc_id, [('h3', '💼 非择时组合（定投版）')])
+    if regime in ('复苏期', 'default'):
+        dca = [
+            (25, "红利低波ETF", "512890", "复苏期红利低波>纯红利"),
+            (30, "纳指100ETF", "513100", "全球科技龙头，QDII核心配置"),
+            (15, "政金债券ETF", "511520", "CPI<1%通缩，债券提供防御"),
+            (15, "创业板ETF", "159915", "A股成长动量"),
+            (15, "豆粕ETF", "159985", "与股债低相关，对冲作用"),
+        ]
+    elif regime == "扩张期":
+        dca = [(20, "半导体ETF", "512480", "扩张期科技最强"), (30, "纳指100ETF", "513100", "全球科技龙头"), (15, "中证500ETF", "510500", "中小盘弹性"), (15, "创业板ETF", "159915", "成长动量"), (10, "政金债券ETF", "511520", "防守底仓"), (10, "黄金ETF", "518880", "通胀对冲")]
+    elif regime == "过热期":
+        dca = [(20, "红利低波ETF", "512890", "过热期防御首选"), (25, "黄金ETF", "518880", "实际利率下行受益"), (15, "豆粕ETF", "159985", "商品上行"), (15, "纳指100ETF", "513100", "核心QDII仓位维持"), (15, "政金债券ETF", "511520", "防御底仓"), (10, "公用事业ETF", "XLU", "防守型资产")]
+    elif regime == "衰退期":
+        dca = [(30, "政金债券ETF", "511520", "衰退期债券王者"), (20, "30年国债ETF", "—", "长久期债弹性最大"), (15, "红利低波ETF", "512890", "红利防御属性"), (15, "黄金ETF", "518880", "避险需求"), (10, "纳指100ETF", "513100", "维持QDII底仓"), (10, "货币/短债", "—", "流动性保留")]
+    
+    for pct, name, code, logic in dca:
+        code_disp = code or "?"
+        w.write(doc_id, [('bullet', f"**{name}**({code_disp}) {pct}% | {logic}")])
+    w.write(doc_id, [('text', "📋 月度再平衡标准: 单品类偏离>5%触发调回。总计100%。")])
+    
+    # Timing portfolio
+    w.write(doc_id, [('h3', '🎯 择时组合（主动版）')])
+    max_pos = 40 if dual_closed else 80
+    w.write(doc_id, [('bold', f"{'🔒 双门关闭 → 仓位上限40%，观望为主。' if dual_closed else '✅ 双门开启 → 仓位上限80%，正常操作。'}")])
+    
+    if dual_closed:
+        timing = [(12, "政金债券ETF", "511520", "防御底仓"), (10, "纳指100ETF", "513100", "QDII核心"), (10, "创业板ETF", "159915", "减仓持有"), (8, "红利低波ETF", "512890", "防御配置")]
+    else:
+        timing = [(20, "半导体ETF", "512480", "科技强动量"), (20, "创业板ETF", "159915", "成长龙头"), (20, "纳指100ETF", "513100", "QDII核心"), (15, "政金债券ETF", "511520", "防御底仓"), (10, "红利低波ETF", "512890", "复苏期红利"), (15, "中证500ETF", "510500", "中小盘弹性")]
+    
+    total_pct = sum(x[0] for x in timing)
+    for pct, name, code, logic in timing:
+        w.write(doc_id, [('bullet', f"**{name}**({code}) {pct}%/{max_pos}% max | {logic}")])
+    w.write(doc_id, [('text', f"总仓位: {total_pct}%/{max_pos}% max | 剩余{max_pos-total_pct}%仓位保留现金/短债")])
+    w.write(doc_id, [('text', "操作纪律: 跌破20日均线减半仓; 双门变绿灯加满至80%; 北向持续流出>30亿不加仓")])
+    
+    log("ETF portfolio done (simplified)")
+    
+    # ─── 板块4: 链路摘要Hook ───
+    SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
+    chain_summary = None
+    try:
+        if os.path.exists(SUMMARY_PATH):
+            with open(SUMMARY_PATH) as f:
+                chain_summary = json.load(f)
+    except Exception:
+        pass
+    
+    w.write(doc_id, [('divider', ''), ('h2', '🔗 五、链路摘要')])
+    
+    if chain_summary:
+        generated_at = chain_summary.get('generated_at', '?')
+        weekly_url = chain_summary.get('doc_url', '')
+        w.write(doc_id, [('quote', f"数据来源：周报 {generated_at} | 点击查看完整研究")])
+        if weekly_url:
+            w.write(doc_id, [('bullet', f"📊 完整周报: {weekly_url}")])
+        chains_data = chain_summary.get('chains', {})
+        w.write(doc_id, [('bold', f"本周链状态（{len(chains_data)}条链）：")])
+        for chain_name, cdata in chains_data.items():
+            gap_dir = cdata.get('gap_direction', '')
+            perez = cdata.get('perez_stage', '')
+            is_cond = cdata.get('is_conditional', False)
+            cond_tag = "⚡条件触发" if is_cond else ""
+            w.write(doc_id, [('bullet', f"{cond_tag}**{chain_name}**: {perez[:25]} | 缺口:{gap_dir[:20]}")])
+        candidates = chain_summary.get('candidates', [])
+        if candidates:
+            w.write(doc_id, [('bold', f"🎯 本周候选 ({len(candidates)}只)：")])
+            for c in candidates:
+                price_str = f"¥{c.get('price',0):.2f}" if c.get('price') else "?"
+                reasons = "、".join(c.get("entry_reasons", [])[:2])
+                w.write(doc_id, [('bullet', f"**{c['name']}**({c['symbol']}) {price_str} | {c['chain']} | {reasons}")])
+    else:
+        w.write(doc_id, [('text', "⏳ 周报尚未运行 → 展示产业链基本面摘要（链定义数据）")])
+        try:
+            from investment_system.domain import OPPORTUNITY_THEMES, INDUSTRY_CHAINS, WATCHLIST
+            chain_stocks = {}
+            for code, info in WATCHLIST.items():
+                c = info.get("chain", "")
+                if c: chain_stocks.setdefault(c, []).append(info["name"])
+            theme_items = []
+            for tn, td in sorted(OPPORTUNITY_THEMES.items(), key=lambda x: len(x[1].get("key_catalysts",[])), reverse=True)[:4]:
+                stage = td.get("perez_stage", "")
+                logic = td.get("logic", "")[:60]
+                catalysts = " / ".join(td.get("key_catalysts", [])[:3])
+                theme_items.append(f"**{tn}**【{stage}】{logic}… | 催化: {catalysts}")
+            if theme_items:
+                w.write(doc_id, [('bold', '🏭 机会主题（面基概念链）')])
+                for ti in theme_items:
+                    w.write(doc_id, [('bullet', ti)])
+            chain_items = []
+            for cn, cd in INDUSTRY_CHAINS.items():
+                desc = cd.get("description", "")[:80]
+                perez = cd.get("perez_stage", "")
+                chain_items.append(f"**{cn}** | {perez} | {desc}")
+            if chain_items:
+                w.write(doc_id, [('bold', '🔬 产业链核心追踪')])
+                for ci in chain_items[:12]:
+                    w.write(doc_id, [('bullet', ci)])
+                w.write(doc_id, [('text', '→ 完整研究请等待本周周报运行')])
+        except Exception as e:
+            w.write(doc_id, [('bullet', f"⚠️ 链定义加载失败: {str(e)[:60]}")])
+    log("Chain hooks done")
+    
+    # ─── 板块5: 今日情报 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 六、今日情报')])
+    w.write(doc_id, [('quote', '查询观察池异动及市场情报...')])
+    
+    try:
+        news_list, summary_text = get_news_with_impact(window_days=1, stock_context=None)
+    except Exception:
+        news_list, summary_text = [], ""
+    
+    if summary_text and len(summary_text.strip()) > 50:
+        w.write(doc_id, [('bold', '📡 市场情报（AI分析）')])
+        import re as _re
+        clean_lines = []
+        for line in summary_text.strip().split('\n')[:15]:
+            line = line.strip()
+            line = _re.sub(r'^#{1,4}\s*', '', line)
+            line = _re.sub(r'^>\s*', '', line)
+            if '情绪得分' in line or '利好0' in line or '利空0' in line: continue
+            if line: clean_lines.append(line[:250])
+        for line in clean_lines:
+            w.write(doc_id, [('bullet', line)])
+    elif news_list:
+        w.write(doc_id, [('bold', '📡 今日快讯')])
+        for n in sorted(news_list, key=lambda x: len(x.get('impacts', [])), reverse=True)[:5]:
+            title = n.get('title', '')
+            if not title or len(title) < 10: continue
+            impacts = n.get('impacts', [])
+            imp_str = ' '.join(f"[{i['chain']}]{i['direction']}" for i in impacts[:2]) if impacts else ''
+            w.write(doc_id, [('bullet', f"{title[:100]}{' → '+imp_str if imp_str else ''}")])
+    try:
+        from investment_system.analysis.news_engine import _calc_sentiment_score, classify_impact
+        nl = classify_impact(news_list[:20]) if news_list else []
+        sent = _calc_sentiment_score(nl)
+        w.write(doc_id, [('bullet', f"市场情绪: {sent.get('overall','?')} | 利好{sent.get('bullish',0)}条 利空{sent.get('bearish',0)}条")])
+    except Exception:
+        pass
+    log("News done")
+    
+    # ─── 板块6: 调仓建议 ───
+    rpt.build_action_section(w, doc_id, macro, section_prefix="七")
+    w.write(doc_id, [('h3', '🎯 今日具体行动')])
+    if dual_closed:
+        w.write(doc_id, [('bullet', '🔒 双门关闭，不开新仓。持有票检查trailing stop。')])
+        w.write(doc_id, [('bullet', f"⏰ 转绿条件: CPI≥1.5%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})")])
+    else:
+        w.write(doc_id, [('bullet', f"✅ 双门开启 → 正常操作。优先进攻方向: {'/'.join(favored[:3] or ['均衡'])}")])
+    try:
+        nb = get_northbound_flow()
+        if nb.get('data_ok'):
+            nb_net = nb.get('today_net', 0)
+            if dual_closed:
+                w.write(doc_id, [('bullet', f"💨 北向资金{nb_net:+.1f}亿 → 与双门信号一致，不做任何加仓")])
+            elif nb_net > 30:
+                w.write(doc_id, [('bullet', f"🟢 北向大幅流入{nb_net:+.1f}亿，与双门信号共振 → 积极关注")])
+    except Exception:
+        pass
+    log("Action done")
+    
+    doc_url = f"https://bytedance.feishu.cn/docx/{doc_id}"
+    log(f"URL: {doc_url}")
+    print(f"✅ 面基三源融合日报 {session} 已生成")
+    print(f"📄 飞书文档: {doc_url}")
+
+except Exception as e:
+    log(f"FATAL: {e}")
+    log(traceback.format_exc())
+    doc_url = f"https://bytedance.feishu.cn/docx/AxKSd71tho0KlcxJbA6cnZqonSb"
+    print(f"⚠️ 日报续写失败: {e}")
+    print(f"📄 部分内容已在: {doc_url}")
