@@ -2066,7 +2066,7 @@ def build_etf_portfolio_section(w, doc_id, macro=None, dual_closed=True, session
     cpi = macro.get("macro_data", {}).get("cpi", "?") if macro else "?"
     trend_temp = macro.get("trend_temp", "?") if macro else "?"
 
-    w.write(doc_id, [("divider", ""), ("h2", "📦 四、ETF/债券组合推荐")])
+    w.write(doc_id, [("divider", ""), ("h2", "📦 6. ETF/债券组合推荐")])
     w.write(doc_id, [("text", f"宏观象限: {regime} | CPI={cpi}% | 趋势={trend_temp} | 双门{'关闭→观望' if dual_closed else '开启→可操作'}")])
     w.write(doc_id, [("text", w.ref("二、ETF全景（三维数据驱动 + LDS组合对照）"))])
 

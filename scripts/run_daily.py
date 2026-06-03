@@ -143,84 +143,65 @@ try:
     trend_icon = "🔴" if trend_gate in ("红灯","黄灯") else "🟢"
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
-    # ═══ HEADER: 实事求是 三层嵌套 ═══
+    # ═══════════════════════════════════════════════
+    #  面基·LDS·桥水 三源融合量化投研日报
+    # ═══════════════════════════════════════════════
     lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位，精选标的" if macro_gate=="黄灯" else "正常操作")
+    
+    # ── 0. 决策摘要 ──
     w.write(doc_id, [
-        ('bold', f"🔒 双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% 3月动量{cpi_mom:+.2f}% | 趋势{trend_temp} | 国运线偏离{guoyun_dev}%"),
-        ('text', f"LDS: 「宏观{'偏空' if macro_gate in ('红灯','黄灯') else '正常'}+趋势{trend_temp}→{lds_judgment}」"),
-        ('divider', ''),
+        ('h2', '0. 决策摘要'),
+        ('bold', f"双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% | 趋势{trend_temp} | 国运线{guoyun_dev}%"),
+        ('text', f"LDS判断: {lds_judgment}"),
     ])
-
-    # ═══ 一、实事求是 + 谁在赢 + 前瞻 ═══
-    w.write(doc_id, [('h2', '一、⚡ 实事求是 — 今日变化')])
+    if dual_closed:
+        w.write(doc_id, [('text', f"转绿条件: CPI≥1.0%(当前{cpi}%) + 3月动量{cpi_mom:+.2f}%{'✅' if cpi_mom>0.2 else ''} + 趋势≥温(当前{trend_temp})")])
     
-    change_lines = []
-    if isinstance(cpi, (int, float)) and cpi < 1.0:
-        change_lines.append(f"CPI={cpi}% 通缩中 | 3月动量{cpi_mom:+.2f}% {'✅边际改善' if cpi_mom > 0.2 else '→持续观察'}")
+    # ── 1. 宏观气候 ──
+    w.write(doc_id, [('h2', '1. 宏观气候')])
+    w.write(doc_id, [('bold', f'1.1 货币-信用象限: {regime} → {bw_name}')])
+    w.write(doc_id, [('text', f'Shibor={macro.get("macro_data",{}).get("shibor","?")}% | 社融/M2增速={macro.get("macro_data",{}).get("m2_growth","?")}% | 偏好: {"/".join(favored[:3])}')])
+    w.write(doc_id, [('bold', f'1.2 CPI驱动: {cpi}% | 3月动量{cpi_mom:+.2f}%')])
+    w.write(doc_id, [('bold', f'1.3 趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%')])
     
+    # 全球市场
     try:
         snap = get_global_market_snapshot()
         idx_data = snap.get('indices', {})
+        mkts = []
         for name in ['标普500', '纳斯达克', '恒生']:
             d = idx_data.get(name)
             if d:
                 p = d.get('price') if isinstance(d, dict) else d
-                if p:
-                    obs_tag = " [观测]" if name in ('标普500','纳斯达克') else ""
-                    change_lines.append(f"{name}:{p:,.0f}{obs_tag}")
-    except Exception:
-        pass
+                tag = '[观测]' if name in ('标普500','纳斯达克') else ''
+                if p: mkts.append(f'{name}:{p:,.0f}{tag}')
+        if mkts: w.write(doc_id, [('text', f'1.4 全球市场: {" | ".join(mkts)}')])
+    except: pass
     
     try:
         nb = get_northbound_flow()
         if nb.get('data_ok'):
-            nb_net = nb.get('today_net', 0)
-            nb_5d = nb.get('5d_cumulative', 0)
-            change_lines.append(f"北向资金: {nb_net:+.1f}亿 (5日{nb_5d:+.1f}亿)")
-    except Exception:
-        pass
+            w.write(doc_id, [('text', f'1.5 北向资金: {nb.get("today_net",0):+.1f}亿 (5日{nb.get("5d_cumulative",0):+.1f}亿)')])
+    except: pass
     
-    change_lines.append(f"LDS全天候: 今日{_fmt(lds.get('portfolio_ret_1d'))} | YTD{_fmt(lds.get('portfolio_ytd'))}")
-    
-    for line in change_lines:
-        w.write(doc_id, [('bullet', line)])
-    
+    w.write(doc_id, [('text', f'1.6 LDS全天候: 今日{_fmt(lds.get("portfolio_ret_1d"))} | YTD{_fmt(lds.get("portfolio_ytd"))}')])
+
+    # ── 2. 资产配置 ──
+    w.write(doc_id, [('h2', '2. 资产配置')])
+    w.write(doc_id, [('bold', f'2.1 策略四 {regime}配比')])
+    s4_w = macro.get('strategy4_weights', {})
+    if not s4_w:
+        try:
+            from investment_system.analysis.backtest import STRATEGY4_QUADRANT_WEIGHTS
+            s4_w = STRATEGY4_QUADRANT_WEIGHTS.get(regime, STRATEGY4_QUADRANT_WEIGHTS.get("default", {}))
+        except: s4_w = {}
+    parts = []
+    for k, v in s4_w.items():
+        label = {'a_share':'A股','stock_etf':'股票ETF','bond_etf':'债券ETF','commodity_etf':'商品ETF','us_stock':'美股[观测]','hk_stock':'港股'}.get(k,k)
+        parts.append(f'{label} {v:.0%}')
+    if parts: w.write(doc_id, [('text', ' | '.join(parts))])
     if dual_closed:
-        cpi_mom_str = f"{'已改善' if cpi_mom > 0.2 else '需继续'}"
-        w.write(doc_id, [('bold', f"LDS: 不开新仓 | 转绿需 CPI≥1.0% + 3月动量{cpi_mom_str} + 趋势≥温")])
-    else:
-        w.write(doc_id, [('bold', f"LDS: 可操作 | 单票≤2% | 四重确认入场")])
-
-    # 谁在赢 — 价格信仰
-    try:
-        leaders = []
-        laggards = []
-        for code, info in WATCHLIST.items():
-            if not str(code).isdigit(): continue
-            pd_info = prices.get(code, {})
-            chg = pd_info.get('chg')
-            if chg is None: continue
-            if chg > 3: leaders.append((info.get('name', code), code, chg))
-            elif chg < -3: laggards.append((info.get('name', code), code, chg))
-        leaders.sort(key=lambda x: -x[2])
-        laggards.sort(key=lambda x: x[2])
-        if leaders or laggards:
-            w.write(doc_id, [('bold', '🎯 谁在赢 — 价格是最贵的信号')])
-            if leaders:
-                w.write(doc_id, [('bullet', '🔥 领涨: ' + ' | '.join(f"**{n}**({c})+{chg:.1f}%" for n,c,chg in leaders[:5]))])
-            if laggards:
-                w.write(doc_id, [('bullet', '❄️ 领跌: ' + ' | '.join(f"**{n}**({c}){chg:.1f}%" for n,c,chg in laggards[:3]))])
-            # 低共识+强趋势 狩猎场
-            hunting = [(n,c,chg) for n,c,chg in leaders if abs(chg) > 3 and abs(chg) < 8]
-            if hunting:
-                w.write(doc_id, [('bullet', f"📊 低共识+强趋势候选: {' | '.join(f'{n}({c})' for n,c,_ in hunting[:3])}")])
-    except Exception:
-        pass
-
-    # 前瞻 — 转绿后第一优先级
-    w.write(doc_id, [('text', '等待扫描完成后确定 — 基于六因子综合评分，四重确认全部通过后按排名建仓')])
-
-    log("Panel done")
+        w.write(doc_id, [('text', f'2.2 仓位乘数: ×0.4(双门关闭) → 实际仓位上限40%')])
 
     # ─── 模拟盘风控：价格更新 + 自动止损 ───
     log("Shadow pre-check...")
@@ -255,8 +236,8 @@ try:
         pass
     log("Shadow pre-check done")
 
-    # ═══ 观察池信号 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '👁️ 三、观察池今日信号')])
+    # ═══ 3. 选股引擎: 观察池 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '👁️ 3. 观察池信号')])
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
 
     try:
@@ -353,8 +334,8 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
-    # ─── 板块3.5：今日扫描发现（跨cron分批续扫）───
-    w.write(doc_id, [('divider', ''), ('h2', '🔍 三点五、今日扫描发现')])
+    # ─── 3.5 今日扫描发现 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔍 3.5 扫描发现')])
     w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
     scan_results = []
     scan_status = ""
@@ -454,7 +435,7 @@ try:
 
     # ═══ Nick四问 + 四重确认 — 对扫描TOP3做深度分析 ═══
     if scan_results and scan_status == "complete":
-        w.write(doc_id, [('divider', ''), ('h2', '🔬 Nick四问 + 四重确认 — 入场审核')])
+        w.write(doc_id, [('divider', ''), ('h2', '🔬 3.6 Nick四问+四重确认')])
         top3 = [s for s in scan_results[:3] if s.get('score', 0) > 0]
         if top3:
             for rank, s in enumerate(top3, 1):
@@ -559,8 +540,8 @@ try:
         log(f"⚠️ Shadow entry/exit: {_e}")
     log("Shadow entry/exit done")
 
-    # ═══ 复利证明 G=E×P×F×T ═══
-    w.write(doc_id, [('divider', ''), ('h2', '💼 复利证明 — G=E×P×F×T')])
+    # ═══ 4. 盯盘监控: 模拟盘复利证明 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 模拟盘 — G=E×P×F×T')])
     try:
         metrics = _sa_metrics()
         edge_status = "✅ 有优势" if metrics["edge_active"] else "⏳ 等待四重确认通过"
@@ -583,8 +564,8 @@ try:
     except Exception:
         w.write(doc_id, [('text', '⏳ 模拟盘数据加载中...')])
 
-    # ═══ 国产替代追踪 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '🏭 国产替代追踪 — 脱钩时代的核心Alpha')])
+    # ═══ 5. 国产替代追踪 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '🏭 5. 国产替代追踪')])
     w.write(doc_id, [('text', '国产化率<30%=替代空间巨大 | 30-60%=加速期 | >60%=成熟期')])
     try:
         from investment_system.config import DOMESTIC_SUB_THEMES
@@ -604,8 +585,8 @@ try:
     rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed, session=session)
     log("ETF portfolio done")
 
-    # ─── 板块4：链路摘要Hook ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔗 五、链路摘要')])
+    # ─── 7. 链路摘要 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔗 7. 链路摘要')])
 
     SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
     chain_summary = None
@@ -714,8 +695,8 @@ try:
             ])
     log("Chain hooks done")
 
-    # ─── 板块5：今日情报（异动解读优先）───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 六、今日情报')])
+    # ─── 8. 情报摘要 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 8. 情报摘要')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -775,8 +756,8 @@ try:
         pass
     log("News done")
 
-    # ─── 板块6：调仓建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="七")
+    # ─── 9. 行动建议 ───
+    rpt.build_action_section(w, doc_id, macro, section_prefix="9")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
