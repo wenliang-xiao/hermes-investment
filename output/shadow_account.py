@@ -228,3 +228,74 @@ def clean_cooldown(max_days: int = 30):
     cutoff = (datetime.now() - timedelta(days=max_days)).strftime("%Y-%m-%d")
     book["cooldown"] = {k: v for k, v in cd.items() if v >= cutoff}
     save_shadow(book)
+
+
+# ═══ 策略四投资组合管理 ═══
+
+def init_portfolio(capital: float = 1000000.0) -> dict:
+    """初始化策略四投资组合。仅在 shadow_account.json 不存在时调用。"""
+    book = load_shadow()
+    if book.get("capital", 0) > 0 and book.get("initialized"):
+        return book
+    book["capital"] = capital
+    book["cash"] = capital
+    book["initialized"] = True
+    book["realized_pnl"] = 0.0
+    book["created_at"] = datetime.now().strftime("%Y-%m-%d")
+    book["positions"] = {}
+    book["history"] = []
+    save_shadow(book)
+    return book
+
+
+def get_portfolio_metrics() -> dict:
+    """计算 G=E×P×F×T 复利指标"""
+    book = load_shadow()
+    summary = get_shadow_summary()
+    capital = book.get("capital", 1000000)
+    cash = book.get("cash", capital)
+    total = summary.get("total_value", cash)
+
+    # E(Edge): 持仓中的总盈亏
+    unrealized = total - capital - book.get("realized_pnl", 0)
+    realized = book.get("realized_pnl", 0)
+    total_pnl = realized + unrealized
+    total_return = total_pnl / capital if capital else 0
+
+    # 胜率统计
+    history = book.get("history", [])
+    exited_trades = [h for h in history if h.get("action") in ("卖出", "减仓")]
+    wins = sum(1 for t in exited_trades if t.get("pnl", 0) > 0)
+    total_closed = len(exited_trades) or 1
+    win_rate = wins / total_closed
+
+    # P(Position): 当前仓位占比
+    position_pct = (total - cash) / total if total > 0 else 0
+
+    # F(Frequency): 交易次数
+    trade_count = len(exited_trades)
+
+    # T(Time): 存活天数
+    created = book.get("created_at", datetime.now().strftime("%Y-%m-%d"))
+    try:
+        days_alive = (datetime.now() - datetime.strptime(created, "%Y-%m-%d")).days
+    except:
+        days_alive = 0
+
+    return {
+        "capital": capital,
+        "cash": cash,
+        "total_value": total,
+        "unrealized_pnl": round(unrealized, 0),
+        "realized_pnl": round(realized, 0),
+        "total_pnl": round(total_pnl, 0),
+        "total_return": round(total_return * 100, 2),
+        "win_rate": round(win_rate * 100, 1),
+        "position_pct": round(position_pct * 100, 1),
+        "trade_count": trade_count,
+        "days_alive": days_alive,
+        "position_count": summary.get("count", 0),
+        "max_positions": 8,
+        "edge_active": unrealized > 0 or realized > 0,
+        "traversal_ok": total > capital * 0.75,  # 遍历性: 不爆仓
+    }

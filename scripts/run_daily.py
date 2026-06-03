@@ -120,99 +120,88 @@ try:
     doc_id = w.create_doc(f"面基·{label} {today_short}({weekday}) {now_time}")
     log(f"Doc: {doc_id}")
 
+    # ── 策略四模拟盘初始化 ──
+    try:
+        from investment_system.output.shadow_account import init_portfolio as _sa_init, get_portfolio_metrics as _sa_metrics
+        _sa_init(1000000)
+    except Exception:
+        pass
+
     dual_gate = macro.get('dual_gate', {})
     macro_gate = dual_gate.get('macro_gate', '?')
     trend_gate = dual_gate.get('trend_gate', '?')
     action = dual_gate.get('action', '?')
     cpi = macro.get('macro_data', {}).get('cpi', '?')
+    cpi_mom = macro.get('macro_data', {}).get('cpi_momentum_3m') or macro.get('macro_data', {}).get('cpi_delta', 0) or 0
     trend_temp = macro.get('trend_temp', '?')
     bw_name = bw.get('quadrant_name', '?') if isinstance(bw, dict) else '?'
     favored = macro.get('favored_sectors', [])
+    guoyun = macro.get('guoyun', {})
+    guoyun_dev = guoyun.get('deviation', '?')
 
     gate_icon = "🔴" if macro_gate in ("红灯","黄灯") else "🟢"
     trend_icon = "🔴" if trend_gate in ("红灯","黄灯") else "🟢"
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
+    # ═══ HEADER: 实事求是 三层嵌套 ═══
+    lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位，精选标的" if macro_gate=="黄灯" else "正常操作")
+    action_icon = "🔒" if dual_closed else "✅"
     w.write(doc_id, [
-        ('h1', f"{'🌅' if session == '开盘前' else '🌆'} 面基·{label} {today_short}({weekday}) {now_time}"),
+        ('bold', f" {action_icon} 双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% 3月动量{cpi_mom:+.2f}%"),
+        ('text', f"趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%{' | 建议仓位≤40%' if dual_closed else ''}"),
+        ('divider', ''),
+        ('text', f"短期(价格): 待加载 | 中期(共识): {regime}叙事 → {'/'.join(favored[:3])}偏好"),
+        ('text', f"长期(规律): 康波萧条期 → 追赶国红利 → 国产替代+军工"),
+        ('text', f"LDS判断: 「宏观{'偏空' if macro_gate in ('红灯','黄灯') else '正常'}+趋势{trend_temp}→{lds_judgment}」"),
         ('divider', ''),
     ])
 
-    # ─── 板块1：决策面板（30秒）───
-    w.write(doc_id, [('h2', '🚦 一、今日决策面板')])
-
-    if dual_closed:
-        w.write(doc_id, [('bold', f"🔒 双门关闭 → {action}")])
-    else:
-        w.write(doc_id, [('bold', f"✅ 双门开启 → {action}")])
-
-    w.write(doc_id, [
-        ('bullet', f"宏观门{gate_icon} {macro_gate} | 趋势门{trend_icon} {trend_gate} | 象限: {regime} → {bw_name}"),
-        ('bullet', f"CPI={cpi}% | 趋势温度={trend_temp} | 偏好: {' / '.join(favored[:3]) or '均衡'}"),
-    ])
-
+    # ═══ 一、实事求是 — 数据替代观点 ═══
+    w.write(doc_id, [('h2', '一、⚡ 实事求是 — 数据替代观点')])
+    
+    change_lines = []
+    if isinstance(cpi, (int, float)) and cpi < 1.0:
+        change_lines.append(f"CPI={cpi}% 通缩中 | 3月动量{cpi_mom:+.2f}% {'✅边际改善' if cpi_mom > 0.2 else '→需持续观察'}")
+    
     try:
         snap = get_global_market_snapshot()
         idx = snap.get('indices', {})
-        snap_parts = []
-        for name in ['标普500', '纳斯达克', '恒生', '沪深300']:
+        for name in ['标普500', '纳斯达克', '恒生']:
             d = idx.get(name)
             if d:
                 p = d.get('price') if isinstance(d, dict) else d
-                if p: snap_parts.append(f"{name}:{p:,.0f}")
-        bonds_s = snap.get('bonds', {})
-        tnx = bonds_s.get('美债10Y')
-        if tnx: snap_parts.append(f"美债10Y:{tnx:.2f}%")
-        vix = snap.get('sentiment', {}).get('VIX')
-        if vix:
-            vix_icon = "🔴" if vix > 30 else ("🟡" if vix > 20 else "🟢")
-            snap_parts.append(f"VIX:{vix:.1f}{vix_icon}")
-        if snap_parts:
-            w.write(doc_id, [('bullet', ' | '.join(snap_parts))])
+                if p:
+                    chg = d.get('change', 0) if isinstance(d, dict) else 0
+                    arrow = "↑" if chg > 0 else ("↓" if chg < 0 else "→")
+                    change_lines.append(f"{name}:{p:,.0f} {arrow}")
     except Exception:
         pass
-
+    
     try:
         nb = get_northbound_flow()
         if nb.get('data_ok'):
             nb_net = nb.get('today_net', 0)
-            nb_icon = "🟢" if nb_net > 10 else ("🔴" if nb_net < -10 else "🟡")
-            w.write(doc_id, [('bullet', f"北向资金: {nb_icon} 今日{nb_net:+.1f}亿 | 5日{nb.get('5d_cumulative',0):+.1f}亿 | {nb.get('signal','?')}")])
-        else:
-            w.write(doc_id, [('bullet', f"北向资金: ⚠️ {nb.get('note','数据不可用')}")])
+            nb_5d = nb.get('5d_cumulative', 0)
+            change_lines.append(f"北向资金: {nb_net:+.1f}亿 | 5日{nb_5d:+.1f}亿")
     except Exception:
         pass
-
-    us10y = None
-    for y in bonds_data.get('us_treasury', {}).get('yields', []):
-        if '10年' in y.get('name', '') and y.get('current'):
-            us10y = y['current']; break
-    if us10y and cpi != '?':
-        try:
-            real_rate = round(float(us10y) - float(cpi), 2)
-            rr_icon = "🔴" if real_rate > 2 else ("🟡" if real_rate > 0.5 else "🟢")
-            w.write(doc_id, [('bullet', f"实际利率={us10y:.2f}%-CPI{cpi}%={real_rate:.2f}% {rr_icon}")])
-        except Exception:
-            pass
-
-    port_ret = lds.get('portfolio_ret_1d')
-    need_rebal = lds.get('need_rebalance', False)
-    w.write(doc_id, [('bullet',
-        f"LDS全天候: 今日{_fmt(port_ret)} | YTD{_fmt(lds.get('portfolio_ytd'))} | "
-        f"{'⚠️再平衡信号' if need_rebal else '✅无需再平衡'}"
-    )])
-
-    # 凯利开关
+    
+    change_lines.append(f"趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%")
+    change_lines.append(f"LDS全天候: 今日{_fmt(lds.get('portfolio_ret_1d'))} | YTD{_fmt(lds.get('portfolio_ytd'))}")
+    
+    for line in change_lines:
+        w.write(doc_id, [('bullet', line)])
+    
     if dual_closed:
-        w.write(doc_id, [('bold', f"🔒 凯利f*关闭 → 不开新仓 | 止损线检查: 成本×0.92")])
-        cpi_mom = macro.get('macro_data', {}).get('cpi_momentum_3m') or macro.get('macro_data', {}).get('cpi_delta', 0) or 0
+        w.write(doc_id, [('bold', f"LDS: 「宏观偏空+趋势平 → 不开新仓，只研究」")])
         if isinstance(cpi, (int, float)) and cpi < 1.0:
-            mom_str = f"3月动量{'已改善' if cpi_mom > 0.2 else '需改善'}(+{cpi_mom:.2f}%)"
-            w.write(doc_id, [('bullet', f"双门转绿条件: CPI≥1.0%(当前={cpi}%) | {mom_str} + 趋势温度回暖(当前={trend_temp})")])
-        else:
-            w.write(doc_id, [('bullet', f"双门转绿条件: CPI≥1.0%(当前={cpi}%) + 趋势温度回暖(当前={trend_temp})")])
+            w.write(doc_id, [('bullet', f"转绿条件: CPI≥1.0%(当前{cpi}%){' + 3月动量>+0.3%已改善' if cpi_mom > 0.2 else ''} + 趋势温度回暖(当前{trend_temp})")])
     else:
-        w.write(doc_id, [('bold', f"✅ 可操作 | 单票≤2%仓位 | 8%硬止损")])
+        w.write(doc_id, [('bold', f"LDS: 「可操作 | 单票≤2% | 四重确认入场」")])
+
+    # ═══ 二、谁在赢 — 价格是最贵的信号 ═══
+    w.write(doc_id, [('h2', '二、🎯 谁在赢 — 价格是最贵的信号')])
+    w.write(doc_id, [('text', '涨价了才有信心，涨价了才有共识。数据替代观点。')])
 
     log("Panel done")
 
@@ -501,7 +490,47 @@ try:
         log(f"⚠️ Shadow entry/exit: {_e}")
     log("Shadow entry/exit done")
 
-    # ─── 板块4：ETF/债券组合推荐 ───
+    # ═══ 复利证明 G=E×P×F×T ═══
+    w.write(doc_id, [('divider', ''), ('h2', '💼 复利证明 — G=E×P×F×T')])
+    try:
+        metrics = _sa_metrics()
+        edge_status = "✅ 有优势" if metrics["edge_active"] else "⏳ 等待四重确认通过"
+        traversal = "✅ 安全" if metrics["traversal_ok"] else "⚠️ 注意回撤"
+        w.write(doc_id, [
+            ('bold', f"资金 ¥{metrics['capital']:,.0f} | 总值 ¥{metrics['total_value']:,.0f}"),
+            ('text', f"E(优势): {edge_status} | P(仓位): {metrics['position_pct']}% | F(频率): {metrics['trade_count']}次"),
+            ('text', f"T(遍历性): D+{metrics['days_alive']} | 胜率{metrics['win_rate']}% | 已实现¥{metrics['realized_pnl']:+,.0f} | 浮盈¥{metrics['unrealized_pnl']:+,.0f}"),
+        ])
+        if metrics['position_count'] == 0:
+            reasons = []
+            if dual_closed: reasons.append("双门关闭")
+            if not scan_results: reasons.append("扫描未完成")
+            if scan_results:
+                top_score = max(s.get('score', 0) for s in scan_results[:10]) if scan_results else 0
+                if top_score < 6.0: reasons.append(f"TOP1分数{top_score:.1f}<6.0")
+            w.write(doc_id, [('text', f"持仓 {metrics['position_count']}/{metrics['max_positions']} | 今日未建仓: {' + '.join(reasons) if reasons else '等待信号'}")])
+        else:
+            w.write(doc_id, [('text', f"持仓 {metrics['position_count']}/{metrics['max_positions']} | 遍历性: {traversal}")])
+    except Exception:
+        w.write(doc_id, [('text', '⏳ 模拟盘数据加载中...')])
+
+    # ═══ 国产替代追踪 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '🏭 国产替代追踪 — 脱钩时代的核心Alpha')])
+    w.write(doc_id, [('text', '国产化率<30%=替代空间巨大 | 30-60%=加速期 | >60%=成熟期')])
+    try:
+        from investment_system.config import DOMESTIC_SUB_THEMES
+        themes = sorted(DOMESTIC_SUB_THEMES.items(), key=lambda x: x[1].get('localization_rate', 100))
+        for tn, td in themes[:5]:
+            lr = td.get('localization_rate', '?')
+            score = td.get('decoupling_score', 0)
+            stocks = td.get('key_stocks_a', [])[:3]
+            w.write(doc_id, [('bullet',
+                f"{'🔴' if lr < 20 else '🟡'} **{tn}**: 国产化率{lr}% | 脱钩评分{score}/10 | {'/'.join(stocks)}"
+            )])
+    except Exception:
+        w.write(doc_id, [('text', '国产替代数据加载中...')])
+
+    # ─── ETF/债券组合推荐 ───
     rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed, session=session)
     log("ETF portfolio done")
 
