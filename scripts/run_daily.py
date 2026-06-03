@@ -785,6 +785,7 @@ try:
 
     # ─── 8. 情报摘要 ───
     w.write(doc_id, [('divider', ''), ('h2', '📰 8. 情报摘要')])
+    w.write(doc_id, [('bold', '8.1 异动分析')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -805,22 +806,26 @@ try:
         w.write(doc_id, [('quote', '今日观察池无≥5%异动，展示常规市场情报')])
 
     if summary_text and len(summary_text.strip()) > 50:
-        w.write(doc_id, [('bold', '📡 市场情报（AI分析）')])
+        w.write(doc_id, [('bold', '📡 8.2 市场情报')])
         import re as _re
-        clean_lines = []
-        for line in summary_text.strip().split('\n')[:15]:
+        bullish, bearish, neutral = [], [], []
+        for line in summary_text.strip().split('\n')[:20]:
             line = line.strip()
-            # 去掉markdown标题符号
             line = _re.sub(r'^#{1,4}\s*', '', line)
-            # 去掉blockquote符号
             line = _re.sub(r'^>\s*', '', line)
-            # 去掉LLM自带的"情绪得分"行（我们有独立的）
-            if '情绪得分' in line or '利好0' in line or '利空0' in line:
-                continue
-            if line:
-                clean_lines.append(line[:250])
-        for line in clean_lines:
-            w.write(doc_id, [('bullet', line)])
+            if '情绪得分' in line or not line: continue
+            if any(kw in line for kw in ['利好', '↑', '增长', '突破', '超预期', '改善', '上升']):
+                bullish.append(('🟢', line[:200]))
+            elif any(kw in line for kw in ['利空', '↓', '下跌', '衰退', '制裁', '风险', '流出']):
+                bearish.append(('🔴', line[:200]))
+            else:
+                neutral.append(('🟡', line[:200]))
+        for icon, line in bullish[:3]:
+            w.write(doc_id, [('bullet', f'{icon} {line}')])
+        for icon, line in bearish[:3]:
+            w.write(doc_id, [('bullet', f'{icon} {line}')])
+        for icon, line in neutral[:2]:
+            w.write(doc_id, [('bullet', f'{icon} {line}')])
     elif news_list:
         w.write(doc_id, [('bold', '📡 今日快讯')])
         for n in sorted(news_list, key=lambda x: len(x.get('impacts', [])), reverse=True)[:5]:
