@@ -436,52 +436,60 @@ try:
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
 
-    # ─── 模拟盘建仓/清仓（六因子评分驱动）───
+    # ─── 模拟盘建仓/清仓（六因子评分驱动 + 组合风控）───
     log("Shadow entry/exit engine...")
     try:
         if scan_results and not dual_closed and scan_status == "complete":
             _sa_sum = _sa_summary()
             _hold = {p["symbol"] for p in _sa_sum.get("positions", [])}
+            _hold_count = len(_hold)
             _sc_map = {s.get("symbol", ""): s.get("score", 0) for s in scan_results}
+            MAX_POSITIONS = 8
 
-            # 建仓：仅开盘前session，TOP5中不重复+非冷却+评分≥6
-            if session == "开盘前":
-                _n = 0
-                for _i, _s in enumerate(scan_results[:5], 1):
-                    _sy = _s.get("symbol", "")
-                    if not _sy or _sy in _hold:
-                        continue
-                    if _sa_cool(_sy):
-                        log(f"  COOLDOWN skip {_sy}"); continue
-                    if abs(_s.get("change_pct", 0) or 0) >= 5:
-                        log(f"  VOLATILE skip {_sy}"); continue
-                    _sc2 = _s.get("score", 0)
-                    if _sc2 < 6.0:
-                        log(f"  LOW_SCORE skip {_sy}: {_sc2:.1f}"); continue
-                    _pr = _s.get("price", 0)
-                    if _pr <= 0:
-                        continue
-                    _nm = _s.get("name", _sy)
-                    _q = max(100, int(20000 / _pr))
-                    _sa_entry(_sy, _nm, "买入", _pr,
-                             f"六因子扫描TOP{_i} 综合{_sc2:.1f}分",
-                             quantity=_q, pct=0.02, entry_score=_sc2)
-                    _n += 1
-                    log(f"✅ Shadow ENTRY {_nm}({_sy}) @¥{_pr:.2f} score={_sc2:.1f}")
-                log(f"Shadow new entries: {_n}")
+            # ── 建仓：TOP5中非持仓+非冷却+非异动+评分≥6 ──
+            _n = 0
+            for _i, _s in enumerate(scan_results[:5], 1):
+                if _hold_count + _n >= MAX_POSITIONS:
+                    log(f"  MAX_POSITIONS({MAX_POSITIONS}) reached, stop entry")
+                    break
+                _sy = _s.get("symbol", "")
+                if not _sy or _sy in _hold:
+                    continue
+                if _sa_cool(_sy):
+                    log(f"  COOLDOWN skip {_sy}"); continue
+                if abs(_s.get("change_pct", 0) or 0) >= 5:
+                    log(f"  VOLATILE skip {_sy}"); continue
+                _sc2 = _s.get("score", 0)
+                if _sc2 < 6.0:
+                    log(f"  LOW_SCORE skip {_sy}: {_sc2:.1f}"); continue
+                _pr = _s.get("price", 0)
+                if _pr <= 0:
+                    continue
+                _nm = _s.get("name", _sy)
+                _q = max(100, int(20000 / _pr))
+                _sa_entry(_sy, _nm, "买入", _pr,
+                         f"六因子扫描TOP{_i} 综合{_sc2:.1f}分",
+                         quantity=_q, pct=0.02, entry_score=_sc2)
+                _n += 1
+                log(f"✅ Shadow ENTRY {_nm}({_sy}) @¥{_pr:.2f} score={_sc2:.1f}")
+            log(f"Shadow new entries: {_n}")
 
-            # 清仓：评分跌至4分以下→自动退出
+            # ── 清仓：评分<4 或 持仓>20天且不在TOP30 ──
             _sa_sum2 = _sa_summary()
             for _p in _sa_sum2.get("positions", []):
                 _sy = _p["symbol"]
                 _score = _sc_map.get(_sy)
-                if _score is None:
-                    continue  # 不在本次扫描TOP10，暂不操作
-                if _score < 4.0:
-                    _ep = _p.get("current", 0)
+                _ep = _p.get("current", 0)
+                if _score is not None and _score < 4.0:
                     if _ep:
                         _sa_exit(_sy, _ep, f"六因子评分降至{_score:.1f}分<4 → 清仓")
                         log(f"🔻 Shadow EXIT {_p['name']}({_sy}): score={_score:.1f}")
+                elif _score is None:
+                    _hd = _p.get("hold_days", 0)
+                    if _hd > 20:
+                        if _ep:
+                            _sa_exit(_sy, _ep, f"持仓{_hd}天未进TOP30 → 清仓")
+                            log(f"🔻 Shadow EXIT {_p['name']}({_sy}): hold={_hd}d, not in scan")
 
         elif scan_results and not dual_closed and scan_status.startswith("partial:"):
             log(f"Scan partial ({scan_status}): skip entry/exit until full scan completes")
