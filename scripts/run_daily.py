@@ -628,29 +628,51 @@ try:
         log(f"⚠️ Shadow entry/exit: {_e}")
     log("Shadow entry/exit done")
 
-    # ═══ 4. 盯盘监控: 模拟盘复利证明 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 模拟盘 — G=E×P×F×T')])
+    # ═══ 4. 策略四多资产模拟盘 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 策略四多资产模拟盘')])
     try:
-        metrics = _sa_metrics()
-        edge_status = "✅ 有优势" if metrics["edge_active"] else "⏳ 等待四重确认通过"
-        traversal = "✅ 安全" if metrics["traversal_ok"] else "⚠️ 注意回撤"
+        from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
+        _s4_init()
+        _s4_daily(macro, scan_results if scan_results else [])
+        snap = _s4_snap()
+
         w.write(doc_id, [
-            ('bold', f"资金 ¥{metrics['capital']:,.0f} | 总值 ¥{metrics['total_value']:,.0f}"),
-            ('text', f"E(优势): {edge_status} | P(仓位): {metrics['position_pct']}% | F(频率): {metrics['trade_count']}次"),
-            ('text', f"T(遍历性): D+{metrics['days_alive']} | 胜率{metrics['win_rate']}% | 已实现¥{metrics['realized_pnl']:+,.0f} | 浮盈¥{metrics['unrealized_pnl']:+,.0f}"),
+            ('bold', f"总值 ¥{snap['total_value']:,.0f} | {snap['regime']} | 仓位{snap['position_pct']:.0f}%"),
         ])
-        if metrics['position_count'] == 0:
-            reasons = []
-            if dual_closed: reasons.append("双门关闭")
-            if not scan_results: reasons.append("扫描未完成")
-            if scan_results:
-                top_score = max(s.get('score', 0) for s in scan_results[:10]) if scan_results else 0
-                if top_score < 6.0: reasons.append(f"TOP1分数{top_score:.1f}<6.0")
-            w.write(doc_id, [('text', f"持仓 {metrics['position_count']}/{metrics['max_positions']} | 今日未建仓: {' + '.join(reasons) if reasons else '等待信号'}")])
+
+        alloc = snap.get('allocations', {})
+        for key, label in [('a_share','A股链内'),('stock_etf','股票ETF'),('bond_etf','债券ETF'),
+                           ('gold_etf','黄金ETF'),('commodity_etf','商品ETF'),('us_stock','美股'),('hk_stock','港股')]:
+            a = alloc.get(key, {})
+            target = a.get('target', 0)
+            if key in ('stock_etf','bond_etf','commodity_etf','gold_etf'):
+                pick = a.get('picked', {})
+                sym = pick.get('symbol', '?')
+                score = pick.get('score', '')
+                score_str = f" {score:.1f}分" if score else ""
+                w.write(doc_id, [('bullet',
+                    f"{label}: ¥{target:,} → {sym}{score_str}")])
+            elif key == 'a_share':
+                status = "⏸️ 待四重确认" if dual_closed else "待建仓"
+                w.write(doc_id, [('bullet', f"{label}: ¥{target:,} → {status}")])
+            else:
+                w.write(doc_id, [('bullet', f"{label}: ¥{target:,} → 待评分")])
+
+        # 今日操作
+        actions = snap.get('daily_actions', [])
+        if actions:
+            for a in actions:
+                w.write(doc_id, [('text', a)])
         else:
-            w.write(doc_id, [('text', f"持仓 {metrics['position_count']}/{metrics['max_positions']} | 遍历性: {traversal}")])
-    except Exception:
-        w.write(doc_id, [('text', '⏳ 模拟盘数据加载中...')])
+            reason = "双门关闭，ETF/黄金/商品维持配比" if dual_closed else "维持配比"
+            w.write(doc_id, [('text', f"今日操作: {reason}")])
+
+        # G=E×P×F×T
+        w.write(doc_id, [('text',
+            f"G=E×P×F×T: D+{snap['days_alive']} | 浮盈¥{snap['unrealized_pnl']:+,.0f} | 锁定¥{snap['realized_pnl']:+,.0f} | {'安全✅' if snap['traversal_ok'] else '⚠️注意回撤'}")])
+
+    except Exception as e:
+        w.write(doc_id, [('text', f'⏳ 策略四模拟盘加载中... ({str(e)[:60]})')])
 
     # ═══ 5. 国产替代追踪 ═══
     w.write(doc_id, [('divider', ''), ('h2', '🏭 5. 国产替代追踪')])
