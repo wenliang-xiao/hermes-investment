@@ -407,8 +407,8 @@ try:
     scan_results = []
     scan_status = ""
     try:
-        scanner.MAX_SCAN = 30
-        scan_results, scan_status = scanner.scan_market_batch(batch_size=15, top_n=10)
+        scanner.MAX_SCAN = 138
+        scan_results, scan_status = scanner.scan_market_batch(batch_size=30, top_n=10)
 
         # 加载上次扫描快照 — 用于显示排名/分数变化
         prev_scores = {}
