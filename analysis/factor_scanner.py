@@ -463,8 +463,6 @@ class FactorScanner:
     def scan_market_batch(self, progress_file=None, batch_size=15, top_n=10):
         """跨cron分批扫描，每次扫batch_size只，保存进度。"""
         from investment_system.domain.stock_universe import LDS_SECTORS, MACRO_TO_SECTORS
-        from investment_system.data.data_layer import set_scan_mode
-        set_scan_mode(True)  # 扫描阶段跳过Tushare, 直接用baostock(免费无限频)
 
         if progress_file is None:
             from investment_system import config

@@ -229,24 +229,29 @@ def _get_financial_em(symbol: str) -> dict:
         return {}
 
 _FIN_CACHE = {}
-_SCAN_MODE = False  # 扫描模式: True时跳过Tushare直接走baostock
-
-def set_scan_mode(on: bool = True):
-    global _SCAN_MODE; _SCAN_MODE = on
 
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→baostock。同进程内缓存。扫描模式跳过Tushare。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。东方财富→Tushare→baostock。同进程内缓存。"""
     if symbol in _FIN_CACHE:
         return _FIN_CACHE[symbol]
-    if not _SCAN_MODE:
-        try:
-            from investment_system.data.tushare_layer import get_financial_report_ts
-            result = get_financial_report_ts(symbol)
-            if result:
-                _FIN_CACHE[symbol] = result
-                return result
-        except Exception:
-            pass
+    # ① 东方财富 (免费无限频, 主力)
+    try:
+        result = _get_financial_em(symbol)
+        if result:
+            _FIN_CACHE[symbol] = result
+            return result
+    except Exception:
+        pass
+    # ② Tushare (需token, 有限频)
+    try:
+        from investment_system.data.tushare_layer import get_financial_report_ts
+        result = get_financial_report_ts(symbol)
+        if result:
+            _FIN_CACHE[symbol] = result
+            return result
+    except Exception:
+        pass
+    # ③ baostock (免费无限频, 兜底)
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
