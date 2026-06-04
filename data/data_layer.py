@@ -128,14 +128,8 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。Tushare→baostock→AKShare。"""
-    try:
-        from investment_system.data.tushare_layer import get_stock_daily_ts
-        df = get_stock_daily_ts(symbol, days)
-        if not df.empty:
-            return df
-    except Exception:
-        pass
+    """获取个股日线数据（含PE/PB）。baostock为主力→AKShare回退。
+    已跳过 Tushare daily_basic（永久频限 1次/分钟/5次/天），直达 baostock。"""
     _bs_login()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
@@ -243,81 +237,85 @@ def get_financial_report(symbol: str) -> dict:
 
     # 主力: EastMoney DataCenter（无频限）
     result = _get_financial_em(symbol)
-    if result:
-        _FIN_CACHE[symbol] = result
-        return result
+    if not result:
+        # EM 失败时走 baostock 全量
+        _bs_login()
+        bs_code = _bs_code(symbol)
+        result = {}
 
-    # fallback: baostock
+    # ─── baostock 补充缺失字段（EM 不提供的：每股经营现金流、股息率等）───
+    # 即使 EM 成功也跑这段，仅补充 result 中不存在的字段
     _bs_login()
     bs_code = _bs_code(symbol)
-    result = {}
 
-    # 增长数据（ROE、营收增速、利润增速 — 转换为百分比）
-    for year_off in [1, 2]:
-        for quarter in [4, 2]:
-            try:
-                rs = bs.query_growth_data(code=bs_code,
-                    year=datetime.now().year - year_off, quarter=quarter)
-                if rs.error_code != "0":
+    # 增长数据补充（仅当 result 中缺失对应字段时）
+    needs_growth = any(k not in result for k in ["净资产收益率", "营业收入同比增长率", "净利润同比增长率"])
+    if needs_growth:
+        for year_off in [1, 2]:
+            for quarter in [4, 2]:
+                try:
+                    rs = bs.query_growth_data(code=bs_code,
+                        year=datetime.now().year - year_off, quarter=quarter)
+                    if rs.error_code != "0":
+                        continue
+                    while rs.next():
+                        r = rs.get_row_data()
+                        for idx, key in [(3, "净资产收益率"), (4, "营业收入同比增长率"), (5, "净利润同比增长率")]:
+                            try:
+                                if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
+                                    v = float(r[idx])
+                                    if not np.isnan(v) and key not in result:
+                                        # baostock 返回十进制小数 (0.13=13%)，转换为百分比
+                                        result[key] = abs(v) * 100
+                            except:
+                                pass
+                    if result:
+                        break
+                except:
                     continue
-                while rs.next():
-                    r = rs.get_row_data()
-                    for idx, key in [(3, "净资产收益率"), (4, "营业收入同比增长率"), (5, "净利润同比增长率")]:
-                        try:
-                            if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
-                                v = float(r[idx])
-                                if not np.isnan(v) and key not in result:
-                                    # baostock 返回十进制小数 (0.13=13%)，转换为百分比
-                                    result[key] = abs(v) * 100
-                        except:
-                            pass
-                if result:
-                    break
-            except:
-                continue
-        if result:
-            break
-
-    # 杜邦指标（毛利率、净利率、EPS经营现金流）
-    for year_off in [1, 2]:
-        for quarter in [4, 2]:
-            try:
-                rs = bs.query_dupont_data(code=bs_code,
-                    year=datetime.now().year - year_off, quarter=quarter)
-                if rs.error_code != "0":
-                    continue
-                while rs.next():
-                    r = rs.get_row_data()
-                    for idx, key in [(4, "毛利率"), (5, "净利率")]:
-                        try:
-                            if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
-                                v = float(r[idx])
-                                if not np.isnan(v) and key not in result:
-                                    result[key] = abs(v) * 100
-                        except:
-                            pass
-                    # 每股经营现金流绝对值不乘100
-                    try:
-                        if len(r) > 7 and r[7] and str(r[7]).strip() != "":
-                            ocps = float(r[7])
-                            if not np.isnan(ocps) and "每股经营现金流" not in result:
-                                result["每股经营现金流"] = abs(ocps)
-                    except:
-                        pass
+            if result:
                 break
-            except:
-                continue
+
+    # 杜邦指标补充（毛利率、每股经营现金流、净利率）
+    needs_dupont = any(k not in result for k in ["毛利率", "每股经营现金流", "净利率"])
+    if needs_dupont:
+        for year_off in [1, 2]:
+            for quarter in [4, 2]:
+                try:
+                    rs = bs.query_dupont_data(code=bs_code,
+                        year=datetime.now().year - year_off, quarter=quarter)
+                    if rs.error_code != "0":
+                        continue
+                    while rs.next():
+                        r = rs.get_row_data()
+                        for idx, key in [(4, "毛利率"), (5, "净利率")]:
+                            try:
+                                if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
+                                    v = float(r[idx])
+                                    if not np.isnan(v) and key not in result:
+                                        result[key] = abs(v) * 100
+                            except:
+                                pass
+                        # 每股经营现金流绝对值不乘100
+                        try:
+                            if len(r) > 7 and r[7] and str(r[7]).strip() != "":
+                                ocps = float(r[7])
+                                if not np.isnan(ocps) and "每股经营现金流" not in result:
+                                    result["每股经营现金流"] = abs(ocps)
+                        except:
+                            pass
+                    break
+                except:
+                    continue
 
     _FIN_CACHE[symbol] = result
     return result
 
 
 def get_financial_history(symbol: str, quarters: int = 8) -> list:
-    """
-    获取多季度财务历史：ROE趋势 + FCF 计算所需数据
-    返回按时间倒序的季度列表，用于计算 ROE 趋势和 FCF
-    Tushare→baostock。同进程内缓存。
-    """
+    """获取多季度财务历史：ROE趋势 + FCF。
+    直走 baostock（EM 只返回最新一期，无历史序列）。
+    返回按时间倒序的季度列表 [{year, quarter, period, roe, ocf, fcf}]"""
     key = f"FH_{symbol}_{quarters}"
     if key in _FIN_CACHE:
         return _FIN_CACHE[key]
@@ -384,18 +382,9 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
 
 
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
-    """
-    获取个股 PE-TTM 历史序列，用于计算历史百分位。
-    Tushare（5年完整）→ baostock（从日线重算）。
-    返回 pd.Series，index=date，values=pe
-    """
-    try:
-        from investment_system.data.tushare_layer import get_pe_history_ts
-        s = get_pe_history_ts(symbol, years=years)
-        if len(s) >= 60:
-            return s
-    except Exception:
-        pass
+    """获取个股 PE-TTM 历史序列，用于计算历史百分位。
+    已跳过 Tushare daily_basic（永久频限），直走 baostock（周线逐笔）。
+    返回 pd.Series，index=date，values=pe"""
     _bs_login()
     start = (datetime.now() - timedelta(days=years * 365 + 30)).strftime("%Y-%m-%d")
     end = datetime.now().strftime("%Y-%m-%d")
