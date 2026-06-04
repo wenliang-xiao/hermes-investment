@@ -208,27 +208,6 @@ try:
         w.write(doc_id, [('text', f'转绿条件: CPI≥1.0%+趋势≥温{prio_text}')])
     w.write(doc_id, [('divider', '')])
 
-    # ── 谁在赢 (实时价格信号) ──
-    try:
-        leaders, laggards = [], []
-        for code, info in WATCHLIST.items():
-            if not str(code).isdigit(): continue
-            pd_info = prices.get(code, {})
-            chg = pd_info.get('chg')
-            if chg is None: continue
-            chain = info.get('chain', '')
-            if chg > 3: leaders.append((info.get('name',code), code, chg, chain))
-            elif chg < -3: laggards.append((info.get('name',code), code, chg, chain))
-        leaders.sort(key=lambda x: -x[2])
-        if leaders or laggards:
-            w.write(doc_id, [('bold', '🔥 谁在赢 — 价格是最贵的信号')])
-            if leaders:
-                w.write(doc_id, [('bullet', '领涨: ' + ' | '.join(f'{n}({c})+{chg:.1f}% [{chain}]' for n,c,chg,chain in leaders[:6]))])
-            if laggards:
-                w.write(doc_id, [('bullet', '领跌: ' + ' | '.join(f'{n}({c}){chg:.1f}%' for n,c,chg,_ in laggards[:3]))])
-    except: pass
-    w.write(doc_id, [('divider', '')])
-
     # ─── 模拟盘风控：价格更新 + 自动止损 ───
     log("Shadow pre-check...")
     try:
@@ -263,11 +242,7 @@ try:
     log("Shadow pre-check done")
 
     # 多资产快照
-    try:
-        from investment_system.output.fund_tracker import track_lds_portfolio_v2
-        lds_snap = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
-        w.write(doc_id, [('text', f'多资产: LDS全天候{_fmt(lds_snap.get("portfolio_ret_1d"))} | LDS YTD{_fmt(lds_snap.get("portfolio_ytd"))}')])
-    except: pass
+    w.write(doc_id, [('text', f'多资产: LDS全天候{_fmt(lds.get("portfolio_ret_1d"))} | YTD{_fmt(lds.get("portfolio_ytd"))}')])
 
     # ═══ 3. 选股引擎: 观察池 ═══
     w.write(doc_id, [('divider', ''), ('h2', '👁️ 1. 观察池')])
@@ -277,6 +252,26 @@ try:
         from investment_system.output.report_v6 import _fetch_watchlist_prices, _calc_tech_signal
         from investment_system.domain import WATCHLIST
         prices = _fetch_watchlist_prices(list(WATCHLIST.keys()))
+
+        # 谁在赢 — 实时价格信号
+        try:
+            leaders, laggards = [], []
+            for code, info in WATCHLIST.items():
+                if not str(code).isdigit(): continue
+                pd = prices.get(code, {})
+                chg = pd.get('chg')
+                if chg is None: continue
+                chain = info.get('chain', '')
+                if chg > 3: leaders.append((info.get('name',code), code, chg, chain))
+                elif chg < -3: laggards.append((info.get('name',code), code, chg, chain))
+            leaders.sort(key=lambda x: -x[2])
+            if leaders:
+                w.write(doc_id, [('bold', '🔥 今日领涨')])
+                w.write(doc_id, [('bullet', ' | '.join(f'{n}({c})+{chg:.1f}% [{chain}]' for n,c,chg,chain in leaders[:6]))])
+            if laggards:
+                w.write(doc_id, [('bold', '❄️ 今日领跌')])
+                w.write(doc_id, [('bullet', ' | '.join(f'{n}({c}){chg:.1f}%' for n,c,chg,_ in laggards[:3]))])
+        except: pass
 
         flagged, core_no_signal = [], []
         flagged_codes = []
