@@ -636,11 +636,10 @@ try:
         _s4_daily(macro, scan_results if scan_results else [])
         snap = _s4_snap()
 
-        w.write(doc_id, [
-            ('bold', f"总值 ¥{snap['total_value']:,.0f} | {snap['regime']} | 仓位{snap['position_pct']:.0f}%"),
-        ])
+        w.write(doc_id, [('bold', f"总值 ¥{snap['total_value']:,.0f} | {snap['regime']} | 仓位{snap['position_pct']:.0f}%"),])
 
         alloc = snap.get('allocations', {})
+        alloc_lines = []
         for key, label in [('a_share','A股链内'),('stock_etf','股票ETF'),('bond_etf','债券ETF'),
                            ('gold_etf','黄金ETF'),('commodity_etf','商品ETF'),('us_stock','美股'),('hk_stock','港股')]:
             a = alloc.get(key, {})
@@ -648,15 +647,16 @@ try:
             if key in ('stock_etf','bond_etf','commodity_etf','gold_etf'):
                 pick = a.get('picked', {})
                 sym = pick.get('symbol', '?')
-                score = pick.get('score', '')
-                score_str = f" {score:.1f}分" if score else ""
-                w.write(doc_id, [('bullet',
-                    f"{label}: ¥{target:,} → {sym}{score_str}")])
+                alloc_lines.append(f"{label}: ¥{target:,} → {sym}")
             elif key == 'a_share':
-                status = "⏸️ 待四重确认" if dual_closed else "待建仓"
-                w.write(doc_id, [('bullet', f"{label}: ¥{target:,} → {status}")])
+                status = "⏸️" if dual_closed else "待建仓"
+                alloc_lines.append(f"{label}: ¥{target:,} → {status}")
             else:
-                w.write(doc_id, [('bullet', f"{label}: ¥{target:,} → 待评分")])
+                alloc_lines.append(f"{label}: ¥{target:,}")
+        w.write(doc_id, [('text', ' | '.join(alloc_lines))])
+
+        # Link to dashboard
+        w.write(doc_id, [('text', w.ref("📊 详细面板 → http://47.85.161.255:8686/dashboard"))])
 
         # 今日操作
         actions = snap.get('daily_actions', [])

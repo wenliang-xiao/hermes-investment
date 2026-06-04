@@ -2003,59 +2003,33 @@ def build_news_section(w, doc_id):
 # 板块 7: 重点票追踪
 # ═══════════════════════════════════
 def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
-    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、👀 重点票追踪")])
+    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、👀 模拟盘追踪")])
     try:
-        from investment_system.output.shadow_account import get_shadow_summary, check_stops
-        summary = get_shadow_summary()
-        positions = summary.get("positions", [])
-        alerts = check_stops()
-        alert_symbols = {a["symbol"] for a in alerts}
-
-        if not positions:
-            w.write(doc_id, [("text", "📭 模拟盘暂无持仓 — 使用 shadow_account.entry() 记录交易")])
-        else:
-            w.write(doc_id, [("bold", f"持仓 {len(positions)} 只 | 总估值 ¥{summary.get('total_value', 0):,.0f}")])
-            for pos in positions:
-                sym = pos["symbol"]
-                name = pos.get("name", sym)
-                entry_p = pos.get("entry", 0)
-                current_p = pos.get("current", entry_p)
-                chg = pos.get("change", 0)
-                peak_p = pos.get("peak", current_p) or current_p
-                hold_days = pos.get("hold_days", 0) or 0
-                pnl = (current_p - entry_p) / entry_p if entry_p > 0 else 0
-                dd_from_peak = (current_p - peak_p) / peak_p if peak_p > 0 else 0
-
-                if hold_days < 10:
-                    stop_price = entry_p * 0.92
-                    stop_label = f"硬止损¥{stop_price:.2f}(-8%)"
-                else:
-                    trailing_pct = 0.12 if pnl >= 0.30 else (0.15 if pnl >= 0.10 else 0.20)
-                    stop_price = peak_p * (1 - trailing_pct)
-                    trail_label = f"-{trailing_pct:.0%}@峰值¥{peak_p:.2f}"
-                    stop_label = f"trailing止损¥{stop_price:.2f}({trail_label})"
-
-                trailing_alert = dd_from_peak <= -(0.12 if pnl >= 0.30 else (0.15 if pnl >= 0.10 else 0.20)) and hold_days >= 10
-                hard_alert = pnl <= -0.08 and hold_days < 10
-                alert_tag = " 🚨触发止损!" if (sym in alert_symbols or trailing_alert or hard_alert) else ""
-                status = pos.get("status", "")
-
-                w.write(doc_id, [("bullet",
-                    f"{status}{alert_tag} {name}({sym}) 买入¥{entry_p:.2f} → 现¥{current_p:.2f} "
-                    f"({chg:+.1f}%) 持{hold_days}天 | {stop_label}"
-                )])
-
-        if alerts:
-            w.write(doc_id, [("bold", f"⚠️ 触发信号 {len(alerts)} 条：")])
-            for a in alerts:
-                kind = "🔴 止损" if a["type"] == "STOP_LOSS" else "🟡 止盈T1" if a["type"] == "TAKE_PROFIT_T1" else "🟢 止盈T2"
-                val = a.get("loss") or a.get("profit", 0)
-                w.write(doc_id, [("bullet", f"{kind} {a['name']}({a['symbol']}) 浮{val:+.1f}%")])
-
+        from investment_system.output.shadow_account import get_portfolio_metrics
+        m = get_portfolio_metrics()
+        dashboard_url = "http://47.85.161.255:8686/dashboard"
+        status = "✅ 运行中" if m["position_count"] > 0 else "⏸️ 空仓"
+        w.write(doc_id, [
+            ("text", f"📊 **[面基·模拟盘 Dashboard]({dashboard_url})** | {status}"),
+            ("bullet", f"总资产 ¥{m['total_value']:,.0f} | 现金 ¥{m['cash']:,.0f} | 持仓 {m['position_count']}只"),
+            ("bullet", f"累计收益 {m['total_pnl']:+,.0f} ({m['total_return']:+.2f}%) | 仓位 {m['position_pct']:.1f}%"),
+            ("bullet", f"交易 {m['trade_count']}笔 | 胜率 {m['win_rate']:.0f}% | 运行{m['days_alive']}天"),
+        ])
+        if m["total_pnl"] != 0:
+            w.write(doc_id, [("text", f"已实现 {m['realized_pnl']:+,.0f} | 浮动 {m['unrealized_pnl']:+,.0f}")])
     except Exception as e:
-        w.write(doc_id, [("text", f"⚠️ 持仓追踪加载失败: {str(e)[:60]}")])
+        w.write(doc_id, [("text", f"⚠️ 模拟盘数据暂不可用: {str(e)[:60]}")])
 
-    w.write(doc_id, [("text", w.ref("五、风控监控·四重确认"))])
+    if scanner and macro:
+        try:
+            from investment_system.output.shadow_account import check_stops
+            alerts = check_stops()
+            if alerts:
+                w.write(doc_id, [("bold", f"⚠️ 触发信号 {len(alerts)} 条 — 详见 Dashboard")])
+        except:
+            pass
+
+    w.write(doc_id, [("text", w.ref("Dashboard: http://47.85.161.255:8686/dashboard"))])
 
 # ═══════════════════════════════════
 # 板块 7.5: ETF/债券组合推荐
