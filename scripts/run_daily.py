@@ -262,6 +262,13 @@ try:
         pass
     log("Shadow pre-check done")
 
+    # 多资产快照
+    try:
+        from investment_system.output.fund_tracker import track_lds_portfolio_v2
+        lds_snap = track_lds_portfolio_v2(version="A", bw_quadrant=bw_q, dual_gate_open=dual_open)
+        w.write(doc_id, [('text', f'多资产: LDS全天候{_fmt(lds_snap.get("portfolio_ret_1d"))} | LDS YTD{_fmt(lds_snap.get("portfolio_ytd"))}')])
+    except: pass
+
     # ═══ 3. 选股引擎: 观察池 ═══
     w.write(doc_id, [('divider', ''), ('h2', '👁️ 1. 观察池')])
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
@@ -502,6 +509,20 @@ try:
         w.write(doc_id, [('bullet', f'⚠️ 扫描跳过: {str(scan_err)[:60]}')])
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
+
+    # ── 链外发现: 评分≥6且不在观察池 ──
+    if scan_results and scan_status == "complete":
+        try:
+            outsiders = [s for s in scan_results
+                         if s.get('score',0) >= 6.0
+                         and str(s.get('symbol','')) not in _watchlist_codes]
+            if outsiders:
+                w.write(doc_id, [('bold', f'🔎 链外发现: {len(outsiders)}只 (评分≥6, 不在观察池)')])
+                for s in outsiders[:3]:
+                    w.write(doc_id, [('bullet',
+                        f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {s.get('sector','?')} | ROE{s.get('roe','?')}%"
+                    )])
+        except: pass
 
     # ═══ 2.3 因子有效性 ═══
     if scan_results and scan_status == "complete":
