@@ -166,72 +166,68 @@ try:
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
     # ═══════════════════════════════════════════════
-    #  面基·LDS·桥水 三源融合量化投研日报
+    #  面基·LDS·桥水 三源融合量化投研日报 v7
     # ═══════════════════════════════════════════════
-    lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位，精选标的" if macro_gate=="黄灯" else "正常操作")
-    
-    # ── 0. 决策摘要 ──
-    w.write(doc_id, [
-        ('h2', '0. 决策摘要'),
-        ('bold', f"双门{macro_gate}·{trend_gate} | {regime} | CPI={cpi}% | 趋势{trend_temp} | 国运线{guoyun_dev}%"),
-        ('text', f"LDS判断: {lds_judgment}"),
-    ])
-    if dual_closed:
-        prio_file = '/tmp/hermes_top_priority.json'
-        prio_text = ""
-        try:
-            if os.path.exists(prio_file):
-                with open(prio_file) as f:
-                    prio = json.load(f)
-                prio_text = f" | 转绿第一优先级: {prio.get('name','?')}({prio.get('symbol','?')}) {prio.get('score',0):.1f}分 ({prio.get('date','?')})"
-        except: pass
-        w.write(doc_id, [('text', f"转绿条件: CPI≥1.0%(当前{cpi}%) + 3月动量{cpi_mom:+.2f}%{'✅' if cpi_mom>0.2 else ''} + 趋势≥温(当前{trend_temp}){prio_text}")])
-    
-    # ── 1. 宏观气候 ──
-    w.write(doc_id, [('h2', '1. 宏观气候')])
-    w.write(doc_id, [('bold', f'1.1 货币-信用象限: {regime} → {bw_name}')])
-    w.write(doc_id, [('text', f'Shibor={macro.get("macro_data",{}).get("shibor","?")}% | 社融/M2增速={macro.get("macro_data",{}).get("m2_growth","?")}% | 偏好: {"/".join(favored[:3])}')])
-    w.write(doc_id, [('bold', f'1.2 CPI驱动: {cpi}% | 3月动量{cpi_mom:+.2f}%')])
-    w.write(doc_id, [('bold', f'1.3 趋势温度: {trend_temp} | 国运线偏离{guoyun_dev}%')])
-    
-    # 全球市场
+    lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位" if macro_gate=="黄灯" else "正常操作")
+
+    # ── 0. 市场全景 ──
+    w.write(doc_id, [('h2', '0. 市场全景')])
+    # 全球快照
     try:
-        snap = get_global_market_snapshot()
-        idx_data = snap.get('indices', {})
         mkts = []
-        for name in ['标普500', '纳斯达克', '恒生']:
-            d = idx_data.get(name)
+        snap = get_global_market_snapshot()
+        idx = snap.get('indices', {})
+        for name in ['标普500','纳斯达克','恒生']:
+            d = idx.get(name)
             if d:
                 p = d.get('price') if isinstance(d, dict) else d
-                tag = '[观测]' if name in ('标普500','纳斯达克') else ''
-                if p: mkts.append(f'{name}:{p:,.0f}{tag}')
-        if mkts: w.write(doc_id, [('text', f'1.4 全球市场: {" | ".join(mkts)}')])
+                obs = '[观测]' if name in ('标普500','纳斯达克') else ''
+                if p: mkts.append(f'{name}:{p:,.0f}{obs}')
+        if mkts: w.write(doc_id, [('text', ' | '.join(mkts))])
     except: pass
-    
+    # A股
     try:
         nb = get_northbound_flow()
         if nb.get('data_ok'):
-            w.write(doc_id, [('text', f'1.5 北向资金: {nb.get("today_net",0):+.1f}亿 (5日{nb.get("5d_cumulative",0):+.1f}亿)')])
+            w.write(doc_id, [('text', f'A股: 北向{nb.get("today_net",0):+.1f}亿 | 5日{nb.get("5d_cumulative",0):+.1f}亿')])
     except: pass
-    
-    w.write(doc_id, [('text', f'1.6 LDS全天候: 今日{_fmt(lds.get("portfolio_ret_1d"))} | YTD{_fmt(lds.get("portfolio_ytd"))}')])
-
-    # ── 2. 资产配置 ──
-    w.write(doc_id, [('h2', '2. 资产配置')])
-    w.write(doc_id, [('bold', f'2.1 策略四 {regime}配比')])
-    s4_w = macro.get('strategy4_weights', {})
-    if not s4_w:
-        try:
-            from investment_system.analysis.backtest import STRATEGY4_QUADRANT_WEIGHTS
-            s4_w = STRATEGY4_QUADRANT_WEIGHTS.get(regime, STRATEGY4_QUADRANT_WEIGHTS.get("default", {}))
-        except: s4_w = {}
-    parts = []
-    for k, v in s4_w.items():
-        label = {'a_share':'A股','stock_etf':'股票ETF','bond_etf':'债券ETF','commodity_etf':'商品ETF','us_stock':'美股[观测]','hk_stock':'港股'}.get(k,k)
-        parts.append(f'{label} {v:.0%}')
-    if parts: w.write(doc_id, [('text', ' | '.join(parts))])
+    # 宏观
+    guoyun = macro.get('guoyun', {})
+    w.write(doc_id, [
+        ('bold', f'{regime} | CPI={cpi}% 3月动量{cpi_mom:+.2f}% | 趋势{trend_temp} | 国运线{guoyun.get("deviation","?")}%'),
+        ('text', f'双门{macro_gate}·{trend_gate} → {lds_judgment} | 偏好: {"/".join(favored[:3])}'),
+    ])
     if dual_closed:
-        w.write(doc_id, [('text', f'2.2 仓位乘数: ×0.4(双门关闭) → 实际仓位上限40%')])
+        prio_text = ""
+        try:
+            if os.path.exists('/tmp/hermes_top_priority.json'):
+                with open('/tmp/hermes_top_priority.json') as f:
+                    prio = json.load(f)
+                prio_text = f" | 转绿第一优先级: {prio.get('name','?')}({prio.get('symbol','?')})"
+        except: pass
+        w.write(doc_id, [('text', f'转绿条件: CPI≥1.0%+趋势≥温{prio_text}')])
+    w.write(doc_id, [('divider', '')])
+
+    # ── 谁在赢 (实时价格信号) ──
+    try:
+        leaders, laggards = [], []
+        for code, info in WATCHLIST.items():
+            if not str(code).isdigit(): continue
+            pd_info = prices.get(code, {})
+            chg = pd_info.get('chg')
+            if chg is None: continue
+            chain = info.get('chain', '')
+            if chg > 3: leaders.append((info.get('name',code), code, chg, chain))
+            elif chg < -3: laggards.append((info.get('name',code), code, chg, chain))
+        leaders.sort(key=lambda x: -x[2])
+        if leaders or laggards:
+            w.write(doc_id, [('bold', '🔥 谁在赢 — 价格是最贵的信号')])
+            if leaders:
+                w.write(doc_id, [('bullet', '领涨: ' + ' | '.join(f'{n}({c})+{chg:.1f}% [{chain}]' for n,c,chg,chain in leaders[:6]))])
+            if laggards:
+                w.write(doc_id, [('bullet', '领跌: ' + ' | '.join(f'{n}({c}){chg:.1f}%' for n,c,chg,_ in laggards[:3]))])
+    except: pass
+    w.write(doc_id, [('divider', '')])
 
     # ─── 模拟盘风控：价格更新 + 自动止损 ───
     log("Shadow pre-check...")
@@ -689,7 +685,7 @@ try:
     log("Shadow entry/exit done")
 
     # ═══ 4. 策略四多资产模拟盘 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 策略四多资产模拟盘')])
+    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 组合状态')])
     try:
         from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
         _s4_init(regime)
