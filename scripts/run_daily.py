@@ -263,7 +263,7 @@ try:
     log("Shadow pre-check done")
 
     # ═══ 3. 选股引擎: 观察池 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '👁️ 3. 观察池信号')])
+    w.write(doc_id, [('divider', ''), ('h2', '👁️ 1. 观察池')])
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
 
     try:
@@ -388,8 +388,8 @@ try:
     except Exception:
         pass
 
-    # ─── 3.5 今日扫描发现 ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔍 3.5 扫描发现')])
+    # ─── 2.1 策略信号: 扫描发现 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔍 2. 策略信号')])
     w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
     scan_results = []
     scan_status = ""
@@ -503,7 +503,7 @@ try:
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
 
-    # ═══ 3.6 因子有效性 ═══
+    # ═══ 2.3 因子有效性 ═══
     if scan_results and scan_status == "complete":
         try:
             from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
@@ -539,7 +539,7 @@ try:
                 if parts:
                     eff = qr.get("effective", [])
                     weak = qr.get("weak", [])
-                    w.write(doc_id, [('divider', ''), ('h2', '🔬 3.6 因子有效性')])
+                    w.write(doc_id, [('divider', ''), ('h2', '🔬 2.3 因子有效性')])
                     w.write(doc_id, [('bold', f"IC(5日): {' | '.join(parts)}")])
                     w.write(doc_id, [('text',
                         f"✅有效: {'/'.join(eff) if eff else '无'} | ⚠️弱: {'/'.join(weak) if weak else '无'} | 动态权重应偏向有效因子")])
@@ -566,9 +566,9 @@ try:
                     f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {cn} | ROE{s.get('roe','?')}%"
                 )])
 
-    # ═══ Nick四问 + 四重确认 — 对扫描TOP3做深度分析 ═══
+    # ═══ 2.2 深度研究: Nick四问+四重确认 ═══
     if scan_results and scan_status == "complete":
-        w.write(doc_id, [('divider', ''), ('h2', '🔬 3.6 Nick四问+四重确认')])
+        w.write(doc_id, [('divider', ''), ('h2', '🔬 2.2 深度研究')])
         top3 = [s for s in scan_results[:3] if s.get('score', 0) > 0]
         if top3:
             for rank, s in enumerate(top3, 1):
@@ -684,8 +684,8 @@ try:
         log(f"⚠️ Shadow entry/exit: {_e}")
     log("Shadow entry/exit done")
 
-    # ═══ 4. 策略四多资产模拟盘 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '💼 4. 组合状态')])
+    # ═══ 4. 3. 组合状态 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '💼 3. 组合状态')])
     try:
         from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
         _s4_init(regime)
@@ -730,8 +730,8 @@ try:
     except Exception as e:
         w.write(doc_id, [('text', f'⏳ 策略四模拟盘加载中... ({str(e)[:60]})')])
 
-    # ═══ 5. 国产替代追踪 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '🏭 5. 国产替代追踪')])
+    # ═══ 5. 4. 国产替代 ═══
+    w.write(doc_id, [('divider', ''), ('h2', '🏭 4. 国产替代')])
     w.write(doc_id, [('text', '国产化率<30%=替代空间巨大 | 30-60%=加速期 | >60%=成熟期')])
     try:
         from investment_system.config import DOMESTIC_SUB_THEMES
@@ -747,7 +747,7 @@ try:
     except Exception:
         w.write(doc_id, [('text', '国产替代数据加载中...')])
 
-    # ─── ETF/债券组合推荐 ───
+    # ─── 5. ETF配置 ───
     # ── 收集ETF预取数据 → 传入ETF板块（预取与扫描并发，缩短总耗时）──
     _a_etf_prices, _us_etf_prices = {}, {}
     if _etf_future is not None:
@@ -766,8 +766,8 @@ try:
                                     session=session, a_etf_prices=_a_etf_prices, us_etf_prices=_us_etf_prices)
     log("ETF portfolio done")
 
-    # ─── 7. 链路摘要 ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔗 7. 链路摘要')])
+    # ─── 7. 6. 链路 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔗 5. 链路')])
 
     SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
     chain_summary = None
@@ -876,8 +876,8 @@ try:
             ])
     log("Chain hooks done")
 
-    # ─── 8. 情报摘要 ───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 8. 情报摘要')])
+    # ─── 8. 7. 情报 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 6. 情报')])
     w.write(doc_id, [('bold', '8.1 异动分析')])
 
     anomaly_results = []
@@ -943,7 +943,7 @@ try:
     log("News done")
 
     # ─── 9. 行动建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="9")
+    rpt.build_action_section(w, doc_id, macro, section_prefix="7")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
