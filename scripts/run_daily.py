@@ -242,7 +242,17 @@ try:
     log("Shadow pre-check done")
 
     # 多资产快照
-    w.write(doc_id, [('text', f'多资产: LDS全天候{_fmt(lds.get("portfolio_ret_1d"))} | YTD{_fmt(lds.get("portfolio_ytd"))}')])
+    try:
+        bonds = scan_bonds()
+        us10y = None
+        for y in bonds.get('us_treasury', {}).get('yields', []):
+            if '10年' in y.get('name', ''): us10y = y.get('current'); break
+        gold = lds.get('gold_price', '?')
+        parts = [f'LDS全天候{_fmt(lds.get("portfolio_ret_1d"))} | YTD{_fmt(lds.get("portfolio_ytd"))}']
+        if gold and gold != '?': parts.append(f'黄金¥{gold}')
+        if us10y: parts.append(f'美债10Y {us10y}%')
+        w.write(doc_id, [('text', '多资产: ' + ' | '.join(parts))])
+    except: pass
 
     # ═══ 3. 选股引擎: 观察池 ═══
     w.write(doc_id, [('divider', ''), ('h2', '👁️ 1. 观察池')])
@@ -505,17 +515,25 @@ try:
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
 
-    # ── 链外发现: 评分≥6且不在观察池 ──
-    if scan_results and scan_status == "complete":
+    # ── 链外发现: 扫描评分≥6 或 ≥5%异动 且不在观察池 ──
+    if scan_status == "complete":
         try:
             outsiders = [s for s in scan_results
                          if s.get('score',0) >= 6.0
                          and str(s.get('symbol','')) not in _watchlist_codes]
+            # 也从异动股中找
+            for a in (anomaly_stocks_for_news or []):
+                sym = str(a.get('symbol',''))
+                if sym not in _watchlist_codes and sym not in [s.get('symbol','') for s in outsiders]:
+                    outsiders.append({'name': a.get('name','?'), 'symbol': sym,
+                                      'score': 0, 'sector': '', 'roe': '', 'chg': a.get('chg',0)})
             if outsiders:
-                w.write(doc_id, [('bold', f'🔎 链外发现: {len(outsiders)}只 (评分≥6, 不在观察池)')])
-                for s in outsiders[:3]:
+                w.write(doc_id, [('bold', f'🔎 链外发现: {len(outsiders)}只')])
+                for s in outsiders[:5]:
+                    score_str = f" {s.get('score',0):.1f}分" if s.get('score',0) > 0 else ""
+                    roe_str = f" ROE{s['roe']}%" if s.get('roe') else ""
                     w.write(doc_id, [('bullet',
-                        f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {s.get('sector','?')} | ROE{s.get('roe','?')}%"
+                        f"**{s.get('name','?')}**({s.get('symbol','?')}){score_str} | {s.get('sector','?')}{roe_str}"
                     )])
         except: pass
 
@@ -615,6 +633,15 @@ try:
                     ('text', f"  Q1紧迫度:{q1} | Q2趋势:{q2} | Q3共识:{q3} | Q4拥挤度:{q4}"),
                     ('text', f"  四重确认: 宏观{check_macro} 趋势{check_trend} 逻辑{check_logic} 技术{check_tech} → {'✅通过' if passes==4 else f'⚠️ {passes}/4 不通过'}"),
                 ])
+                # 研报联动
+                rr_line = format_research_line(research_map.get(sym)) if research_map else ""
+                if rr_line:
+                    w.write(doc_id, [('bullet', rr_line)])
+                # 新闻联动
+                for a in (anomaly_results or []):
+                    if a.get('symbol') == sym:
+                        w.write(doc_id, [('bullet', f"📰 {a.get('driver','')[:80]}")])
+                        break
         else:
             w.write(doc_id, [('text', '⏳ 扫描数据不足，无法执行四重确认')])
 
@@ -700,7 +727,7 @@ try:
         log(f"⚠️ Shadow entry/exit: {_e}")
     log("Shadow entry/exit done")
 
-    # ═══ 4. 3. 组合状态 ═══
+    # ═══ 3. 组合状态 ═══
     w.write(doc_id, [('divider', ''), ('h2', '💼 3. 组合状态')])
     try:
         from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
@@ -709,6 +736,20 @@ try:
         snap = _s4_snap()
 
         w.write(doc_id, [('bold', f"总值 ¥{snap['total_value']:,.0f} | {snap['regime']} | 仓位{snap['position_pct']:.0f}%"),])
+
+        # 实际持仓
+        try:
+            summary = _sa_summary()
+            positions = summary.get('positions', [])
+            if positions:
+                pos_parts = []
+                for p in positions[:5]:
+                    sym = p.get('symbol','?')
+                    chg = p.get('change', 0)
+                    arrow = '↑' if chg > 0 else ('↓' if chg < 0 else '→')
+                    pos_parts.append(f"{p['name']}({sym}) {arrow}{abs(chg):.1f}%")
+                w.write(doc_id, [('bold', f"持仓 {len(positions)}只: {' | '.join(pos_parts)}")])
+        except: pass
 
         alloc = snap.get('allocations', {})
         alloc_lines = []
@@ -719,7 +760,9 @@ try:
             if key in ('stock_etf','bond_etf','commodity_etf','gold_etf'):
                 pick = a.get('picked', {})
                 sym = pick.get('symbol', '?')
-                alloc_lines.append(f"{label}: ¥{target:,} → {sym}")
+                score = pick.get('score', '')
+                score_str = f" {score:.1f}分" if score else ""
+                alloc_lines.append(f"{label}: ¥{target:,} → {sym}{score_str}")
             elif key == 'a_share':
                 status = "⏸️" if dual_closed else "待建仓"
                 alloc_lines.append(f"{label}: ¥{target:,} → {status}")
