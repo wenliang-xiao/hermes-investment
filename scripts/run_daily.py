@@ -177,7 +177,15 @@ try:
         ('text', f"LDS判断: {lds_judgment}"),
     ])
     if dual_closed:
-        w.write(doc_id, [('text', f"转绿条件: CPI≥1.0%(当前{cpi}%) + 3月动量{cpi_mom:+.2f}%{'✅' if cpi_mom>0.2 else ''} + 趋势≥温(当前{trend_temp})")])
+        prio_file = '/tmp/hermes_top_priority.json'
+        prio_text = ""
+        try:
+            if os.path.exists(prio_file):
+                with open(prio_file) as f:
+                    prio = json.load(f)
+                prio_text = f" | 转绿第一优先级: {prio.get('name','?')}({prio.get('symbol','?')}) {prio.get('score',0):.1f}分 ({prio.get('date','?')})"
+        except: pass
+        w.write(doc_id, [('text', f"转绿条件: CPI≥1.0%(当前{cpi}%) + 3月动量{cpi_mom:+.2f}%{'✅' if cpi_mom>0.2 else ''} + 趋势≥温(当前{trend_temp}){prio_text}")])
     
     # ── 1. 宏观气候 ──
     w.write(doc_id, [('h2', '1. 宏观气候')])
@@ -498,6 +506,30 @@ try:
         w.write(doc_id, [('bullet', f'⚠️ 扫描跳过: {str(scan_err)[:60]}')])
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
+
+    # ═══ 3.6 因子有效性 ═══
+    if scan_results and scan_status == "complete":
+        try:
+            from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
+            save_snapshot(scan_results)  # 保存分数快照供IC回溯
+            qr = get_quality_report()
+            factor_ic = qr.get("factor_ic", {})
+            if factor_ic:
+                parts = []
+                for fn, r in factor_ic.items():
+                    if r is None: continue
+                    ic = r["ic"]
+                    icon = "↑" if ic > 0.05 else ("→" if ic > 0.02 else "↓")
+                    parts.append(f"{fn}{icon}{ic:.3f}")
+                if parts:
+                    eff = qr.get("effective", [])
+                    weak = qr.get("weak", [])
+                    w.write(doc_id, [('divider', ''), ('h2', '🔬 3.6 因子有效性')])
+                    w.write(doc_id, [('bold', f"IC(5日): {' | '.join(parts)}")])
+                    w.write(doc_id, [('text',
+                        f"✅有效: {'/'.join(eff) if eff else '无'} | ⚠️弱: {'/'.join(weak) if weak else '无'} | 动态权重应偏向有效因子")])
+        except Exception as e:
+            log(f"Factor quality skipped: {e}")
 
     # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
     if scan_results and scan_status == "complete" and _chain_stocks:
