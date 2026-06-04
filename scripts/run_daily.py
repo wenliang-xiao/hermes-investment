@@ -371,6 +371,7 @@ try:
         anomaly_stocks_for_news = []
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
+    anomaly_results = []  # 前置声明，情报节会填充
 
     # ═══ 1.4 低共识狩猎 ═══
     try:
