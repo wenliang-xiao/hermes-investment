@@ -511,7 +511,26 @@ try:
     if scan_results and scan_status == "complete":
         try:
             from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
-            save_snapshot(scan_results)  # 保存分数快照供IC回溯
+            # 从扫描结果提取价格（scan_one自带的price字段）
+            _price_map = {str(s.get('symbol', '')): s.get('price') 
+                         for s in scan_results if s.get('price') is not None}
+            save_snapshot(scan_results, prices_map=_price_map)
+            log(f"Factor snapshot saved ({len(scan_results)} stocks, {len(_price_map)} prices)")
+
+            # 保存今日最高分票 → 供明日报决策摘要「转绿第一优先级」
+            best = max(scan_results, key=lambda s: s.get('score', 0))
+            import json as _json
+            try:
+                with open('/tmp/hermes_top_priority.json', 'w') as _f:
+                    _json.dump({
+                        'name': best.get('name', ''),
+                        'symbol': best.get('symbol', ''),
+                        'score': round(best.get('score', 0), 1),
+                        'date': time.strftime('%Y-%m-%d'),
+                    }, _f)
+            except Exception:
+                pass
+
             qr = get_quality_report()
             factor_ic = qr.get("factor_ic", {})
             if factor_ic:
