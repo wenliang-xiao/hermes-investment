@@ -254,7 +254,7 @@ try:
         w.write(doc_id, [('text', '多资产: ' + ' | '.join(parts))])
     except: pass
 
-    # ═══ 3. 选股引擎: 观察池 ═══
+    # ═══ 1. 观察池 ═══
     w.write(doc_id, [('divider', ''), ('h2', '👁️ 1. 观察池')])
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
 
@@ -372,7 +372,7 @@ try:
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
 
-    # ═══ 3.4 低共识狩猎 — 跌幅大+基本面好的逆向机会 ═══
+    # ═══ 1.4 低共识狩猎 ═══
     try:
         contrarian = []
         for code, info in WATCHLIST.items():
@@ -392,7 +392,7 @@ try:
                 if roe and float(roe) > 15:
                     contrarian.append((info.get('name', code), code, chg, roe, rsi))
         if contrarian:
-            w.write(doc_id, [('bold', f'🔎 3.4 低共识狩猎: {len(contrarian)}只 (跌幅>3%+ROE>15%→逆向研究)')])
+            w.write(doc_id, [('h3', f'🔎 1.4 低共识狩猎: {len(contrarian)}只 (跌幅>3%+ROE>15%→逆向研究)')])
             for name, code, chg, roe, rsi in contrarian[:3]:
                 w.write(doc_id, [('bullet',
                     f"**{name}**({code}) {chg:+.1f}% | ROE{roe:.0f}% | RSI{rsi:.0f} | 市场悲观+基本面强=逆向机会"
@@ -537,72 +537,9 @@ try:
                     )])
         except: pass
 
-    # ═══ 2.3 因子有效性 ═══
-    if scan_results and scan_status == "complete":
-        try:
-            from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
-            # 从扫描结果提取价格（scan_one自带的price字段）
-            _price_map = {str(s.get('symbol', '')): s.get('price') 
-                         for s in scan_results if s.get('price') is not None}
-            save_snapshot(scan_results, prices_map=_price_map)
-            log(f"Factor snapshot saved ({len(scan_results)} stocks, {len(_price_map)} prices)")
-
-            # 保存今日最高分票 → 供明日报决策摘要「转绿第一优先级」
-            best = max(scan_results, key=lambda s: s.get('score', 0))
-            import json as _json
-            try:
-                with open('/tmp/hermes_top_priority.json', 'w') as _f:
-                    _json.dump({
-                        'name': best.get('name', ''),
-                        'symbol': best.get('symbol', ''),
-                        'score': round(best.get('score', 0), 1),
-                        'date': time.strftime('%Y-%m-%d'),
-                    }, _f)
-            except Exception:
-                pass
-
-            qr = get_quality_report()
-            factor_ic = qr.get("factor_ic", {})
-            if factor_ic:
-                parts = []
-                for fn, r in factor_ic.items():
-                    if r is None: continue
-                    ic = r["ic"]
-                    icon = "↑" if ic > 0.05 else ("→" if ic > 0.02 else "↓")
-                    parts.append(f"{fn}{icon}{ic:.3f}")
-                if parts:
-                    eff = qr.get("effective", [])
-                    weak = qr.get("weak", [])
-                    w.write(doc_id, [('divider', ''), ('h2', '🔬 2.3 因子有效性')])
-                    w.write(doc_id, [('bold', f"IC(5日): {' | '.join(parts)}")])
-                    w.write(doc_id, [('text',
-                        f"✅有效: {'/'.join(eff) if eff else '无'} | ⚠️弱: {'/'.join(weak) if weak else '无'} | 动态权重应偏向有效因子")])
-        except Exception as e:
-            log(f"Factor quality skipped: {e}")
-
-    # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
-    if scan_results and scan_status == "complete" and _chain_stocks:
-        discoveries = []
-        for s in scan_results:
-            sym = str(s.get('symbol', ''))
-            if not sym or sym in _watchlist_codes: continue
-            score = s.get('score', 0)
-            if score < 6.0: continue
-            # 查找该票属于哪个链
-            for cn, codes in _chain_stocks.items():
-                if sym in codes:
-                    discoveries.append((cn, s))
-                    break
-        if discoveries:
-            w.write(doc_id, [('divider', ''), ('bold', f'🔎 链内新发现: {len(discoveries)}只 (已评分≥6, 同链但不在观察池)')])
-            for cn, s in discoveries[:5]:
-                w.write(doc_id, [('bullet',
-                    f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {cn} | ROE{s.get('roe','?')}%"
-                )])
-
     # ═══ 2.2 深度研究: Nick四问+四重确认 ═══
     if scan_results and scan_status == "complete":
-        w.write(doc_id, [('divider', ''), ('h2', '🔬 2.2 深度研究')])
+        w.write(doc_id, [('divider', ''), ('h3', '🔬 2.2 深度研究')])
         top3 = [s for s in scan_results[:3] if s.get('score', 0) > 0]
         if top3:
             for rank, s in enumerate(top3, 1):
@@ -644,6 +581,69 @@ try:
                         break
         else:
             w.write(doc_id, [('text', '⏳ 扫描数据不足，无法执行四重确认')])
+
+    # ═══ 2.3 因子有效性 ═══
+    if scan_results and scan_status == "complete":
+        try:
+            from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
+            # 从扫描结果提取价格（scan_one自带的price字段）
+            _price_map = {str(s.get('symbol', '')): s.get('price') 
+                         for s in scan_results if s.get('price') is not None}
+            save_snapshot(scan_results, prices_map=_price_map)
+            log(f"Factor snapshot saved ({len(scan_results)} stocks, {len(_price_map)} prices)")
+
+            # 保存今日最高分票 → 供明日报决策摘要「转绿第一优先级」
+            best = max(scan_results, key=lambda s: s.get('score', 0))
+            import json as _json
+            try:
+                with open('/tmp/hermes_top_priority.json', 'w') as _f:
+                    _json.dump({
+                        'name': best.get('name', ''),
+                        'symbol': best.get('symbol', ''),
+                        'score': round(best.get('score', 0), 1),
+                        'date': time.strftime('%Y-%m-%d'),
+                    }, _f)
+            except Exception:
+                pass
+
+            qr = get_quality_report()
+            factor_ic = qr.get("factor_ic", {})
+            if factor_ic:
+                parts = []
+                for fn, r in factor_ic.items():
+                    if r is None: continue
+                    ic = r["ic"]
+                    icon = "↑" if ic > 0.05 else ("→" if ic > 0.02 else "↓")
+                    parts.append(f"{fn}{icon}{ic:.3f}")
+                if parts:
+                    eff = qr.get("effective", [])
+                    weak = qr.get("weak", [])
+                    w.write(doc_id, [('divider', ''), ('h3', '🔬 2.3 因子有效性')])
+                    w.write(doc_id, [('bold', f"IC(5日): {' | '.join(parts)}")])
+                    w.write(doc_id, [('text',
+                        f"✅有效: {'/'.join(eff) if eff else '无'} | ⚠️弱: {'/'.join(weak) if weak else '无'} | 动态权重应偏向有效因子")])
+        except Exception as e:
+            log(f"Factor quality skipped: {e}")
+
+    # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
+    if scan_results and scan_status == "complete" and _chain_stocks:
+        discoveries = []
+        for s in scan_results:
+            sym = str(s.get('symbol', ''))
+            if not sym or sym in _watchlist_codes: continue
+            score = s.get('score', 0)
+            if score < 6.0: continue
+            # 查找该票属于哪个链
+            for cn, codes in _chain_stocks.items():
+                if sym in codes:
+                    discoveries.append((cn, s))
+                    break
+        if discoveries:
+            w.write(doc_id, [('divider', ''), ('bold', f'🔎 链内新发现: {len(discoveries)}只 (已评分≥6, 同链但不在观察池)')])
+            for cn, s in discoveries[:5]:
+                w.write(doc_id, [('bullet',
+                    f"**{s.get('name','?')}**({s.get('symbol','?')}) {s.get('score',0):.1f}分 | {cn} | ROE{s.get('roe','?')}%"
+                )])
 
         # 转绿后第一优先级 (持久化)
         if top3 and dual_closed:
@@ -789,7 +789,7 @@ try:
     except Exception as e:
         w.write(doc_id, [('text', f'⏳ 策略四模拟盘加载中... ({str(e)[:60]})')])
 
-    # ═══ 5. 4. 国产替代 ═══
+    # ═══ 4. 国产替代 ═══
     w.write(doc_id, [('divider', ''), ('h2', '🏭 4. 国产替代')])
     w.write(doc_id, [('text', '国产化率<30%=替代空间巨大 | 30-60%=加速期 | >60%=成熟期')])
     try:
@@ -821,12 +821,13 @@ try:
             except Exception:
                 pass
 
+    w.write(doc_id, [('divider', ''), ('h2', '📊 5. ETF配置')])
     rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed,
                                     session=session, a_etf_prices=_a_etf_prices, us_etf_prices=_us_etf_prices)
     log("ETF portfolio done")
 
-    # ─── 7. 6. 链路 ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔗 5. 链路')])
+    # ─── 6. 链路 ───
+    w.write(doc_id, [('divider', ''), ('h2', '🔗 6. 链路')])
 
     SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
     chain_summary = None
@@ -935,9 +936,9 @@ try:
             ])
     log("Chain hooks done")
 
-    # ─── 8. 7. 情报 ───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 6. 情报')])
-    w.write(doc_id, [('bold', '8.1 异动分析')])
+    # ─── 7. 情报 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 7. 情报')])
+    w.write(doc_id, [('h3', '7.1 异动分析')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -958,7 +959,7 @@ try:
         w.write(doc_id, [('quote', '今日观察池无≥5%异动，展示常规市场情报')])
 
     if summary_text and len(summary_text.strip()) > 50:
-        w.write(doc_id, [('bold', '📡 8.2 市场情报')])
+        w.write(doc_id, [('h3', '7.2 市场情报')])
         import re as _re
         bullish, bearish, neutral = [], [], []
         for line in summary_text.strip().split('\n')[:20]:
@@ -1001,8 +1002,8 @@ try:
         pass
     log("News done")
 
-    # ─── 9. 行动建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="7")
+    # ─── 8. 行动建议 ───
+    rpt.build_action_section(w, doc_id, macro, section_prefix="8")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
