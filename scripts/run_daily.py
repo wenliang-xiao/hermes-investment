@@ -587,7 +587,7 @@ try:
                 if abs(_s.get("change_pct", 0) or 0) >= 5:
                     log(f"  VOLATILE skip {_sy}"); continue
                 _sc2 = _s.get("score", 0)
-                if _sc2 < 6.0:
+                if _sc2 < 5.5:
                     log(f"  LOW_SCORE skip {_sy}: {_sc2:.1f}"); continue
                 _pr = _s.get("price", 0)
                 if _pr <= 0:

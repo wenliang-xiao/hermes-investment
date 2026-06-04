@@ -118,8 +118,6 @@ def init(regime=None):
     regime = regime or data.get("regime", "复苏期")
     weights = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS["复苏期"])
     data["regime"] = regime
-    data["capital"] = 1000000
-    data["cash"] = 0
     data["initialized"] = True
     data["initialized_at"] = datetime.now().strftime("%Y-%m-%d")
     data["allocations"] = weights
@@ -172,7 +170,7 @@ def init(regime=None):
 
 
 def daily(macro, scanner_results):
-    """每日执行: 更新价格, check止损, 四重确认→A股建仓"""
+    """每日执行: 更新ETF价格, 检查ETF止损 (A股建仓由run_daily统一管理)"""
     regime = macro.get('regime', '复苏期')
     data = _load()
     if not data.get("initialized"):
@@ -201,44 +199,6 @@ def daily(macro, scanner_results):
                 actions.append(f"🔴 止损触发 {a['name']}({a['symbol']}) {a['type']}")
     except Exception as e:
         actions.append(f"⚠️ ETF价格更新失败: {str(e)[:60]}")
-
-    # A股建仓检查: 四重确认
-    dual_gate = macro.get('dual_gate', {})
-    macro_gate = dual_gate.get('macro_gate', '')
-    trend_gate = dual_gate.get('trend_gate', '')
-    trend_temp = macro.get('trend_temp', '')
-    cpi = macro.get('macro_data', {}).get('cpi')
-    cpi_mom = macro.get('macro_data', {}).get('cpi_momentum_3m', 0) or 0
-
-    macro_ok = (isinstance(cpi, (int, float)) and cpi >= 1.0) or (cpi_mom > 0.3)
-    trend_ok = trend_temp in ('温', '热')
-    dual_open = macro_gate not in ('红灯', '黄灯') or trend_gate not in ('红灯', '黄灯')
-
-    # 检查A股持仓
-    try:
-        from investment_system.output.shadow_account import get_shadow_summary
-        summary = get_shadow_summary()
-        a_positions = [p for p in summary.get("positions", []) if str(p["symbol"]).isdigit()]
-
-        # 检查掉队票
-        if scanner_results:
-            sc_map = {str(s.get("symbol", "")): s.get("score", 0) for s in scanner_results}
-            for p in a_positions:
-                sym = p["symbol"]
-                score = sc_map.get(sym)
-                if score is not None and score < 3.0:
-                    exit_position(sym, p.get("current", 0), f"评分{score:.1f}<3.0→清仓")
-                    actions.append(f"🔻 A股清仓 {p['name']}({sym}) 评分{score:.1f}")
-    except: pass
-
-    # 美股/港股: 首次评分后建仓
-    a_alloc = data["allocations"].get("a_share", 500000)
-    if dual_open and not dual_gate.get('macro_gate') in ('红灯', '黄灯'):
-        # 仅当双门打开时检查A股建仓条件
-        if scanner_results and not a_positions:
-            top = [s for s in scanner_results[:5] if s.get('score', 0) >= 6.0]
-            if top and macro_ok and trend_ok:
-                actions.append(f"✅ A股建仓条件满足 — {len(top)}只候选待执行")
 
     data["last_daily"] = today
     data["daily_actions"] = actions

@@ -28,14 +28,20 @@ def entry(symbol: str, name: str, action: str, price: float, reason: str,
           quantity: int = 100, pct: float = 0.02, entry_score: float = None):
     book = load_shadow()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    entry_record = {
-        "time": now, "symbol": symbol, "name": name,
-        "action": action, "price": price, "reason": reason,
-    }
-    book["history"].append(entry_record)
-    book["history"] = book["history"][-200:]
 
     if action in ("买入", "加仓"):
+        # 已有持仓不覆盖 — run_daily建仓前已检查_hold
+        if symbol in book["positions"]:
+            return book
+        cost = price * quantity
+        if cost > book["cash"]:
+            # 现金不足时按比例缩减数量
+            quantity = max(100, int(book["cash"] / price / 100) * 100)
+            cost = price * quantity
+            if cost > book["cash"]:
+                return book  # 现金连最小单位都不够
+        book["cash"] -= cost
+
         pos = {
             "name": name, "entry_price": price,
             "entry_time": now,
@@ -43,13 +49,29 @@ def entry(symbol: str, name: str, action: str, price: float, reason: str,
             "peak_price": price, "peak_time": now,
             "pct": pct,
             "entry_date": datetime.now().strftime("%Y-%m-%d"),
+            "cost": cost,
         }
         if entry_score is not None:
             pos["entry_score"] = entry_score
         book["positions"][symbol] = pos
+        book["history"].append({
+            "time": now, "symbol": symbol, "name": name,
+            "action": action, "price": price, "reason": reason,
+            "quantity": quantity, "cost": cost,
+        })
     elif action in ("卖出", "减仓"):
-        book["positions"].pop(symbol, None)
+        pos = book["positions"].pop(symbol, None)
+        if pos:
+            pnl = (price - pos["entry_price"]) * pos.get("quantity", 0)
+            book["cash"] += price * pos.get("quantity", 0)
+            book["realized_pnl"] = book.get("realized_pnl", 0) + pnl
+            book["history"].append({
+                "time": now, "symbol": symbol, "name": pos.get("name", symbol),
+                "action": action, "price": price, "reason": reason,
+                "quantity": pos.get("quantity", 0), "pnl": round(pnl, 2),
+            })
 
+    book["history"] = book["history"][-200:]
     save_shadow(book)
     return book
 
@@ -167,18 +189,33 @@ def get_shadow_summary() -> dict:
 
 
 def exit_position(symbol: str, price: float = None, reason: str = "手动清仓") -> dict:
-    """退出持仓并加入5天冷却期"""
+    """退出持仓：加回现金、计算盈亏、加入5天冷却期"""
     book = load_shadow()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     pos = book["positions"].pop(symbol, None)
 
-    entry_record = {
-        "time": now, "symbol": symbol,
-        "name": pos.get("name", symbol) if pos else symbol,
-        "action": "卖出", "price": price or 0,
-        "reason": reason,
-    }
-    book["history"].append(entry_record)
+    if pos and price:
+        qty = pos.get("quantity", 0)
+        pnl = (price - pos["entry_price"]) * qty
+        proceeds = price * qty
+        book["cash"] += proceeds
+        book["realized_pnl"] = book.get("realized_pnl", 0) + pnl
+
+        book["history"].append({
+            "time": now, "symbol": symbol,
+            "name": pos.get("name", symbol),
+            "action": "卖出", "price": price, "reason": reason,
+            "quantity": qty, "pnl": round(pnl, 2),
+            "proceeds": round(proceeds, 2),
+        })
+    else:
+        book["history"].append({
+            "time": now, "symbol": symbol,
+            "name": pos.get("name", symbol) if pos else symbol,
+            "action": "卖出", "price": price or 0,
+            "reason": reason,
+        })
+
     book["history"] = book["history"][-200:]
 
     # 加入冷却期

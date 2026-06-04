@@ -304,6 +304,7 @@ class FactorScanner:
 
             return {
                 "symbol": symbol,
+                "name": self._get_stock_name(symbol),
                 "score": round(total_score, 2),
                 "perez_multiplier": perez_multiplier,
                 "profit_pool_score": round(profit_pool_score, 1),
