@@ -1,8 +1,7 @@
-"""
-Data Layer — 统一数据获取
-优先级：Tushare Pro（主力）→ baostock（免费安全网）→ AKShare（宏观月度兜底）
+"""Data Layer - 统一数据获取
+优先级: EastMoney DataCenter(主力,无频限) -> baostock(免费安全网) -> Tushare Pro(备选)
 
-配置 Tushare：在 config.py 中设置 TUSHARE_TOKEN
+配置 Tushare: 在 config.py 中设置 TUSHARE_TOKEN
 或设置同名环境变量
 """
 import baostock as bs
@@ -10,6 +9,7 @@ import pandas as pd
 import numpy as np
 import time
 import logging
+import requests
 from datetime import datetime, timedelta
 from investment_system import config
 from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
@@ -176,22 +176,78 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════
-# 3. 基本面数据（baostock）
+# 3. 基本面数据（EastMoney DataCenter + baostock）
 # ═══════════════════════════════════════════
+
+# EastMoney DataCenter API
+_EM_HEADERS = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
+_EM_URL = 'https://datacenter-web.eastmoney.com/api/data/v1/get'
+
+def _get_financial_em(symbol: str) -> dict:
+    """东方财富数据中心获取财务数据（主力，无频限）。
+    返回 baostock 兼容字段名: 净资产收益率, 营业收入同比增长率, 净利润同比增长率, 毛利率, 每股收益, 每股净资产
+    """
+    try:
+        params = {
+            'reportName': 'RPT_LICO_FN_CPD',
+            'columns': 'SECURITY_CODE,SECURITY_NAME_ABBR,REPORTDATE,WEIGHTAVG_ROE,XSMLL,YSTZ,SJLTZ,BASIC_EPS,BPS,PARENT_NETPROFIT',
+            'filter': f'(SECURITY_CODE="{symbol}")',
+            'pageNumber': 1,
+            'pageSize': 1,
+        }
+        r = requests.get(_EM_URL, params=params, headers=_EM_HEADERS, timeout=10)
+        d = r.json()
+        if not d.get('result') or not d['result'].get('data'):
+            return {}
+
+        row = d['result']['data'][0]
+        result = {}
+
+        em_fields = {
+            'WEIGHTAVG_ROE': '净资产收益率',
+            'YSTZ': '营业收入同比增长率',
+            'SJLTZ': '净利润同比增长率',
+            'XSMLL': '毛利率',
+        }
+        for em_key, bs_key in em_fields.items():
+            val = row.get(em_key)
+            if val is not None and val != '':
+                try:
+                    result[bs_key] = abs(float(val))  # EM 已返回百分比(4.37=4.37%)，直接使用
+                except (ValueError, TypeError):
+                    pass
+
+        try:
+            eps = row.get('BASIC_EPS')
+            if eps is not None and eps != '':
+                result['每股收益'] = float(eps)
+        except (ValueError, TypeError):
+            pass
+        try:
+            bps = row.get('BPS')
+            if bps is not None and bps != '':
+                result['每股净资产'] = float(bps)
+        except (ValueError, TypeError):
+            pass
+
+        return result
+    except Exception:
+        return {}
+
 _FIN_CACHE = {}
 
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。Tushare→baostock。同进程内缓存。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。EastMoney -> baostock -> Tushare。同进程内缓存。"""
     if symbol in _FIN_CACHE:
         return _FIN_CACHE[symbol]
-    try:
-        from investment_system.data.tushare_layer import get_financial_report_ts
-        result = get_financial_report_ts(symbol)
-        if result:
-            _FIN_CACHE[symbol] = result
-            return result
-    except Exception:
-        pass
+
+    # 主力: EastMoney DataCenter（无频限）
+    result = _get_financial_em(symbol)
+    if result:
+        _FIN_CACHE[symbol] = result
+        return result
+
+    # fallback: baostock
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}

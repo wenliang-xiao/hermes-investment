@@ -7,3 +7,5 @@ __pycache__/
 /hermes/
 config_backup_*.yaml
 credentials/
+*.json
+!config.json
