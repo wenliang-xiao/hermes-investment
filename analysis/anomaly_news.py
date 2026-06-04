@@ -239,7 +239,10 @@ def analyze_anomaly_stocks(
     print(f"[anomaly_news] 市场快讯: CLS {len(cls_news)} 条 + 新浪 {len(sina_news)} 条")
 
     results = []
-    for stock in targets[:5]:
+    # 并发分析每只异动股（新闻获取+LLM调用独立，可并行）
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _analyze_one(stock):
         symbol = stock.get("symbol", "")
         name = stock.get("name", symbol)
         chg = float(stock.get("chg", 0))
@@ -255,7 +258,7 @@ def analyze_anomaly_stocks(
             prompt = _build_anomaly_prompt(name, symbol, chg, price, stock_news, market_news)
             llm_result = _call_llm_for_anomaly(prompt)
 
-        results.append({
+        return {
             "symbol": symbol,
             "name": name,
             "chg": chg,
@@ -264,9 +267,27 @@ def analyze_anomaly_stocks(
             "llm_analysis": llm_result,
             "top_news": stock_news[:3],
             "analyzed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        })
+        }
 
-        time.sleep(1)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = {pool.submit(_analyze_one, s): s for s in targets[:5]}
+        for f in as_completed(futs, timeout=90):
+            try:
+                r = f.result(timeout=10)
+                results.append(r)
+                print(f"    ✅ {r['name']} 分析完成")
+            except Exception as e:
+                s = futs[f]
+                print(f"    ❌ {s.get('name','?')} 分析失败: {e}")
+                results.append({
+                    "symbol": s.get("symbol", ""),
+                    "name": s.get("name", "?"),
+                    "chg": float(s.get("chg", 0)),
+                    "stock_news_count": 0,
+                    "llm_analysis": None,
+                    "top_news": [],
+                    "analyzed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
 
     return results
 

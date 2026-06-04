@@ -2034,62 +2034,12 @@ def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
 # ═══════════════════════════════════
 # 板块 7.5: ETF/债券组合推荐
 # ═══════════════════════════════════
-def build_etf_portfolio_section(w, doc_id, macro=None, dual_closed=True, session="收盘后"):
-    """ETF/债券组合推荐板块 — 择时版 + 非择时版 + LDS全天候参考"""
-    regime = macro.get("regime", "复苏期") if macro else "复苏期"
-    cpi = macro.get("macro_data", {}).get("cpi", "?") if macro else "?"
-    trend_temp = macro.get("trend_temp", "?") if macro else "?"
-
-    w.write(doc_id, [("divider", ""), ("h2", "📦 6. ETF/债券组合推荐")])
-    w.write(doc_id, [("text", f"宏观象限: {regime} | CPI={cpi}% | 趋势={trend_temp} | 双门{'关闭→观望' if dual_closed else '开启→可操作'}")])
-    w.write(doc_id, [("text", w.ref("二、ETF全景（三维数据驱动 + LDS组合对照）"))])
-
-    # ── 获取ETF价格数据 ──
-    import pandas as pd, numpy as np, time
+def prefetch_etf_data():
+    """预取所有ETF价格数据——单次baostock登录 + yfinance并发，供日报并发调用"""
+    import pandas as pd
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime
 
-    A_ETF_PRICES = {}
-    US_ETF_PRICES = {}
-
-    def _fetch_a_etf(code):
-        """从baostock获取A股ETF日线"""
-        import baostock as bs
-        try:
-            lg = bs.login()
-            full = "sh." + code if code.startswith("5") else "sz." + code
-            rs = bs.query_history_k_data_plus(
-                full, "date,close,volume",
-                start_date="2026-01-01", end_date=datetime.now().strftime("%Y-%m-%d"),
-                frequency="d", adjustflag="3")
-            rows = []
-            while rs.error_code == "0" and rs.next():
-                rows.append(rs.get_row_data())
-            if len(rows) >= 10:
-                df = pd.DataFrame(rows, columns=["date","close","volume"])
-                df["close"] = pd.to_numeric(df["close"])
-                return df
-        except:
-            pass
-        return None
-
-    def _calc_metrics(df):
-        if df is None or len(df) < 5:
-            return {}
-        c = df["close"].values
-        r = {"price": float(f"{c[-1]:.3f}") if c[-1] < 100 else float(f"{c[-1]:.2f}")}
-        if len(c) >= 2:
-            r["pct_1d"] = round(float((c[-1]/c[-2]-1)*100), 2)
-        if len(c) >= 5:
-            r["pct_5d"] = round(float((c[-1]/c[-5]-1)*100), 2)
-        if len(c) >= 20:
-            r["pct_20d"] = round(float((c[-1]/c[-20]-1)*100), 2)
-            r["ma20"] = round(float(c[-20:].mean()), 3)
-        if len(c) >= 60:
-            r["ma60"] = round(float(c.mean()), 3)
-            r["ma60_dev"] = round(float((c[-1]/c.mean()-1)*100), 1)
-        return r
-
-    # 预定义ETF信息
     A_ETF_INFO = {
         "510300": ("沪深300ETF", "宽基"), "588000": ("科创50ETF", "科技"),
         "512480": ("半导体ETF", "科技成长"), "512890": ("红利低波ETF", "红利"),
@@ -2110,25 +2060,118 @@ def build_etf_portfolio_section(w, doc_id, macro=None, dual_closed=True, session
         "XLU": ("公用事业ETF", "防守"), "GDX": ("黄金矿业ETF", "商品"),
     }
 
-    # 获取A股ETF价格
-    for code in list(A_ETF_INFO.keys()):
-        df = _fetch_a_etf(code)
-        if df is not None:
-            A_ETF_PRICES[code] = _calc_metrics(df)
-        time.sleep(0.15)
+    def _calc_metrics(df):
+        if df is None or len(df) < 5:
+            return {}
+        c = df["close"].values
+        r = {"price": float(f"{c[-1]:.3f}") if c[-1] < 100 else float(f"{c[-1]:.2f}")}
+        if len(c) >= 2:
+            r["pct_1d"] = round(float((c[-1]/c[-2]-1)*100), 2)
+        if len(c) >= 5:
+            r["pct_5d"] = round(float((c[-1]/c[-5]-1)*100), 2)
+        if len(c) >= 20:
+            r["pct_20d"] = round(float((c[-1]/c[-20]-1)*100), 2)
+            r["ma20"] = round(float(c[-20:].mean()), 3)
+        if len(c) >= 60:
+            r["ma60"] = round(float(c.mean()), 3)
+            r["ma60_dev"] = round(float((c[-1]/c.mean()-1)*100), 1)
+        return r
 
-    # 获取美股ETF价格
+    A_ETF_PRICES = {}
+    US_ETF_PRICES = {}
+
+    # A股ETF: 单次baostock登录，串行查询（baostock单进程限制）
+    import baostock as bs
     try:
-        from investment_system.data.yf_data_layer import get_price_data
-        for sym in list(US_ETF_INFO.keys()):
+        lg = bs.login()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        for code in A_ETF_INFO:
+            try:
+                full = "sh." + code if code.startswith("5") else "sz." + code
+                rs = bs.query_history_k_data_plus(
+                    full, "date,close,volume",
+                    start_date="2026-01-01", end_date=today_str,
+                    frequency="d", adjustflag="3")
+                rows = []
+                while rs.error_code == "0" and rs.next():
+                    rows.append(rs.get_row_data())
+                if len(rows) >= 10:
+                    df = pd.DataFrame(rows, columns=["date", "close", "volume"])
+                    df["close"] = pd.to_numeric(df["close"])
+                    A_ETF_PRICES[code] = _calc_metrics(df)
+            except Exception:
+                pass
+        bs.logout()
+    except Exception:
+        pass
+
+    # 美股ETF: ThreadPoolExecutor并发
+    from investment_system.data.yf_data_layer import get_price_data
+
+    def _fetch_us(sym):
+        try:
             df = get_price_data(sym, period="6mo")
             if df is not None and len(df) >= 10:
-                close = df["Close"].values if "Close" in df.columns else df.iloc[:,3].values
+                close = df["Close"].values if "Close" in df.columns else df.iloc[:, 3].values
                 c_pd = pd.DataFrame({"close": close})
-                US_ETF_PRICES[sym] = _calc_metrics(c_pd)
-            time.sleep(1.5)
-    except:
-        pass
+                return sym, _calc_metrics(c_pd)
+        except Exception:
+            pass
+        return sym, {}
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futs = {pool.submit(_fetch_us, s): s for s in US_ETF_INFO}
+        for f in as_completed(futs, timeout=60):
+            sym, metrics = f.result(timeout=10)
+            if metrics:
+                US_ETF_PRICES[sym] = metrics
+
+    return A_ETF_PRICES, US_ETF_PRICES
+
+
+def build_etf_portfolio_section(w, doc_id, macro=None, dual_closed=True, session="收盘后",
+                                a_etf_prices=None, us_etf_prices=None):
+    """ETF/债券组合推荐板块 — 择时版 + 非择时版 + LDS全天候参考
+    可传入预取数据 a_etf_prices/us_etf_prices（来自 prefetch_etf_data()）
+    """
+    regime = macro.get("regime", "复苏期") if macro else "复苏期"
+    cpi = macro.get("macro_data", {}).get("cpi", "?") if macro else "?"
+    trend_temp = macro.get("trend_temp", "?") if macro else "?"
+
+    w.write(doc_id, [("divider", ""), ("h2", "📦 6. ETF/债券组合推荐")])
+    w.write(doc_id, [("text", f"宏观象限: {regime} | CPI={cpi}% | 趋势={trend_temp} | 双门{'关闭→观望' if dual_closed else '开启→可操作'}")])
+    w.write(doc_id, [("text", w.ref("二、ETF全景（三维数据驱动 + LDS组合对照）"))])
+
+    # ── 获取ETF价格数据（优先用预取数据）──
+    import pandas as pd, time
+    from datetime import datetime
+
+    if a_etf_prices is not None and us_etf_prices is not None:
+        A_ETF_PRICES = a_etf_prices
+        US_ETF_PRICES = us_etf_prices
+    else:
+        # 无预取数据时自取（兼容旧调用）
+        A_ETF_PRICES, US_ETF_PRICES = prefetch_etf_data()
+
+    A_ETF_INFO = {
+        "510300": ("沪深300ETF", "宽基"), "588000": ("科创50ETF", "科技"),
+        "512480": ("半导体ETF", "科技成长"), "512890": ("红利低波ETF", "红利"),
+        "159915": ("创业板ETF", "成长"), "510050": ("上证50ETF", "宽基"),
+        "510500": ("中证500ETF", "宽基"), "159845": ("中证1000ETF", "宽基"),
+        "159949": ("创业板50ETF", "成长"), "510880": ("红利ETF", "红利"),
+        "515180": ("红利低波100ETF", "红利"), "563180": ("高股息ETF", "红利"),
+        "512660": ("军工ETF", "行业"), "511520": ("政金债券ETF", "债券"),
+        "518880": ("黄金ETF", "商品"), "159985": ("豆粕ETF", "商品"),
+        "513100": ("纳指ETF", "海外科技"), "513050": ("中概互联ETF", "海外中国"),
+        "513500": ("标普500ETF", "海外宽基"), "159509": ("纳指科技ETF", "海外科技"),
+        "513330": ("恒生互联ETF", "海外中国"), "513520": ("日经ETF", "海外宽基"),
+        "159605": ("中概互联30ETF", "海外中国"),
+    }
+    US_ETF_INFO = {
+        "QQQ": ("纳斯达克100", "海外科技"), "SPY": ("标普500", "海外宽基"),
+        "GLD": ("黄金ETF", "商品"), "TLT": ("20年+美债", "债券"),
+        "XLU": ("公用事业ETF", "防守"), "GDX": ("黄金矿业ETF", "商品"),
+    }
 
     # ── 复苏期ETF宏观匹配得分 ──
     # 复苏期: 宽基(8) 红利(7) 科技/成长(7) 行业(6) 海外科技(7) 债券(5) 商品(5) 防守(4)

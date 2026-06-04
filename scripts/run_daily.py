@@ -124,6 +124,15 @@ try:
     )
     log("Data loaded")
 
+    # ── ETF数据后台预取（与后续扫描并发执行）──
+    _etf_future = None
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        _etf_pool = ThreadPoolExecutor(max_workers=1)
+        _etf_future = _etf_pool.submit(rpt.prefetch_etf_data)
+    except Exception as _e:
+        log(f"ETF预取启动失败: {_e}")
+
     w = rpt.FeishuWriter()
     today = time.strftime('%Y/%m/%d')
     today_short = time.strftime('%m-%d')
@@ -692,7 +701,22 @@ try:
         w.write(doc_id, [('text', '国产替代数据加载中...')])
 
     # ─── ETF/债券组合推荐 ───
-    rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed, session=session)
+    # ── 收集ETF预取数据 → 传入ETF板块（预取与扫描并发，缩短总耗时）──
+    _a_etf_prices, _us_etf_prices = {}, {}
+    if _etf_future is not None:
+        try:
+            _a_etf_prices, _us_etf_prices = _etf_future.result(timeout=120)
+            log(f"ETF数据预取完成: A股{len(_a_etf_prices)}只/美股{len(_us_etf_prices)}只")
+        except Exception as _e:
+            log(f"ETF预取结果收集失败(不影响日报): {_e}")
+        finally:
+            try:
+                _etf_pool.shutdown(wait=False)
+            except Exception:
+                pass
+
+    rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed,
+                                    session=session, a_etf_prices=_a_etf_prices, us_etf_prices=_us_etf_prices)
     log("ETF portfolio done")
 
     # ─── 7. 链路摘要 ───
