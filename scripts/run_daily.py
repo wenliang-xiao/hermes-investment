@@ -11,6 +11,12 @@ Hermes cron:
 """
 import sys, time, json, os
 sys.path.insert(0, '/home/admin/.hermes')
+# 从.env加载正确的飞书凭据（不同于gateway的App ID）
+try:
+    from dotenv import load_dotenv
+    load_dotenv('/home/admin/.hermes/.env')
+except Exception:
+    pass
 import investment_system.output.report_v6 as rpt
 from investment_system.output.full_asset_scanner import (
     scan_commodities, scan_fx, scan_bonds, determine_bridgewater_quadrant
