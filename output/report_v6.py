@@ -2007,7 +2007,7 @@ def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
     try:
         from investment_system.output.shadow_account import get_portfolio_metrics
         m = get_portfolio_metrics()
-        dashboard_url = "http://47.85.161.255:8686/dashboard"
+        dashboard_url = "http://47.85.161.255/dashboard"
         status = "✅ 运行中" if m["position_count"] > 0 else "⏸️ 空仓"
         w.write(doc_id, [
             ("text", f"📊 **[面基·模拟盘 Dashboard]({dashboard_url})** | {status}"),
@@ -2029,7 +2029,7 @@ def build_tracking_section(w, doc_id, scanner, macro, section_prefix="七"):
         except:
             pass
 
-    w.write(doc_id, [("text", w.ref("Dashboard: http://47.85.161.255:8686/dashboard"))])
+    w.write(doc_id, [("text", w.ref("Dashboard: http://47.85.161.255/dashboard"))])
 
 # ═══════════════════════════════════
 # 板块 7.5: ETF/债券组合推荐

@@ -772,7 +772,7 @@ try:
         w.write(doc_id, [('text', ' | '.join(alloc_lines))])
 
         # Link to dashboard
-        w.write(doc_id, [('text', w.ref("📊 详细面板 → http://47.85.161.255:8686/dashboard"))])
+        w.write(doc_id, [('text', w.ref("📊 详细面板 → http://47.85.161.255/dashboard"))])
 
         # 今日操作
         actions = snap.get('daily_actions', [])
