@@ -372,8 +372,32 @@ try:
     scan_results = []
     scan_status = ""
     try:
+        # 强制重置baostock连接状态 (_fetch_watchlist_prices可能已logout导致标志不同步)
+        try:
+            from investment_system.data.data_layer import _bs_logout as _reset_bs
+            _reset_bs()
+        except Exception:
+            pass
         scanner.MAX_SCAN = 138
-        scan_results, scan_status = scanner.scan_market_batch(batch_size=138, top_n=10)
+        scan_results, scan_status = scanner.scan_market_batch(batch_size=138, top_n=100)
+        log(f"Scan initial: {scan_status}, results={len(scan_results)}")
+        # 如果 batch_size=batch_size 但未完成 (baostock socket 断开时), 分批续扫直到完成
+        max_batch_loops = 5
+        batch_loop = 0
+        while scan_status != "complete" and scan_status.startswith("partial:") and batch_loop < max_batch_loops:
+            batch_loop += 1
+            more_results, scan_status = scanner.scan_market_batch(batch_size=30, top_n=100)
+            log(f"Scan continue {batch_loop}: {scan_status}")
+            if more_results:
+                # 合并去重
+                existing = {s.get('symbol','') for s in scan_results}
+                for s in more_results:
+                    if s.get('symbol','') not in existing:
+                        scan_results.append(s)
+                        existing.add(s.get('symbol',''))
+                scan_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+        scan_results = scan_results[:10]
+        log(f"Scan final: status={scan_status}, top10={len(scan_results)}")
 
         # 加载上次扫描快照 — 用于显示排名/分数变化
         prev_scores = {}

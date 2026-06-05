@@ -128,8 +128,7 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。baostock为主力→AKShare回退。
-    已跳过 Tushare daily_basic（永久频限 1次/分钟/5次/天），直达 baostock。"""
+    """获取个股日线数据（含PE/PB）。baostock主力，失败直接返回空(不试AKShare以免挂死)。"""
     _bs_login()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
@@ -141,7 +140,7 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
             start_date=start, end_date=end,
             frequency="d", adjustflag="2")
         if rs.error_code != "0":
-            raise RuntimeError(f"baostock error_code={rs.error_code}")
+            return pd.DataFrame()
 
         rows = []
         while rs.next():
@@ -159,14 +158,14 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
                 continue
 
         if not rows:
-            raise RuntimeError("baostock returned empty rows")
+            return pd.DataFrame()
         df = pd.DataFrame(rows)
         df["symbol"] = symbol
         return df
     except Exception as e:
-        print(f"[data] {symbol} baostock失败({e})，切AKShare回退")
+        print(f"[data] {symbol} baostock失败({str(e)[:40]})")
         _bs_logout()  # 重置连接，下次重连
-        return _get_stock_daily_akshare(symbol, days)
+        return pd.DataFrame()
 
 
 # ═══════════════════════════════════════════
