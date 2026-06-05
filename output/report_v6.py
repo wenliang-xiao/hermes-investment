@@ -2372,7 +2372,7 @@ def build_action_section(w, doc_id, macro, section_prefix="八"):
     except Exception:
         s4_w = {}
 
-    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、⚖️ 调仓建议")])
+    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}、⚖️ 行动指令")])
 
     w.write(doc_id, [("h3", "宏观基调")])
     w.write(doc_id, [("bullet", f"当前象限: {regime} → 偏好: {favor}")])

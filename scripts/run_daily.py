@@ -516,6 +516,14 @@ try:
         log(f"Scanner failed (non-critical): {scan_err}")
     log("Scanner section done")
 
+    if scan_status != "complete":
+        log(f"ABORT: 扫描未完成 ({scan_status}), 删除文档")
+        try:
+            import urllib.request
+            w._api(f"/docx/v1/documents/{doc_id}", "DELETE")
+        except: pass
+        sys.exit(1)
+
     # ── 链外发现: 扫描评分≥6 或 ≥5%异动 且不在观察池 ──
     if scan_status == "complete":
         try:
@@ -790,156 +798,9 @@ try:
     except Exception as e:
         w.write(doc_id, [('text', f'⏳ 策略四模拟盘加载中... ({str(e)[:60]})')])
 
-    # ═══ 4. 国产替代 ═══
-    w.write(doc_id, [('divider', ''), ('h2', '🏭 4. 国产替代')])
-    w.write(doc_id, [('text', '国产化率<30%=替代空间巨大 | 30-60%=加速期 | >60%=成熟期')])
-    try:
-        from investment_system.config import DOMESTIC_SUB_THEMES
-        themes = sorted(DOMESTIC_SUB_THEMES.items(), key=lambda x: x[1].get('localization_rate', 100))
-        for tn, td in themes[:5]:
-            lr = td.get('localization_rate', 0)
-            lr_pct = round(lr * 100) if lr < 1 else lr
-            score = td.get('decoupling_score', 0)
-            stocks = td.get('key_stocks_a', [])[:3]
-            w.write(doc_id, [('bullet',
-                f"{'🔴' if lr_pct < 20 else '🟡'} **{tn}**: 国产化率{lr_pct}% | 脱钩评分{score}/10 | {'/'.join(stocks)}"
-            )])
-    except Exception:
-        w.write(doc_id, [('text', '国产替代数据加载中...')])
-
-    # ─── 5. ETF配置 ───
-    # ── 收集ETF预取数据 → 传入ETF板块（预取与扫描并发，缩短总耗时）──
-    _a_etf_prices, _us_etf_prices = {}, {}
-    if _etf_future is not None:
-        try:
-            _a_etf_prices, _us_etf_prices = _etf_future.result(timeout=120)
-            log(f"ETF数据预取完成: A股{len(_a_etf_prices)}只/美股{len(_us_etf_prices)}只")
-        except Exception as _e:
-            log(f"ETF预取结果收集失败(不影响日报): {_e}")
-        finally:
-            try:
-                _etf_pool.shutdown(wait=False)
-            except Exception:
-                pass
-
-    w.write(doc_id, [('divider', ''), ('h2', '📊 5. ETF配置')])
-    rpt.build_etf_portfolio_section(w, doc_id, macro=macro, dual_closed=dual_closed,
-                                    session=session, a_etf_prices=_a_etf_prices, us_etf_prices=_us_etf_prices)
-    log("ETF portfolio done")
-
-    # ─── 6. 链路 ───
-    w.write(doc_id, [('divider', ''), ('h2', '🔗 6. 链路')])
-
-    SUMMARY_PATH = '/home/admin/.hermes/investment_system/data/weekly_chain_summary.json'
-    chain_summary = None
-    try:
-        if os.path.exists(SUMMARY_PATH):
-            with open(SUMMARY_PATH) as f:
-                chain_summary = json.load(f)
-    except Exception:
-        pass
-
-    if chain_summary:
-        generated_at = chain_summary.get('generated_at', '?')
-        weekly_url = chain_summary.get('doc_url', '')
-        w.write(doc_id, [('quote', f"数据来源：周报 {generated_at} | 点击查看完整研究")])
-        if weekly_url:
-            w.write(doc_id, [('bullet', f"📊 完整周报: {weekly_url}")])
-
-        chains_data = chain_summary.get('chains', {})
-        changed, unchanged = [], []
-        for chain_name, cdata in chains_data.items():
-            gap_dir = cdata.get('gap_direction', '')
-            perez = cdata.get('perez_stage', '')
-            is_cond = cdata.get('is_conditional', False)
-            cond_tag = "⚡条件触发" if is_cond else ""
-            summary_line = f"{cond_tag}**{chain_name}**: {perez[:25]} | 缺口:{gap_dir[:20]}"
-            unchanged.append(summary_line)
-
-        w.write(doc_id, [('bold', f"本周链状态（{len(unchanged)}条链）：")])
-        for line in unchanged:
-            w.write(doc_id, [('bullet', line)])
-        w.write(doc_id, [('bullet', f"→ 完整链研究详见周报文档（链接见上）")])
-
-        candidates = chain_summary.get('candidates', [])
-        if candidates:
-            w.write(doc_id, [('bold', f"🎯 本周候选 ({len(candidates)}只，周报扫描结果)：")])
-            for c in candidates:
-                track = c.get("score_detail", {}).get("track", "")
-                track_tag = "🔵" if "脱钩" in track else "🟡"
-                price = c.get("price")
-                ma20 = c.get("ma20")
-                ma60 = c.get("ma60")
-                price_str = f"¥{price:.2f}" if price else "?"
-                ma_str = f"MA20¥{ma20:.2f}/MA60¥{ma60:.2f}" if ma20 and ma60 else ""
-                reasons = "、".join(c.get("entry_reasons", [])[:2])
-                w.write(doc_id, [('bullet',
-                    f"{track_tag} **{c['name']}**({c['symbol']}) {price_str} {ma_str} | {c['chain']} | {reasons}"
-                )])
-    else:
-        # fallback: 无周报时从链定义直出摘要
-        w.write(doc_id, [('text', "⏳ 周报尚未运行 → 展示产业链基本面摘要（链定义数据）")])
-        try:
-            from investment_system.domain import OPPORTUNITY_THEMES, INDUSTRY_CHAINS, WATCHLIST
-            # 统计各链当前持仓数
-            chain_stocks = {}
-            for code, info in WATCHLIST.items():
-                c = info.get("chain", "")
-                if c:
-                    chain_stocks.setdefault(c, []).append(info["name"])
-            # 主题机会摘要（取前4条最重要的）
-            theme_items = []
-            for tn, td in sorted(OPPORTUNITY_THEMES.items(), key=lambda x: len(x[1].get("key_catalysts",[])), reverse=True)[:4]:
-                stage = td.get("perez_stage", "")
-                logic = td.get("logic", "")[:80]
-                catalysts = " / ".join(td.get("key_catalysts", [])[:3])
-                stocks_in = []
-                for a in td.get("a_stocks_focus", []):
-                    if a in WATCHLIST:
-                        stocks_in.append(WATCHLIST[a]["name"])
-                for us in td.get("us_stocks_focus", []):
-                    if us in WATCHLIST:
-                        stocks_in.append(WATCHLIST[us]["name"])
-                for hk in td.get("hk_stocks_focus", []):
-                    if hk in WATCHLIST:
-                        stocks_in.append(WATCHLIST[hk]["name"])
-                stock_tag = f"🔗 {'/'.join(stocks_in[:3])}" if stocks_in else ""
-                theme_items.append(f"**{tn}**【{stage}】{logic[:60]}… | 催化: {catalysts} {stock_tag}")
-            if theme_items:
-                w.write(doc_id, [('bold', '🏭 机会主题（面基概念链）')])
-                for ti in theme_items:
-                    w.write(doc_id, [('bullet', ti)])
-            # 产业链利润池摘要
-            chain_items = []
-            for cn, cd in INDUSTRY_CHAINS.items():
-                desc = cd.get("description", "")[:80]
-                perez = cd.get("perez_stage", "")
-                ml = cd.get("meso_layer", {})
-                lifecycle = ml.get("lifecycle", "")
-                valuation = ml.get("valuation", "")[:60]
-                lds_logic = cd.get("lds_logic", "")[:100]
-                stocks_in = chain_stocks.get(cn, [])
-                stock_tag = f"📊 {'/'.join(stocks_in[:4])}" if stocks_in else ""
-                chain_items.append(f"**{cn}** | {perez} | {lifecycle} | {desc}")
-                if valuation:
-                    chain_items.append(f"· 估值: {valuation}")
-                if lds_logic:
-                    chain_items.append(f"· LDS逻辑: {lds_logic}…")
-                if stock_tag:
-                    chain_items.append(f"· {stock_tag}")
-            if chain_items:
-                w.write(doc_id, [('bold', '🔬 产业链核心追踪')])
-                for ci in chain_items[:12]:
-                    w.write(doc_id, [('bullet', ci)])
-                w.write(doc_id, [('text', '→ 完整研究请等待本周周报运行')])
-        except Exception as e:
-            w.write(doc_id, [('bullet', f"⚠️ 链定义加载失败: {str(e)[:60]}")
-            ])
-    log("Chain hooks done")
-
-    # ─── 7. 情报 ───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 7. 情报')])
-    w.write(doc_id, [('h3', '7.1 异动分析')])
+    # ─── 5. 异动情报 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 5. 异动情报')])
+    w.write(doc_id, [('h3', '5.1 异动分析')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -960,7 +821,7 @@ try:
         w.write(doc_id, [('quote', '今日观察池无≥5%异动，展示常规市场情报')])
 
     if summary_text and len(summary_text.strip()) > 50:
-        w.write(doc_id, [('h3', '7.2 市场情报')])
+        w.write(doc_id, [('h3', '5.2 市场情报')])
         import re as _re
         bullish, bearish, neutral = [], [], []
         for line in summary_text.strip().split('\n')[:20]:
@@ -1004,7 +865,7 @@ try:
     log("News done")
 
     # ─── 8. 行动建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="8")
+    rpt.build_action_section(w, doc_id, macro, section_prefix="6")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
