@@ -52,8 +52,8 @@ class FactorScanner:
         ROE / 营收增速来自 query_growth_data（可靠）
         毛利率/净利率来自 duPont（不同公式），仅做辅助参考
         """
-        roe = min(abs(fin.get("净资产收益率", 0) or 0), 60)  # 截断异常值
-        rev = min(abs(fin.get("营业收入同比增长率", 0) or 0), 100)
+        roe = min(float(fin.get("净资产收益率", 0) or 0), 60)  # 截断异常值
+        rev = min(float(fin.get("营业收入同比增长率", 0) or 0), 100)
         ocps = min(abs(fin.get("每股经营现金流", 0) or 0), 10)
 
         s_roe = self._bounded_linear_score(roe, (0, 30))
@@ -98,8 +98,8 @@ class FactorScanner:
 
     def calc_growth_score(self, fin: dict, fin_hist: list = None) -> float:
         """成长因子：营收增速+利润增速+增速加速度（面基：增速加速度>0=肥美期）"""
-        rev = abs(fin.get("营业收入同比增长率", 0) or 0)
-        profit = abs(fin.get("净利润同比增长率", 0) or 0)
+        rev = float(fin.get("营业收入同比增长率", 0) or 0)
+        profit = float(fin.get("净利润同比增长率", 0) or 0)
 
         s_rev = self._bounded_linear_score(rev, (0, 60))
         s_profit = self._bounded_linear_score(profit, (0, 80))

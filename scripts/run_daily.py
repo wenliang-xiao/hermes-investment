@@ -124,23 +124,14 @@ try:
     )
     log("Data loaded")
 
-    # ── ETF数据后台预取（与后续扫描并发执行）──
-    _etf_future = None
-    try:
-        from concurrent.futures import ThreadPoolExecutor
-        _etf_pool = ThreadPoolExecutor(max_workers=1)
-        _etf_future = _etf_pool.submit(rpt.prefetch_etf_data)
-    except Exception as _e:
-        log(f"ETF预取启动失败: {_e}")
-
     w = rpt.FeishuWriter()
     today = time.strftime('%Y/%m/%d')
     today_short = time.strftime('%m-%d')
     weekday = ['一','二','三','四','五','六','日'][time.localtime().tm_wday]
     now_time = time.strftime('%H:%M')
     label = "盘前简报" if session == "开盘前" else "收盘简报"
-    doc_id = w.create_doc(f"面基·{label} {today_short}({weekday}) {now_time}")
-    log(f"Doc: {doc_id}")
+    doc_id = None
+    doc_created = False
 
     # ── 策略四模拟盘初始化 ──
     try:
@@ -168,6 +159,9 @@ try:
     # ═══════════════════════════════════════════════
     #  面基·LDS·桥水 三源融合量化投研日报 v7
     # ═══════════════════════════════════════════════
+    doc_id = w.create_doc(f"面基·{label} {today_short}({weekday}) {now_time}")
+    doc_created = True
+    log(f"Doc: {doc_id}")
     lds_judgment = "只研究，不开仓" if dual_closed else ("控制仓位" if macro_gate=="黄灯" else "正常操作")
 
     # ── 0. 市场全景 ──
@@ -371,35 +365,6 @@ try:
         anomaly_stocks_for_news = []
         w.write(doc_id, [('bullet', f"⚠️ 观察池加载失败: {str(e)[:60]}")])
     log("Watchlist done")
-    anomaly_results = []  # 前置声明，情报节会填充
-
-    # ═══ 1.4 低共识狩猎 ═══
-    try:
-        contrarian = []
-        for code, info in WATCHLIST.items():
-            if not str(code).isdigit(): continue
-            pd_info = prices.get(code, {})
-            chg = pd_info.get('chg')
-            rsi = pd_info.get('rsi')
-            if chg is None: continue
-            if chg <= -3 and rsi and rsi < 40:
-                roe = pd_info.get('roe') if 'roe' in pd_info else None
-                if not roe:
-                    try:
-                        from investment_system.data.data_layer import get_financial_report
-                        fin = get_financial_report(code)
-                        roe = fin.get('净资产收益率')
-                    except: pass
-                if roe and float(roe) > 15:
-                    contrarian.append((info.get('name', code), code, chg, roe, rsi))
-        if contrarian:
-            w.write(doc_id, [('h3', f'🔎 1.4 低共识狩猎: {len(contrarian)}只 (跌幅>3%+ROE>15%→逆向研究)')])
-            for name, code, chg, roe, rsi in contrarian[:3]:
-                w.write(doc_id, [('bullet',
-                    f"**{name}**({code}) {chg:+.1f}% | ROE{roe:.0f}% | RSI{rsi:.0f} | 市场悲观+基本面强=逆向机会"
-                )])
-    except Exception:
-        pass
 
     # ─── 2.1 策略信号: 扫描发现 ───
     w.write(doc_id, [('divider', ''), ('h2', '🔍 2. 策略信号')])
@@ -408,7 +373,7 @@ try:
     scan_status = ""
     try:
         scanner.MAX_SCAN = 138
-        scan_results, scan_status = scanner.scan_market_batch(batch_size=30, top_n=10)
+        scan_results, scan_status = scanner.scan_market_batch(batch_size=138, top_n=10)
 
         # 加载上次扫描快照 — 用于显示排名/分数变化
         prev_scores = {}
@@ -584,7 +549,7 @@ try:
                 if rr_line:
                     w.write(doc_id, [('bullet', rr_line)])
                 # 新闻联动
-                for a in (anomaly_results or []):
+                for a in (locals().get('anomaly_results') or []):
                     if a.get('symbol') == sym:
                         w.write(doc_id, [('bullet', f"📰 {a.get('driver','')[:80]}")])
                         break
@@ -798,9 +763,9 @@ try:
     except Exception as e:
         w.write(doc_id, [('text', f'⏳ 策略四模拟盘加载中... ({str(e)[:60]})')])
 
-    # ─── 5. 异动情报 ───
-    w.write(doc_id, [('divider', ''), ('h2', '📰 5. 异动情报')])
-    w.write(doc_id, [('h3', '5.1 异动分析')])
+    # ─── 4. 异动情报 ───
+    w.write(doc_id, [('divider', ''), ('h2', '📰 4. 异动情报')])
+    w.write(doc_id, [('h3', '4.1 异动分析')])
 
     anomaly_results = []
     if anomaly_stocks_for_news:
@@ -821,7 +786,7 @@ try:
         w.write(doc_id, [('quote', '今日观察池无≥5%异动，展示常规市场情报')])
 
     if summary_text and len(summary_text.strip()) > 50:
-        w.write(doc_id, [('h3', '5.2 市场情报')])
+        w.write(doc_id, [('h3', '4.2 市场情报')])
         import re as _re
         bullish, bearish, neutral = [], [], []
         for line in summary_text.strip().split('\n')[:20]:
@@ -864,8 +829,8 @@ try:
         pass
     log("News done")
 
-    # ─── 8. 行动建议 ───
-    rpt.build_action_section(w, doc_id, macro, section_prefix="6")
+    # ─── 5. 行动建议 ───
+    rpt.build_action_section(w, doc_id, macro, section_prefix="5")
 
     # ── 今日具体行动（基于今日实际信号）──
     w.write(doc_id, [('h3', '🎯 今日具体行动')])
@@ -913,3 +878,10 @@ except Exception as e:
     log(f"FATAL: {e}")
     import traceback
     log(traceback.format_exc())
+    # Phase1/2/3 保障: 任何异常导致崩溃时删除已创建的文档, 不留残篇
+    if doc_created and doc_id:
+        try:
+            w._api(f"/docx/v1/documents/{doc_id}", "DELETE")
+            log(f"Deleted partial doc: {doc_id}")
+        except Exception:
+            pass

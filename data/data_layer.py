@@ -242,16 +242,7 @@ def get_financial_report(symbol: str) -> dict:
             return result
     except Exception:
         pass
-    # ② Tushare (需token, 有限频)
-    try:
-        from investment_system.data.tushare_layer import get_financial_report_ts
-        result = get_financial_report_ts(symbol)
-        if result:
-            _FIN_CACHE[symbol] = result
-            return result
-    except Exception:
-        pass
-    # ③ baostock (免费无限频, 兜底)
+    # ② baostock (免费无限频, 兜底)
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
