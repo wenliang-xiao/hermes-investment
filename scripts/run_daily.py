@@ -9,6 +9,8 @@ Hermes cron:
   schedule: 0 8 30 * * 1-5   # 工作日08:30
   schedule: 0 18 0 * * 1-5   # 工作日18:00
 """
+import socket
+socket.setdefaulttimeout(30)  # 全局网络超时，防止baostock/AKShare/yfinance无限期挂起
 import sys, time, json, os
 sys.path.insert(0, '/home/admin/.hermes')
 # 从.env加载正确的飞书凭据（不同于gateway的App ID）
@@ -384,8 +386,8 @@ try:
             _reset_bs()
         except Exception:
             pass
-        scanner.MAX_SCAN = 138
-        scan_results, scan_status = scanner.scan_market_batch(batch_size=138, top_n=100)
+        scanner.MAX_SCAN = 18
+        scan_results, scan_status = scanner.scan_market_batch(batch_size=9, top_n=100)
         log(f"Scan initial: {scan_status}, results={len(scan_results)}")
         # 如果 batch_size=batch_size 但未完成 (baostock socket 断开时), 分批续扫直到完成
         max_batch_loops = 5
@@ -676,7 +678,7 @@ try:
             _sc_map = {s.get("symbol", ""): s.get("score", 0) for s in scan_results}
             MAX_POSITIONS = 8
 
-            # ── 建仓：TOP5中非持仓+非冷却+非异动+评分≥6 ──
+            # ── 建仓：TOP5中非持仓+非冷却+非异动+评分≥5.0 + 趋势确认 ──
             _n = 0
             for _i, _s in enumerate(scan_results[:5], 1):
                 if _hold_count + _n >= MAX_POSITIONS:
@@ -690,36 +692,99 @@ try:
                 if abs(_s.get("change_pct", 0) or 0) >= 5:
                     log(f"  VOLATILE skip {_sy}"); continue
                 _sc2 = _s.get("score", 0)
-                if _sc2 < 5.5:
-                    log(f"  LOW_SCORE skip {_sy}: {_sc2:.1f}"); continue
+                if _sc2 < 5.0:
+                    log(f"  LOW_SCORE skip {_sy}: {_sc2:.1f}<5.0"); continue
+                # 趋势确认：MA20>MA60（金叉）或技术评分达标
+                _tech = _s.get('tech', {}) or {}
+                _ma20d = _tech.get('ma20_dev', 0) or 0
+                _ma60d = _tech.get('ma60_dev', 0) or 0
+                _trend_ok = (_ma60d > _ma20d)  # MA20 > MA60
+                _vol_ok = True
+                _vsig = _s.get('vol_signal', '')
+                if _vsig == '缩量' or _vsig == '极度缩量':
+                    _vol_ok = False
+                    log(f"  VOLUME WEAK skip {_sy}: {_vsig}")
+                if not _trend_ok:
+                    log(f"  TREND WEAK skip {_sy}: MA20_dev={_ma20d:.1f}% MA60_dev={_ma60d:.1f}%")
+                    if _sc2 < 5.5:  # 趋势不好且评分也普通 → 跳过
+                        continue
                 _pr = _s.get("price", 0)
                 if _pr <= 0:
                     continue
                 _nm = _s.get("name", _sy)
-                _q = max(100, int(20000 / _pr))
+                # 凯利仓位：用评分作为胜率代理
+                _win_p = min(_sc2 / 10.0, 0.8)  # 评分→胜率(封顶80%)
+                _win_lose_ratio = 1.8  # 盈亏比保守估计
+                _kelly_f = max(0, (_win_p * _win_lose_ratio - (1 - _win_p)) / _win_lose_ratio)
+                _kelly_f = min(_kelly_f * 0.5, 0.08)  # 半凯利，上限8%
+                if _sc2 >= 6.0: _kelly_f = min(_kelly_f, 0.08)
+                elif _sc2 >= 5.5: _kelly_f = min(_kelly_f, 0.05)
+                else: _kelly_f = min(_kelly_f, 0.03)
+                _kelly_cash = int(_sa_book.get("cash", 1000000) * _kelly_f)
+                _q = max(100, int(_kelly_cash / _pr / 100) * 100)
                 _sa_entry(_sy, _nm, "买入", _pr,
-                         f"六因子扫描TOP{_i} 综合{_sc2:.1f}分",
-                         quantity=_q, pct=0.02, entry_score=_sc2)
+                         f"六因子TOP{_i} 综合{_sc2:.1f}分 凯利{_kelly_f:.0%}",
+                         quantity=_q, pct=_kelly_f, entry_score=_sc2)
                 _n += 1
                 log(f"✅ Shadow ENTRY {_nm}({_sy}) @¥{_pr:.2f} score={_sc2:.1f}")
             log(f"Shadow new entries: {_n}")
 
-            # ── 清仓：评分<4 或 持仓>20天且不在TOP30 ──
+            # ── 清仓：评分<4 | MA死叉+评分<5 | 持仓>20天不在TOP30 ──
             _sa_sum2 = _sa_summary()
             for _p in _sa_sum2.get("positions", []):
                 _sy = _p["symbol"]
                 _score = _sc_map.get(_sy)
                 _ep = _p.get("current", 0)
+                _pname = _p.get("name", _sy)
+
+                # 条件1: 评分<4 → 硬清仓
                 if _score is not None and _score < 4.0:
                     if _ep:
                         _sa_exit(_sy, _ep, f"六因子评分降至{_score:.1f}分<4 → 清仓")
-                        log(f"🔻 Shadow EXIT {_p['name']}({_sy}): score={_score:.1f}")
-                elif _score is None:
+                        log(f"🔻 Shadow EXIT {_pname}({_sy}): score={_score:.1f} <4")
+                    continue
+
+                # 条件2: 不在扫描结果中 >20天
+                if _score is None:
                     _hd = _p.get("hold_days", 0)
                     if _hd > 20:
                         if _ep:
                             _sa_exit(_sy, _ep, f"持仓{_hd}天未进TOP30 → 清仓")
-                            log(f"🔻 Shadow EXIT {_p['name']}({_sy}): hold={_hd}d, not in scan")
+                            log(f"🔻 Shadow EXIT {_pname}({_sy}): hold={_hd}d")
+                    continue
+
+                # 条件3: 评分>=4但评分<5 + 趋势走坏 → MA死叉清仓
+                if _score is not None and 4.0 <= _score < 5.0:
+                    _tech = _sc_map.get(f'{_sy}_tech', {})
+                    _scan_s = None
+                    for _ss in scan_results:
+                        if _ss.get("symbol", "") == _sy:
+                            _scan_s = _ss; break
+                    if _scan_s:
+                        _t = _scan_s.get("tech", {}) or {}
+                        _ma20d = _t.get("ma20_dev", 0) or 0
+                        _ma60d = _t.get("ma60_dev", 0) or 0
+                        _macd = _t.get("macd_signal", "")
+                        if _ma20d < _ma60d or _macd == "🔴死叉":
+                            if _ep:
+                                _sa_exit(_sy, _ep, f"MA死叉评分{_score:.1f}→清仓")
+                                log(f"🔻 Shadow EXIT {_pname}({_sy}): trend dead, score={_score:.1f}")
+
+
+            # ── 不建仓原因（if块内最末）──
+            try:
+                from investment_system.output.shadow_account import get_all_no_trade_reasons
+                _sa_sum5 = _sa_summary() if "summary" in dir() else _sa_summary()
+                _no_trade_rs = get_all_no_trade_reasons(
+                    scan_results, _sa_sum5.get("positions", []),
+                    dual_closed, _sa_cool if "cool" in dir() else None,
+                    MAX_POSITIONS)
+                if _no_trade_rs:
+                    log(f"今日不建仓原因: {len(_no_trade_rs)}只")
+                    for _nt_name, _nt_rs in list(_no_trade_rs.items())[:8]:
+                        log(f"  ✗ {_nt_name}: {' | '.join(_nt_rs)}")
+            except Exception as _nte:
+                log(f"⚠️ No-trade reasons: {_nte}")
 
         elif scan_results and not dual_closed and scan_status.startswith("partial:"):
             log(f"Scan partial ({scan_status}): skip entry/exit until full scan completes")

@@ -269,6 +269,56 @@ def clean_cooldown(max_days: int = 30):
 
 # ═══ 策略四投资组合管理 ═══
 
+
+def get_no_trade_reasons(symbol: str, score: float, scan_results: list,
+                           positions: list, dual_closed: bool,
+                           cool_func=None, max_positions=8) -> list:
+    """返回该标的不建仓的所有原因列表"""
+    reasons = []
+    
+    # Check if already held
+    held_symbols = {p.get("symbol", "") for p in positions}
+    if symbol in held_symbols:
+        return []
+    
+    # Check cooldown
+    if cool_func and cool_func(symbol):
+        reasons.append("冷却期(5天)")
+    
+    # Check dual gate
+    if dual_closed:
+        reasons.append("双门关闭")
+    
+    # Check score
+    if score < 5.0:
+        reasons.append(f"评分不足({score:.1f}<5.0)")
+    
+    # Check max positions
+    if len(positions) >= max_positions:
+        reasons.append(f"仓位已满({len(positions)}/{max_positions})")
+    
+    return reasons
+
+def get_all_no_trade_reasons(scan_results: list, positions: list,
+                              dual_closed: bool, cool_func=None,
+                              max_positions=8) -> dict:
+    """返回所有未建仓标的的完整不交易原因"""
+    held_symbols = {p.get("symbol", "") for p in positions}
+    reasons = {}
+    if not scan_results:
+        return {"整体": "无扫描结果"}
+    
+    for s in scan_results[:15]:
+        sym = s.get("symbol", "")
+        if not sym or sym in held_symbols:
+            continue
+        score = s.get("score", 0)
+        r = get_no_trade_reasons(sym, score, scan_results, positions,
+                                  dual_closed, cool_func, max_positions)
+        if r:
+            reasons[s.get("name", sym)] = r
+    return reasons
+
 def init_portfolio(capital: float = 1000000.0) -> dict:
     """初始化策略四投资组合。仅在 shadow_account.json 不存在时调用。"""
     book = load_shadow()

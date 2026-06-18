@@ -16,6 +16,33 @@ from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
 
 logger = logging.getLogger(__name__)
 
+import signal as _signal_module
+
+class _BSTimeoutError(Exception):
+    """baostock query timed out"""
+    pass
+
+def _bs_timeout_handler(signum, frame):
+    raise _BSTimeoutError("baostock query timed out (25s)")
+
+def _bs_query_with_timeout(func, *args, timeout=25, **kwargs):
+    """Execute a baostock query with signal.alarm timeout protection.
+    baostock uses custom TCP protocol where socket.setdefaulttimeout doesn't work.
+    """
+    old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)
+    old_alarm = _signal_module.alarm(timeout)
+    try:
+        result = func(*args, **kwargs)
+        return result
+    except _BSTimeoutError:
+        print(f"[data] baostock timeout after {timeout}s, resetting connection")
+        _bs_logout()
+        raise
+    finally:
+        _signal_module.alarm(0)
+        _signal_module.signal(_signal_module.SIGALRM, old_handler)
+
+
 # ─── Baostock 连接管理 ───
 _bs_logged_in = False
 
@@ -41,11 +68,14 @@ def _bs_login():
     global _bs_logged_in
     if not _bs_logged_in:
         try:
-            lg = bs.login()
+            lg = _bs_query_with_timeout(bs.login, timeout=25)
             if lg.error_code == "0":
                 _bs_logged_in = True
             else:
                 print(f"[data] baostock login failed: {lg.error_msg}")
+        except _BSTimeoutError:
+            print(f"[data] baostock login timed out")
+            _bs_logged_in = False
         except Exception as e:
             print(f"[data] baostock login exception: {e}")
             _bs_logged_in = False
@@ -68,7 +98,7 @@ def get_stock_info(symbol: str) -> dict:
     """获取个股基础信息：名称、上市日期等"""
     _bs_login()
     try:
-        rs = bs.query_stock_basic(code=_bs_code(symbol))
+        rs = _bs_query_with_timeout(bs.query_stock_basic, code=_bs_code(symbol))
         if rs.error_code == "0":
             while rs.next():
                 r = rs.get_row_data()
@@ -134,7 +164,8 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
 
     try:
-        rs = bs.query_history_k_data_plus(
+        rs = _bs_query_with_timeout(
+            bs.query_history_k_data_plus,
             _bs_code(symbol),
             "date,open,high,low,close,volume,amount,peTTM,pbMRQ",
             start_date=start, end_date=end,
@@ -250,7 +281,7 @@ def get_financial_report(symbol: str) -> dict:
     for year_off in [1, 2]:
         for quarter in [4, 2]:
             try:
-                rs = bs.query_growth_data(code=bs_code,
+                rs = _bs_query_with_timeout(bs.query_growth_data, code=bs_code,
                     year=datetime.now().year - year_off, quarter=quarter)
                 if rs.error_code != "0":
                     continue
@@ -277,7 +308,7 @@ def get_financial_report(symbol: str) -> dict:
         for year_off in [1, 2]:
             for quarter in [4, 2]:
                 try:
-                    rs = bs.query_dupont_data(code=bs_code,
+                    rs = _bs_query_with_timeout(bs.query_dupont_data, code=bs_code,
                         year=datetime.now().year - year_off, quarter=quarter)
                     if rs.error_code != "0":
                         continue
@@ -326,7 +357,7 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
                 break
             try:
                 roe_val = None
-                rs_d = bs.query_dupont_data(code=bs_code, year=year, quarter=quarter)
+                rs_d = _bs_query_with_timeout(bs.query_dupont_data, code=bs_code, year=year, quarter=quarter)
                 if rs_d.error_code == "0":
                     while rs_d.next():
                         r = rs_d.get_row_data()
@@ -338,7 +369,7 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
                             pass
 
                 ocf = capex = None
-                rs_cf = bs.query_cash_flow_data(code=bs_code, year=year, quarter=quarter)
+                rs_cf = _bs_query_with_timeout(bs.query_cash_flow_data, code=bs_code, year=year, quarter=quarter)
                 if rs_cf.error_code == "0":
                     fields = rs_cf.fields
                     while rs_cf.next():
@@ -384,7 +415,8 @@ def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
     start = (datetime.now() - timedelta(days=years * 365 + 30)).strftime("%Y-%m-%d")
     end = datetime.now().strftime("%Y-%m-%d")
     try:
-        rs = bs.query_history_k_data_plus(
+        rs = _bs_query_with_timeout(
+            bs.query_history_k_data_plus,
             _bs_code(symbol),
             "date,peTTM",
             start_date=start, end_date=end,
@@ -486,7 +518,8 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
 
     try:
-        rs = bs.query_history_k_data_plus(
+        rs = _bs_query_with_timeout(
+            bs.query_history_k_data_plus,
             bs_code, "date,close,volume",
             start_date=start, end_date=end, frequency="d", adjustflag="2")
         rows = []
