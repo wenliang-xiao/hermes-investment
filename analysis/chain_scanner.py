@@ -1,476 +1,379 @@
 """
-链内候选动态扫描器 v1.0
-目标：每周从14条链里找出3-5只「本周最值得关注的候选」
+中观产业链分析引擎
+基于面基播客知识体系（12条产业链），扫描利润池分布 + 瓶颈度评分
 
-设计原则（来自面基+LDS+脱钩框架）：
-  - 先过滤后排序（不是靠单一总分）
-  - 低波动质量型而非追热点型
-  - 脱钩方向（国产替代）独立于双门，持续追踪
-  - 输出四维度而非一个总分，保留人工判断空间
-
-四段筛选：
-  第1段：可交易性硬过滤（ST/退市/流动性）
-  第2段：低波动+不追高过滤（核心差异化）
-  第3段：链路对齐（Perez阶段+宏观regime匹配）
-  第4段：双轨评分排序（脱钩方向 vs 宏观敏感方向）
-
-双轨评分：
-  轨道A（脱钩/国产替代方向）：质量韧性(40%)+低波动(30%)+链路确定性(30%)
-  轨道B（宏观敏感方向）：趋势强度(35%)+质量韧性(30%)+估值安全边际(20%)+链路匹配(15%)
+每条链定义：
+  - profit_pool: 利润池最厚的环节及其利润率估算
+  - bottleneck: 技术/产能瓶颈环节
+  - mapped_stocks: 该链映射到WATCHLIST的标的
 """
-import json
-import os
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+import sys, os
+from datetime import date
 
-import numpy as np
-import pandas as pd
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
+sys.path.insert(0, _PROJECT_DIR)
 
-from investment_system import config
-from investment_system.data.data_layer import get_stock_daily, get_financial_report
+from domain import WATCHLIST
 
-DECOUPLING_CHAINS = {
-    "半导体链", "国产替代/信创链", "半导体国产替代",
-    "军工链", "医药创新链",
+# ═══════════════════════════════════════════
+# 12条产业链定义
+# ═══════════════════════════════════════════
+CHAINS = {
+    "nvidia": {
+        "name": "英伟达算力链",
+        "desc": "英伟达GPU→光模块→HBM→服务器→数据中心互联",
+        "profit_pool": {
+            "main": "光模块(30-55%)、HBM(50%+)",
+            "upstream": "HBM(50%+)",
+            "midstream": "光模块(30-55%)、PCB(25-35%)",
+            "downstream": "AI服务器(15-20%)、数据中心",
+        },
+        "bottleneck": "HBM产能、800G光模块产能",
+        "directional_bias": "利润向上游HBM集中(有限产能),中游光模块爆发(800G放量)",
+        "stocks": [
+            {"symbol": "300502", "role": "800G光模块龙头", "position": "中游", "profit_share": 55},
+            {"symbol": "300308", "role": "光模块(800G/1.6T)", "position": "中游", "profit_share": 50},
+        ]
+    },
+    "tsmc": {
+        "name": "台积电先进制程链",
+        "desc": "台积电→半导体设备→材料→CoWoS封测→EDA/IP",
+        "profit_pool": {
+            "main": "半导体设备(40-55%)、CoWoS(45%+)",
+            "upstream": "设备(40-55%)、材料(25-35%)",
+            "midstream": "晶圆制造(台积电独家)",
+            "downstream": "封测(15-20%)",
+        },
+        "bottleneck": "CoWoS产能、先进光刻机、EUV光刻胶",
+        "directional_bias": "受益于台积电资本开支扩张,设备增量明确",
+        "stocks": [
+            {"symbol": "002371", "role": "刻蚀/薄膜沉积设备", "position": "上游", "profit_share": 45},
+            {"symbol": "688012", "role": "刻蚀设备龙头", "position": "上游", "profit_share": 45},
+            {"symbol": "688120", "role": "CMP/减薄设备", "position": "上游", "profit_share": 40},
+            {"symbol": "688041", "role": "CPU/DCU替代", "position": "下游", "profit_share": 30},
+        ]
+    },
+    "robot": {
+        "name": "机器人核心零部件",
+        "desc": "谐波减速器→RV减速器→伺服电机→控制器→整机集成",
+        "profit_pool": {
+            "main": "减速器(40%)、伺服电机(30%)",
+            "upstream": "减速器(40%)、传感器(35%)",
+            "midstream": "伺服系统(25-30%)、控制器(20-25%)",
+            "downstream": "整机集成(10-15%)",
+        },
+        "bottleneck": "谐波减速器精密加工、空心杯电机",
+        "directional_bias": "人形机器人量产前夜,减速器最先受益(验证→放量→定价权)",
+        "stocks": [
+            {"symbol": "688017", "role": "谐波减速器龙头", "position": "上游", "profit_share": 40},
+            {"symbol": "300124", "role": "伺服系统/PLC", "position": "中游", "profit_share": 30},
+            {"symbol": "002747", "role": "减速器/RV减速器", "position": "上游", "profit_share": 38},
+            {"symbol": "002472", "role": "齿轮/减速器部件", "position": "上游", "profit_share": 35},
+        ]
+    },
+    "semiconductor": {
+        "name": "半导体链",
+        "desc": "设计IP→EDA→制造→封测→芯片设计→分销",
+        "profit_pool": {
+            "main": "设计IP(80%+)、设备(40-55%)",
+            "upstream": "IP授权(80%+)、EDA(70%+)",
+            "midstream": "晶圆代工(25-35%)、封测(15-20%)",
+            "downstream": "芯片设计(20-40%)、分销(8-12%)",
+        },
+        "bottleneck": "先进制程产能、HBM、Chiplet互联",
+        "directional_bias": "自主可控主线,设备/材料长期受益,设计环节景气度跟随下游需求",
+        "stocks": [
+            {"symbol": "688041", "role": "DCU/CPU国产替代", "position": "下游", "profit_share": 35},
+            {"symbol": "688008", "role": "内存接口芯片/DDR5", "position": "下游", "profit_share": 30},
+            {"symbol": "603501", "role": "CIS图像传感器", "position": "下游", "profit_share": 25},
+            {"symbol": "002371", "role": "半导体设备", "position": "上游", "profit_share": 45},
+            {"symbol": "688012", "role": "刻蚀设备", "position": "上游", "profit_share": 45},
+            {"symbol": "688120", "role": "CMP设备", "position": "上游", "profit_share": 40},
+        ]
+    },
+    "ai_power": {
+        "name": "AI电力",
+        "desc": "核电→燃气轮机→变压器→电力IT→数据中心配电",
+        "profit_pool": {
+            "main": "核电PPA(稳定)、燃气轮机(寡头定价)、变压器(国内寡头)",
+            "upstream": "核电燃料(稀缺)、燃气轮机叶片(壁垒高)",
+            "midstream": "变压器(30-35%)、高压开关(25-30%)",
+            "downstream": "电力运营(15-20%)、数据中心配电(20-25%)",
+        },
+        "bottleneck": "核电审批、特高压变压器、燃气轮机热端部件",
+        "directional_bias": "AI算力扩建→电力需求爆发,变压器缺货周期最长(18-24月)",
+        "stocks": [
+            {"symbol": "600900", "role": "水电基荷电源", "position": "下游", "profit_share": 20},
+            {"symbol": "601985", "role": "核电运营商", "position": "下游", "profit_share": 25},
+            {"symbol": "601877", "role": "低压电器/配电", "position": "中游", "profit_share": 28},
+        ]
+    },
+    "new_energy": {
+        "name": "新能源链",
+        "desc": "锂矿→电池材料→电芯→储能逆变器→光伏组件→电站运营",
+        "profit_pool": {
+            "main": "储能逆变器、锂矿(周期底部反弹)",
+            "upstream": "锂矿(波动大)、正极材料(15-20%)",
+            "midstream": "电芯(10-15%)、逆变器(25-35%)",
+            "downstream": "电站运营(8-12%)、EPC(5-8%)",
+        },
+        "bottleneck": "储能电芯产能过剩,逆变器IGBT国产替代",
+        "directional_bias": "产能过剩出清中→利润向逆变器/新技术集中,组件/电池片最惨烈",
+        "stocks": [
+            {"symbol": "300750", "role": "动力电池/储能", "position": "中游", "profit_share": 15},
+            {"symbol": "601012", "role": "光伏硅片/组件", "position": "中游", "profit_share": 10},
+            {"symbol": "688390", "role": "光伏逆变器/储能", "position": "中游", "profit_share": 30},
+        ]
+    },
+    "defense": {
+        "name": "军工链",
+        "desc": "主机厂→航发→电子系统→连接器→材料→锻件",
+        "profit_pool": {
+            "main": "连接器(35-40%)、高温合金/材料(30-35%)",
+            "upstream": "高温合金(30-35%)、钛合金(25-30%)",
+            "midstream": "连接器(35-40%)、航电系统(25-30%)",
+            "downstream": "主机厂(5-10%)、总装(8-12%)",
+        },
+        "bottleneck": "航发叶片、高端连接器",
+        "directional_bias": "连接器是军工链中ROE最高+现金流最好的环节,主机厂最苦",
+        "stocks": [
+            {"symbol": "600760", "role": "军机主机厂", "position": "下游", "profit_share": 8},
+            {"symbol": "002179", "role": "军用连接器", "position": "中游", "profit_share": 35},
+        ]
+    },
+    "pharma": {
+        "name": "医药创新链",
+        "desc": "CXO→创新药→原料药→医疗器械→医疗服务",
+        "profit_pool": {
+            "main": "CXO(25-35%)、创新药(20-40%+)、高端器械(30-40%)",
+            "upstream": "原料药(15-20%)、生命科学试剂(40-50%)",
+            "midstream": "CXO(25-35%)、医疗器械(30-40%)",
+            "downstream": "创新药(20-40%)、医疗服务(15-20%)",
+        },
+        "bottleneck": "CXO产能（生物安全法案扰动）、高端影像设备",
+        "directional_bias": "CXO受地缘政治压制,国内创新药企受益于海外授权(BD出海)",
+        "stocks": [
+            {"symbol": "603259", "role": "CXO一体化龙头", "position": "中游", "profit_share": 28},
+            {"symbol": "300760", "role": "医疗器械龙头", "position": "中游", "profit_share": 35},
+        ]
+    },
+    "consumer_defense": {
+        "name": "消费防守链",
+        "desc": "白酒→乳制品→调味品→家电→品牌服饰",
+        "profit_pool": {
+            "main": "高端白酒(70-80%毛利率)",
+            "upstream": "农产品(波动大)、包材(10-15%)",
+            "midstream": "白酒酿造(70-80%)、乳制品加工(25-35%)",
+            "downstream": "品牌运营(15-25%)、渠道分销(8-12%)",
+        },
+        "bottleneck": "高端白酒产能（时间窖藏）、奶源",
+        "directional_bias": "高端白酒是消费链最厚的利润环节,但当前处于去库存周期底部",
+        "stocks": [
+            {"symbol": "600519", "role": "高端白酒", "position": "中游", "profit_share": 75},
+            {"symbol": "000858", "role": "高端白酒", "position": "中游", "profit_share": 72},
+            {"symbol": "600887", "role": "乳制品龙头", "position": "中游", "profit_share": 28},
+        ]
+    },
+    "finance": {
+        "name": "金融链",
+        "desc": "银行→保险→券商→资管→金融科技",
+        "profit_pool": {
+            "main": "零售银行(净息差)、券商(行情驱动)",
+            "upstream": "资金端(央行/同业)",
+            "midstream": "零售银行(净息差1.5-2.5%)、对公银行(0.8-1.5%)",
+            "downstream": "财富管理(手续费0.5-1%)、保险(死差+费差)",
+        },
+        "bottleneck": "优质信贷资产荒、保险代理人转型",
+        "directional_bias": "零售银行ROE最高且稳定(招行),券商具有高β属性→成交量放大时弹性最大",
+        "stocks": [
+            {"symbol": "600036", "role": "零售银行龙头", "position": "中游", "profit_share": 18},
+            {"symbol": "601318", "role": "综合金融/保险", "position": "下游", "profit_share": 12},
+            {"symbol": "600030", "role": "头部券商", "position": "下游", "profit_share": 10},
+        ]
+    },
+    "grid": {
+        "name": "电网设备链",
+        "desc": "特高压→变压器→开关→线缆→智能电表→电力IT",
+        "profit_pool": {
+            "main": "超高压变压器(30-35%)、特高压换流阀(40-45%)",
+            "upstream": "硅钢/铜(原材料)、绝缘材料(15-20%)",
+            "midstream": "变压器(30-35%)、高压开关(25-30%)、换流阀(40-45%)",
+            "downstream": "输变电EPC(8-12%)、运维服务(15-20%)",
+        },
+        "bottleneck": "特高压变压器产能(国产仅3家)、IGBT功率模块",
+        "directional_bias": "特高压是十四五/十五五确定性最高的基建方向,换流阀/变压器环节壁垒最高",
+        "stocks": [
+            {"symbol": "601877", "role": "低压电器", "position": "中游", "profit_share": 28},
+            {"symbol": "688390", "role": "储能变流器/PCS", "position": "中游", "profit_share": 32},
+        ]
+    },
+    "commodity": {
+        "name": "大宗商品链",
+        "desc": "铜→黄金→原油→工业金属→煤炭→化工",
+        "profit_pool": {
+            "main": "铜(矿端)、黄金(避险)、原油(上游)",
+            "upstream": "采矿(铜/金/原油)",
+            "midstream": "冶炼(3-5%利润率)、化工(10-15%)",
+            "downstream": "加工(5-8%)、贸易(1-2%)",
+        },
+        "bottleneck": "铜矿资本开支不足(新矿10年+),黄金矿产量见顶",
+        "directional_bias": "利润集中在上游采矿环节,冶炼/加工无定价权→只买矿股不买冶",
+        "stocks": [
+            {"symbol": "601899", "role": "铜/金矿开采", "position": "上游", "profit_share": 40},
+            {"symbol": "600028", "role": "石化一体化", "position": "中游", "profit_share": 12},
+        ]
+    },
 }
 
-MAX_CANDIDATES = 5
-MIN_CANDIDATES = 3
 
-CACHE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "chain_candidates_cache.json"
-)
-
-
-def _load_cache() -> dict:
-    try:
-        if os.path.exists(CACHE_PATH):
-            age = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(CACHE_PATH))).total_seconds()
-            if age < 86400 * 6:
-                with open(CACHE_PATH) as f:
-                    return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-
-def _save_cache(data: dict):
-    try:
-        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+def get_stock_chain_mapping():
+    """返回 {symbol -> [(chain_key, chain_info, role, position, profit_share)]}"""
+    mapping = {}
+    for key, chain in CHAINS.items():
+        for s in chain["stocks"]:
+            sym = s["symbol"]
+            if sym not in mapping:
+                mapping[sym] = []
+            mapping[sym].append({
+                "chain_key": key,
+                "chain_name": chain["name"],
+                "role": s["role"],
+                "position": s["position"],
+                "profit_share": s["profit_share"],
+                "bottleneck": chain["bottleneck"],
+                "directional_bias": chain["directional_bias"],
+            })
+    return mapping
 
 
-def _get_stock_basics(symbol: str) -> dict:
-    try:
-        import baostock as bs
-        code = f"sz.{symbol}" if symbol.startswith(("0", "3")) else f"sh.{symbol}"
-        rs = bs.query_stock_basic(code=code)
-        if rs.error_code == "0":
-            while rs.next():
-                r = rs.get_row_data()
-                return {
-                    "name": r[1] if len(r) > 1 else symbol,
-                    "status": r[5] if len(r) > 5 else "1",
-                }
-    except Exception:
-        pass
-    return {"name": symbol, "status": "1"}
+def get_chain_for_symbol(symbol):
+    """获取单个标的的链信息"""
+    mapping = get_stock_chain_mapping()
+    return mapping.get(symbol, [])
 
 
-def _stage1_hard_filter(symbol: str, basics: dict) -> Tuple[bool, str]:
-    status = basics.get("status", "1")
-    if status not in ("1", ""):
-        return False, "ST/退市"
-    return True, ""
+def score_chain_position(chain_info_list):
+    """
+    根据链定位评分（0-10）
+    - 利润池厚度：profit_share越高越好（0-5分）
+    - 位置权重：上游(瓶颈) > 中游 > 下游（0-3分）
+    - 瓶颈度：标的是否是chain.bottleneck中的环节（0-2分）
+    """
+    total = 0
+    for ci in chain_info_list:
+        ps = ci.get("profit_share", 20)
+        pos = ci.get("position", "中游")
+        bt = ci.get("bottleneck", "")
+
+        # 利润池厚度分 (0-5)
+        pool_score = min(ps / 10, 5)
+        # 位置分 (0-3)
+        pos_score = {"上游": 3, "中游": 2, "下游": 1}.get(pos, 2)
+        # 瓶颈度 (0-2)
+        role = ci.get("role", "")
+        bottleneck_score = 2 if any(kw in role for kw in ["龙头", "稀缺", "寡头", "独家"]) else \
+                           (1 if any(kw in bt for kw in role[:4]) else 0)
+        total += pool_score + pos_score + bottleneck_score
+
+    return min(total, 10)
 
 
-def _stage2_lowvol_filter(daily: pd.DataFrame) -> Tuple[bool, str, dict]:
-    if daily.empty or len(daily) < 60:
-        return False, "数据不足60日", {}
+def scan_chains():
+    """主扫描：遍历所有WATCHLIST标的，输出链标注结果"""
+    mapping = get_stock_chain_mapping()
+    results = []
 
-    close = daily["close"].values
-    price = float(close[-1])
-
-    ret = pd.Series(close).pct_change().dropna()
-    vol_90d = float(ret.tail(90).std() * np.sqrt(252) * 100) if len(ret) >= 90 else None
-    vol_180d = float(ret.tail(180).std() * np.sqrt(252) * 100) if len(ret) >= 180 else None
-
-    max_dd_90 = 0.0
-    if len(close) >= 90:
-        window = close[-90:]
-        running_max = np.maximum.accumulate(window)
-        drawdowns = (window - running_max) / running_max * 100
-        max_dd_90 = float(np.min(drawdowns))
-
-    rsi = 50.0
-    if len(close) >= 15:
-        diffs = np.diff(close[-15:])
-        gains = np.mean(np.maximum(diffs, 0))
-        losses = np.mean(np.maximum(-diffs, 0))
-        if losses > 0:
-            rsi = 100 - 100 / (1 + gains / losses)
-
-    ma60 = float(np.mean(close[-60:])) if len(close) >= 60 else price
-    ma20 = float(np.mean(close[-20:])) if len(close) >= 20 else price
-    ma120 = float(np.mean(close[-120:])) if len(close) >= 120 else price
-    ma60_dev = (price - ma60) / ma60 * 100
-
-    if rsi > 80:
-        return False, f"极端超买RSI={rsi:.0f}", {}
-    if ma60_dev > 50:
-        return False, f"偏离MA60过高={ma60_dev:.0f}%", {}
-
-    metrics = {
-        "price": price,
-        "rsi": round(rsi, 1),
-        "ma20": round(ma20, 2),
-        "ma60": round(ma60, 2),
-        "ma120": round(ma120, 2),
-        "ma60_dev": round(ma60_dev, 1),
-        "vol_90d": round(vol_90d, 1) if vol_90d else None,
-        "vol_180d": round(vol_180d, 1) if vol_180d else None,
-        "max_dd_90": round(max_dd_90, 1),
-        "above_ma60": price > ma60,
-        "above_ma120": price > ma120,
-        "trend_up": ma20 > ma60 > ma120 if len(close) >= 120 else ma20 > ma60,
-    }
-    return True, "", metrics
-
-
-def _stage3_chain_alignment(chain_name: str, regime: str, perez_stage: str) -> Tuple[bool, str]:
-    bad_perez = ["maturity", "decline", "成熟期", "衰退", "沉寂"]
-    if any(kw in (perez_stage or "").lower() for kw in bad_perez):
-        if chain_name not in DECOUPLING_CHAINS:
-            return False, f"Perez阶段不佳({perez_stage[:20]})"
-
-    from investment_system.config import MACRO_SECTOR_ROTATION
-    rotation = MACRO_SECTOR_ROTATION.get(regime, MACRO_SECTOR_ROTATION["default"])
-    unfavored = rotation.get("unfavored", [])
-    chain_keywords_map = {
-        "新能源链": ["新能源"],
-        "消费电子链": ["消费必需品"],
-        "AI应用/Agent链": [],
-    }
-    chain_unfavored = chain_keywords_map.get(chain_name, [])
-    if any(uf in unfavored for uf in chain_unfavored):
-        return False, f"宏观象限不支持({regime}回避)"
-
-    return True, ""
-
-
-def _score_decoupling(fin: dict, metrics: dict, chain_name: str) -> dict:
-    roe = fin.get("净资产收益率") or 0
-    rev_growth = fin.get("营业收入同比增长率") or 0
-    ocps = fin.get("每股经营现金流") or 0
-
-    quality = min(10, max(1,
-        (min(roe, 40) / 40 * 4) +
-        (min(max(rev_growth, 0), 60) / 60 * 3) +
-        (min(max(ocps, 0), 5) / 5 * 3)
-    ))
-
-    vol = metrics.get("vol_90d") or 40
-    dd = abs(metrics.get("max_dd_90") or 25)
-    lowvol = min(10, max(1, 10 - (vol - 15) / 4 - dd / 5))
-
-    above_ma60 = 1 if metrics.get("above_ma60") else 0
-    trend_up = 1 if metrics.get("trend_up") else 0
-    rsi_ok = 1 if 30 < (metrics.get("rsi") or 50) < 75 else 0
-    chain_certainty = min(10, max(1, 5 + above_ma60 * 2 + trend_up * 2 + rsi_ok))
-
-    total = quality * 0.40 + lowvol * 0.30 + chain_certainty * 0.30
-    return {
-        "track": "A_脱钩",
-        "total": round(total, 2),
-        "quality": round(quality, 1),
-        "lowvol": round(lowvol, 1),
-        "chain_certainty": round(chain_certainty, 1),
-        "trend_strength": None,
-        "valuation": None,
-        "chain_match": round(chain_certainty, 1),
-    }
-
-
-def _score_macro_sensitive(fin: dict, metrics: dict, daily: pd.DataFrame, chain_name: str, regime: str) -> dict:
-    close = daily["close"].values
-
-    ret_20d = float((close[-1] / close[-21] - 1) * 100) if len(close) >= 21 else 0
-    ret_60d = float((close[-1] / close[-61] - 1) * 100) if len(close) >= 61 else 0
-    ret_120d = float((close[-1] / close[-121] - 1) * 100) if len(close) >= 121 else 0
-    above_ma60 = 1 if metrics.get("above_ma60") else 0
-    trend_up = 1 if metrics.get("trend_up") else 0
-    rsi = metrics.get("rsi") or 50
-    not_overheated = 1 if rsi < 75 else 0
-    trend_strength = min(10, max(1,
-        max(ret_20d, 0) / 20 * 3 +
-        max(ret_60d, 0) / 40 * 2.5 +
-        max(ret_120d, 0) / 60 * 1.5 +
-        above_ma60 * 2 +
-        trend_up * 1 +
-        not_overheated * 0 +
-        1
-    ))
-
-    roe = fin.get("净资产收益率") or 0
-    ocps = fin.get("每股经营现金流") or 0
-    quality = min(10, max(1, min(roe, 40) / 40 * 7 + min(max(ocps, 0), 5) / 5 * 3))
-
-    pe_val = None
-    if "pe" in daily.columns and not daily["pe"].isna().all():
-        pe_val = float(daily["pe"].iloc[-1]) if daily["pe"].iloc[-1] > 0 else None
-    valuation = 5.0
-    if pe_val:
-        valuation = min(10, max(1, 10 - (pe_val - 10) / 5))
-
-    from investment_system.config import MACRO_SECTOR_ROTATION
-    rotation = MACRO_SECTOR_ROTATION.get(regime, MACRO_SECTOR_ROTATION["default"])
-    favored = rotation.get("favored", [])
-    chain_keywords_map = {
-        "英伟达算力链": ["科技", "半导体", "AI"],
-        "机器人/自动化链": ["科技", "高端制造", "机器人"],
-        "医药创新链": ["医药"],
-        "军工链": ["军工"],
-        "新能源汽车链": ["消费", "汽车"],
-        "苹果产业链": ["消费", "科技"],
-    }
-    chain_keys = chain_keywords_map.get(chain_name, [])
-    match_score = 7 if any(k in favored for k in chain_keys) else 5
-    chain_match = float(match_score)
-
-    total = trend_strength * 0.35 + quality * 0.30 + valuation * 0.20 + chain_match * 0.15
-    return {
-        "track": "B_宏观敏感",
-        "total": round(total, 2),
-        "trend_strength": round(trend_strength, 1),
-        "quality": round(quality, 1),
-        "valuation": round(valuation, 1),
-        "chain_match": round(chain_match, 1),
-        "lowvol": None,
-        "chain_certainty": None,
-    }
-
-
-def _build_entry_reason(symbol: str, metrics: dict, fin: dict, score_detail: dict) -> List[str]:
-    reasons = []
-
-    rsi = metrics.get("rsi", 50)
-    ma60_dev = metrics.get("ma60_dev", 0)
-    trend_up = metrics.get("trend_up", False)
-    above_ma60 = metrics.get("above_ma60", False)
-
-    if trend_up and above_ma60 and rsi < 70:
-        reasons.append(f"趋势健康: MA20>MA60>MA120，RSI={rsi:.0f}不过热")
-    elif above_ma60 and ma60_dev < 20:
-        reasons.append(f"站稳MA60偏离{ma60_dev:.0f}%，未过热")
-
-    roe = fin.get("净资产收益率")
-    rev = fin.get("营业收入同比增长率")
-    if roe and roe >= 15:
-        reasons.append(f"ROE={roe:.1f}%达LDS质量门槛(≥15%)")
-    elif roe and roe >= 10:
-        reasons.append(f"ROE={roe:.1f}%合格")
-    if rev and rev >= 20:
-        reasons.append(f"营收增速{rev:.0f}%超LDS成长门槛")
-
-    track = score_detail.get("track", "")
-    if "脱钩" in track:
-        reasons.append("国产替代方向，独立于宏观双门")
-
-    return reasons[:3]
-
-
-def _build_trigger_condition(metrics: dict, fin: dict) -> str:
-    ma20 = metrics.get("ma20")
-    ma60 = metrics.get("ma60")
-    price = metrics.get("price")
-    rsi = metrics.get("rsi", 50)
-
-    if price and ma20 and price > ma20 * 1.05:
-        return f"等待回踩MA20(¥{ma20:.2f})附近，RSI回落至50-60"
-    if rsi > 65:
-        return f"等待RSI回落至50以下（当前{rsi:.0f}），再评估"
-    return "技术面已具备，等财报/催化剂验证基本面"
-
-
-def _build_invalidation(fin: dict, chain_name: str) -> str:
-    roe = fin.get("净资产收益率")
-    if roe and roe < 8:
-        return f"ROE跌破8%（当前{roe:.1f}%），或链路核心假设破灭"
-    if chain_name in DECOUPLING_CHAINS:
-        return "政策退坡/国产替代进度停滞，或出口管制取消"
-    return "跌破MA60且成交量放大，或行业链景气逆转"
-
-
-def scan_chain_candidates(
-    regime: str = "default",
-    dual_open: bool = True,
-    max_candidates: int = MAX_CANDIDATES,
-    verbose: bool = True,
-) -> List[dict]:
-    cache = _load_cache()
-    cache_key = f"{regime}_{dual_open}_{datetime.now().strftime('%Y%m%d')}"
-    if cache_key in cache:
-        if verbose:
-            print(f"[chain_scanner] 使用缓存结果: {len(cache[cache_key])} 只候选")
-        return cache[cache_key]
-
-    chains = config.INDUSTRY_CHAINS
-    all_candidates = []
-
-    try:
-        import baostock as bs
-        bs.login()
-        bs_logged = True
-    except Exception:
-        bs_logged = False
-
-    for chain_name, chain_data in chains.items():
-        perez_stage = chain_data.get("perez_stage", "")
-        is_decoupling = chain_name in DECOUPLING_CHAINS
-        symbols_a = [s for s in chain_data.get("symbols", []) if s.isdigit()]
-
-        if not symbols_a:
+    for sym, info in WATCHLIST.items():
+        sym_str = str(sym)
+        chain_info = mapping.get(sym_str, [])
+        name = info.get("name", sym_str) if isinstance(info, dict) else str(info)
+        if not chain_info:
+            results.append({
+                "symbol": sym_str,
+                "name": name,
+                "chains": [],
+                "chain_scores": {"total": 0, "pool": 0, "position": 0, "bottleneck": 0},
+                "best_chain": "未映射",
+            })
             continue
 
-        for symbol in symbols_a:
-            if verbose:
-                print(f"  [{chain_name}] {symbol}...")
+        cs = score_chain_position(chain_info)
+        chain_names = [c["chain_name"] for c in chain_info]
+        roles = [c["role"] for c in chain_info]
+        positions = [c["position"] for c in chain_info]
+        pool_scores = [min(c["profit_share"]/10, 5) for c in chain_info]
+        pos_scores = [{"上游": 3, "中游": 2, "下游": 1}.get(c["position"], 2) for c in chain_info]
 
-            basics = _get_stock_basics(symbol)
-            ok, reason = _stage1_hard_filter(symbol, basics)
-            if not ok:
-                continue
+        best = max(chain_info, key=lambda c: c.get("profit_share", 0))
 
-            try:
-                daily = get_stock_daily(symbol, 200)
-            except Exception:
-                continue
-            if daily is None or (hasattr(daily, 'empty') and daily.empty):
-                continue
+        results.append({
+            "symbol": sym_str,
+            "name": name,
+            "chains": chain_names,
+            "roles": roles,
+            "positions": positions,
+            "chain_scores": {
+                "total": round(cs, 1),
+                "pool": round(max(pool_scores), 1),
+                "position": max(pos_scores),
+                "bottleneck": best.get("profit_share", 20) / 10,
+            },
+            "best_chain": best["chain_name"],
+            "best_role": best["role"],
+            "best_position": best["position"],
+            "direction": best.get("directional_bias", ""),
+        })
 
-            ok, reason, metrics = _stage2_lowvol_filter(daily)
-            if not ok:
-                if verbose:
-                    print(f"    ❌ Stage2: {reason}")
-                continue
-
-            ok, reason = _stage3_chain_alignment(chain_name, regime, perez_stage)
-            if not ok and not is_decoupling:
-                if verbose:
-                    print(f"    ❌ Stage3: {reason}")
-                continue
-
-            try:
-                fin = get_financial_report(symbol) or {}
-            except Exception:
-                fin = {}
-
-            if is_decoupling or not dual_open:
-                score_detail = _score_decoupling(fin, metrics, chain_name)
-            else:
-                score_detail = _score_macro_sensitive(fin, metrics, daily, chain_name, regime)
-
-            entry_reasons = _build_entry_reason(symbol, metrics, fin, score_detail)
-            trigger = _build_trigger_condition(metrics, fin)
-            invalidation = _build_invalidation(fin, chain_name)
-
-            candidate = {
-                "symbol": symbol,
-                "name": basics.get("name", symbol),
-                "chain": chain_name,
-                "is_decoupling": is_decoupling,
-                "perez_stage": perez_stage[:30] if perez_stage else "",
-                "score": score_detail["total"],
-                "score_detail": score_detail,
-                "price": metrics.get("price"),
-                "rsi": metrics.get("rsi"),
-                "ma20": metrics.get("ma20"),
-                "ma60": metrics.get("ma60"),
-                "ma60_dev": metrics.get("ma60_dev"),
-                "vol_90d": metrics.get("vol_90d"),
-                "max_dd_90": metrics.get("max_dd_90"),
-                "trend_up": metrics.get("trend_up"),
-                "roe": fin.get("净资产收益率"),
-                "rev_growth": fin.get("营业收入同比增长率"),
-                "entry_reasons": entry_reasons,
-                "trigger_condition": trigger,
-                "invalidation": invalidation,
-                "scanned_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            }
-            all_candidates.append(candidate)
-
-    if bs_logged:
-        try:
-            import baostock as bs
-            bs.logout()
-        except Exception:
-            pass
-
-    all_candidates.sort(key=lambda x: x["score"], reverse=True)
-
-    selected = []
-    seen_chains = set()
-    for c in all_candidates:
-        if len(selected) >= max_candidates:
-            break
-        if c["chain"] in seen_chains and len(selected) >= MIN_CANDIDATES:
-            continue
-        selected.append(c)
-        seen_chains.add(c["chain"])
-
-    result = selected[:max_candidates]
-
-    cache[cache_key] = result
-    _save_cache(cache)
-
-    if verbose:
-        print(f"[chain_scanner] 完成: 扫描{len(all_candidates)}只通过过滤，选出{len(result)}只候选")
-        for c in result:
-            print(f"  {'🔵脱钩' if c['is_decoupling'] else '🟡宏观'} {c['name']}({c['symbol']}) "
-                  f"[{c['chain']}] 评分{c['score']:.1f}")
-
-    return result
+    return results
 
 
-def format_candidate_for_report(c: dict) -> str:
-    name = c.get("name", c.get("symbol"))
-    symbol = c.get("symbol", "")
-    chain = c.get("chain", "")
-    score = c.get("score", 0)
-    price = c.get("price")
-    ma20 = c.get("ma20")
-    ma60 = c.get("ma60")
-    rsi = c.get("rsi")
-    ma60_dev = c.get("ma60_dev")
-    roe = c.get("roe")
-    track = c.get("score_detail", {}).get("track", "")
-    track_tag = "🔵脱钩" if "脱钩" in track else "🟡宏观"
+def format_chain_report(scan_results):
+    """生成为日报可用的文本报告"""
+    chains_covered = set()
+    for r in scan_results:
+        for c in r.get("chains", []):
+            if c:
+                chains_covered.add(c)
 
-    price_str = f"¥{price:.2f}" if price else "?"
-    ma_str = f"MA20¥{ma20:.2f} MA60¥{ma60:.2f}" if ma20 and ma60 else ""
-    rsi_str = f"RSI{rsi:.0f}" if rsi else ""
-    dev_str = f"偏MA60{ma60_dev:+.0f}%" if ma60_dev is not None else ""
-    roe_str = f"ROE{roe:.0f}%" if roe else ""
+    lines = []
+    lines.append(f"📊 产业链覆盖: {len(chains_covered)}/12条链")
+    lines.append(f"   已覆盖: {' | '.join(sorted(chains_covered))}")
+    lines.append("")
 
-    header = f"{track_tag} **{name}**({symbol}) [{chain}] 评分{score:.1f}"
-    metrics_line = " | ".join(filter(None, [price_str, ma_str, rsi_str, dev_str, roe_str]))
+    # 按链分组
+    by_chain = {}
+    for r in scan_results:
+        for i, c_name in enumerate(r.get("chains", [])):
+            if c_name:
+                by_chain.setdefault(c_name, []).append(r)
 
-    reasons = c.get("entry_reasons", [])
-    reasons_str = "、".join(reasons) if reasons else "综合因子评分优秀"
+    for chain_name, chain_stocks in sorted(by_chain.items()):
+        chain_key = None
+        for k, c in CHAINS.items():
+            if c["name"] == chain_name:
+                chain_key = k
+                break
+        if chain_key:
+            chain_def = CHAINS[chain_key]
+        else:
+            chain_def = {}
+        lines.append(f"  {chain_name}")
+        lines.append(f"    利润池: {chain_def.get('profit_pool', {}).get('main', 'N/A')}")
+        lines.append(f"    瓶颈: {chain_def.get('bottleneck', 'N/A')}")
+        lines.append(f"    方向: {chain_def.get('directional_bias', 'N/A')}")
+        for st in sorted(chain_stocks, key=lambda x: x.get("chain_scores", {}).get("total", 0), reverse=True):
+            pos = st.get("best_position", "?")
+            role = st.get("best_role", "?")
+            cs = st.get("chain_scores", {})
+            lines.append(f"      {st['symbol']}({st['name']}) [{pos}] {role} — 链分{cs.get('total',0):.1f}")
+        lines.append("")
 
-    trigger = c.get("trigger_condition", "")
-    invalid = c.get("invalidation", "")
-
-    lines = [
-        header,
-        f"  数据: {metrics_line}",
-        f"  入选原因: {reasons_str}",
-        f"  触发条件: {trigger}",
-        f"  失效条件: {invalid}",
-    ]
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    results = scan_chains()
+    report = format_chain_report(results)
+    print(report)
+    print(f"\n✅ {len(results)}个标的完成链标注")

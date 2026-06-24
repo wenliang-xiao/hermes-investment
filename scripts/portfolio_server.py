@@ -642,9 +642,25 @@ def get_comparison():
     try:
         from investment_system.analysis.strategy_comparison import run_comparison
         result = run_comparison(days=60)
+        # 附加实时信号
+        sig_path = ROOT / "data" / "trading_signals.json"
+        if sig_path.exists():
+            with open(sig_path) as f:
+                result["live_signals"] = json.load(f)
         return result
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/signals")
+def api_signals():
+    """今日实时信号"""
+    sig_path = ROOT / "data" / "trading_signals.json"
+    if sig_path.exists():
+        with open(sig_path) as f:
+            data = json.load(f)
+        return data
+    return {"error": "no signals yet today", "signals": []}
 
 
 @app.get("/comparison")

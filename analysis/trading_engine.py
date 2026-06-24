@@ -191,7 +191,7 @@ class FacejiStrategy(BaseStrategy):
         self.signals = []
         held = set(self.positions.keys())
 
-        # ── 建仓信号 ──
+        # ── 建仓信号（保留面基趋势过滤 + Kelly动态分配）──
         candidates = sorted(
             [s for s in score_map if s not in held],
             key=lambda s: score_map.get(s, 0), reverse=True
@@ -227,28 +227,48 @@ class FacejiStrategy(BaseStrategy):
                 size_pct=round(kelly_pct, 1), score=score
             ))
 
-        # ── 清仓信号 ──
+        # ── 清仓信号（融合SilverQuant 4层风控）──
         for sym in list(self.positions.keys()):
             pos = self.positions[sym]
             price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
             score = score_map.get(sym, 0)
             entry = pos["entry_price"]
+            peak = pos.get("peak", entry)
             pnl_pct = (price - entry) / entry * 100
+            dd = (price - peak) / peak * 100 if peak else 0
             name = self._get_name(sym)
 
-            # Exit: score < 4
-            if score < self.exit_threshold:
+            # 1. HardSeller: -8% 硬止损（SQ继承）
+            if pnl_pct <= -8:
                 self.signals.append(Signal(
                     strategy="faceji", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"评分{score:.1f}<{self.exit_threshold}",
+                    price=price, reason=f"硬止损{pnl_pct:.1f}%",
                     priority="HIGH", pnl_pct=pnl_pct, score=score
                 ))
                 continue
 
-            # Exit: score < 5 + MA death cross
+            # 2. FallSeller: -12% 峰值回落止盈（SQ继承）
+            if dd <= -12:
+                self.signals.append(Signal(
+                    strategy="faceji", action="SELL", symbol=sym, name=name,
+                    price=price, reason=f"回落止盈{dd:.1f}%",
+                    priority="HIGH", pnl_pct=pnl_pct, score=score
+                ))
+                continue
+
+            # 3. ScoreDropSeller: 评分<4.5 基本面下滑（SQ收紧版，比原来4.0更早）
+            if score < 4.5:
+                self.signals.append(Signal(
+                    strategy="faceji", action="SELL", symbol=sym, name=name,
+                    price=price, reason=f"评分下滑{score:.1f}",
+                    priority="MED", pnl_pct=pnl_pct, score=score
+                ))
+                continue
+
+            # 4. MASeller: MA死叉 + 亏损未超-5%（SQ继承，附加评分条件）
             if score < 5.0:
                 tech = tech_map.get(sym, {})
-                if (tech.get("ma20_dev", 0) or 0) < (tech.get("ma60_dev", 0) or 0):
+                if (tech.get("ma20_dev", 0) or 0) < (tech.get("ma60_dev", 0) or 0) and pnl_pct > -5:
                     self.signals.append(Signal(
                         strategy="faceji", action="SELL", symbol=sym, name=name,
                         price=price, reason="MA死叉+评分<5",
