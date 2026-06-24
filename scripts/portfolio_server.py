@@ -227,6 +227,7 @@ td { padding: 6px; border-bottom: 1px solid var(--border); }
     <a href="/dashboard">← 模拟盘</a>
     <span style="color:var(--text2)">｜</span>
     <a href="/comparison" style="color:var(--orange);font-weight:600">三方策略对比</a>
+    <a href="https://bytedance.feishu.cn/docx/Q3ojdDMNPoiRMMx6eppc0Pzkn9U" target="_blank">日报v9</a>
   </div>
 
   <h1>📊 三方策略对比</h1>
@@ -663,15 +664,246 @@ def api_signals():
     return {"error": "no signals yet today", "signals": []}
 
 
-@app.get("/comparison")
-def comparison_page():
-    return responses.HTMLResponse(COMPARISON_HTML)
+@app.get("/api/simulated")
+def api_simulated():
+    """三个策略模拟盘全方位数据"""
+    sig_path = ROOT / "data" / "trading_signals.json"
+    if not sig_path.exists():
+        return {"error": "no simulated data yet", "portfolios": {}}
+
+    with open(sig_path) as f:
+        data = json.load(f)
+
+    portfolios = data.get("portfolios", {})
+    positions = data.get("positions", {})
+    signals = data.get("signals", [])
+
+    # 各策略汇总
+    result = {}
+    strategy_labels = {
+        "faceji": {"name": "面基", "color": "#58a6ff", "style": "面基(评分+趋势+Kelly+SQ风控)"},
+        "silverquant": {"name": "SilverQuant", "color": "#3fb950", "style": "组件化(评分建仓+4层风控)"},
+        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "辩论制(Kelly动态+技术融合)"},
+    }
+
+    for sname in ["faceji", "silverquant", "tradingagents"]:
+        pf = portfolios.get(sname, {})
+        pos = positions.get(sname, {})
+        s_sigs = [s for s in signals if s["strategy"] == sname]
+        label = strategy_labels.get(sname, {})
+
+        cash = pf.get("cash", 1000000)
+        invested = pf.get("total_invested", 0)
+        total_value = cash + invested
+        total_pnl = total_value - 1000000
+        total_return = total_pnl / 1000000 * 100
+
+        pos_list = []
+        for sym, pd in pos.items():
+            entry = pd.get("entry_price", 0)
+            current = pd.get("current_price", entry)
+            qty = pd.get("quantity", 0)
+            cost = entry * qty
+            mkt_val = current * qty
+            pnl = mkt_val - cost
+            pnl_pct = pd.get("pnl_pct", 0)
+            pos_list.append({
+                "symbol": sym, "name": sym,
+                "entry_price": entry, "current_price": current,
+                "quantity": qty, "cost": cost, "market_value": mkt_val,
+                "pnl": round(pnl, 2), "pnl_pct": pnl_pct,
+                "entry_date": pd.get("entry_date", ""),
+            })
+
+        result[sname] = {
+            "label": label.get("name", sname),
+            "color": label.get("color", "#fff"),
+            "style": label.get("style", ""),
+            "cash": round(cash, 2),
+            "invested": round(invested, 2),
+            "total_value": round(total_value, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_return": round(total_return, 2),
+            "position_count": len(pos),
+            "history_count": pf.get("history_count", 0),
+            "positions": pos_list,
+            "signals": [s for s in signals if s["strategy"] == sname],
+        }
+
+    return {
+        "date": data.get("date", ""),
+        "generated_at": data.get("generated_at", ""),
+        "simulated_trades": data.get("simulated_trades", 0),
+        "portfolios": result,
+        "user_signals": signals,
+    }
+
+
+UNIFIED_DASHBOARD_HTML = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>面基·三源融合模拟盘</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root { --bg:#0d1117; --card:#161b22; --card2:#1c2333; --border:#30363d;
+        --text:#e6edf3; --text2:#8b949e; --green:#3fb950; --red:#f85149;
+        --blue:#58a6ff; --yellow:#d29922; --orange:#d9600e; --purple:#bc8cff; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+       background:var(--bg); color:var(--text); padding:20px; }
+.container { max-width:1500px; margin:0 auto; }
+h1 { font-size:22px; margin-bottom:4px; }
+.subtitle { color:var(--text2); font-size:13px; margin-bottom:20px; }
+.nav { display:flex; gap:12px; margin-bottom:20px; font-size:13px; }
+.nav a { color:var(--blue); text-decoration:none; padding:4px 12px;
+         border:1px solid var(--border); border-radius:6px; }
+.nav a:hover { background:var(--card2); }
+.nav a.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+@media(max-width:900px){ .grid-3 { grid-template-columns:1fr; } }
+.card { background:var(--card); border:1px solid var(--border);
+        border-radius:10px; padding:16px; margin-bottom:16px; }
+.card-header { display:flex; justify-content:space-between; align-items:center;
+               margin-bottom:12px; }
+.card-header h3 { font-size:15px; }
+.strategy-panel { border-top:3px solid transparent; }
+.metric { margin:4px 0; display:flex; justify-content:space-between; }
+.metric-l { color:var(--text2); font-size:12px; }
+.metric-v { font-size:14px; font-weight:600; }
+.metric-big { font-size:26px; font-weight:700; margin:8px 0; }
+.green { color:var(--green); } .red { color:var(--red); }
+.chart-container { height:200px; margin:12px 0; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th { text-align:left; padding:6px 4px; color:var(--text2);
+     border-bottom:1px solid var(--border); font-weight:500; }
+td { padding:5px 4px; border-bottom:1px solid var(--border); }
+.tr-hover:hover { background:var(--card2); }
+.badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; }
+.badge-buy { background:#1a3a2a; color:var(--green); }
+.badge-sell { background:#3a1a1a; color:var(--red); }
+.badge-win { background:#1a3a2a; color:var(--green); }
+.badge-loss { background:#3a1a1a; color:var(--red); }
+.empty { color:var(--text2); padding:20px; text-align:center; }
+.scroll { max-height:300px; overflow-y:auto; }
+.tag { display:inline-block; padding:2px 8px; border-radius:4px;
+        font-size:10px; font-weight:500; margin-left:6px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="nav">
+    <a href="/dashboard" class="active">模拟盘</a>
+    <a href="/comparison">回测对比</a>
+    <a href="https://bytedance.feishu.cn/docx/Q3ojdDMNPoiRMMx6eppc0Pzkn9U" target="_blank">日报v9</a>
+  </div>
+
+  <h1>面基 · 三源融合模拟盘</h1>
+  <div class="subtitle" id="runInfo">加载中...</div>
+
+  <div class="grid-3" id="strategyPanels"></div>
+
+  <div class="card" id="userSignals" style="display:none">
+    <div class="card-header"><h3>执行建议（今日优先级）</h3></div>
+    <div id="userSignalsBody"></div>
+  </div>
+</div>
+
+<script>
+async function load() {
+  const r = await fetch('/api/simulated');
+  const data = await r.json();
+  if (data.error) {
+    document.getElementById('strategyPanels').innerHTML = '<div class="card">数据不可用</div>';
+    return;
+  }
+
+  document.getElementById('runInfo').textContent =
+    data.date + ' | ' + data.generated_at + ' | 模拟交易 ' + data.simulated_trades + ' 笔';
+
+  // 三大策略面板
+  document.getElementById('strategyPanels').innerHTML =
+    ['faceji','silverquant','tradingagents'].map(sname => {
+      const p = data.portfolios[sname];
+      if (!p) return '';
+      const retCls = p.total_return >= 0 ? 'green' : 'red';
+      const posRows = p.positions.map(pos => {
+        const pnlCls = pos.pnl_pct >= 0 ? 'green' : 'red';
+        return `<tr class="tr-hover">
+          <td>${pos.symbol}</td>
+          <td>${pos.quantity}</td>
+          <td>${pos.entry_price.toFixed(2)}</td>
+          <td class="${pnlCls}">${pos.current_price.toFixed(2)}</td>
+          <td class="${pnlCls}">${fmtPct(pos.pnl_pct)}</td>
+          <td style="font-size:11px;color:var(--text2)">${pos.entry_date}</td>
+        </tr>`;
+      }).join('');
+
+      const sigRows = p.signals.map(s =>
+        `<tr class="tr-hover"><td><span class="badge ${s.action==='BUY'?'badge-buy':'badge-sell'}">${s.action}</span></td>
+         <td>${s.symbol}</td><td>${s.price.toFixed(2)}</td><td style="font-size:11px;color:var(--text2)">${s.reason}</td></tr>`
+      ).join('');
+
+      return `<div class="card strategy-panel" style="border-top-color:${p.color}">
+        <div class="card-header">
+          <h3><span style="color:${p.color}">●</span> ${p.label}</h3>
+          <span style="font-size:11px;color:var(--text2)">${p.style}</span>
+        </div>
+        <div class="metric-big ${retCls}">${p.total_return >= 0 ? '+':''}${p.total_return.toFixed(2)}%</div>
+        <div class="metric"><span class="metric-l">总资产</span><span class="metric-v">¥${fmt(p.total_value)}</span></div>
+        <div class="metric"><span class="metric-l">现金</span><span class="metric-v">¥${fmt(p.cash)}</span></div>
+        <div class="metric"><span class="metric-l">已投</span><span class="metric-v">¥${fmt(p.invested)}</span></div>
+        <div class="metric"><span class="metric-l">仓位</span><span class="metric-v">${p.position_count} 只</span></div>
+        <div style="margin-top:12px;font-size:12px;color:var(--text2)">持仓明细</div>
+        <div class="scroll" style="max-height:180px">
+          ${posRows || '<div class="empty">空仓</div>'}
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:var(--text2)">今日信号</div>
+        <div class="scroll" style="max-height:120px">
+          ${sigRows || '<div class="empty">无信号</div>'}
+        </div>
+      </div>`;
+    }).join('');
+
+  // 用户建议信号
+  if (data.user_signals && data.user_signals.length > 0) {
+    document.getElementById('userSignals').style.display = 'block';
+    const rows = data.user_signals.map(s => {
+      const pct = s.priority === 'HIGH' ? '🔴' : (s.priority === 'MED' ? '🟡' : '⚪');
+      return `<tr class="tr-hover">
+        <td>${pct} ${s.priority}</td>
+        <td><span class="badge ${s.action==='BUY'?'badge-buy':'badge-sell'}">${s.action}</span></td>
+        <td>${s.symbol}</td>
+        <td>${s.name}</td>
+        <td>¥${s.price.toFixed(2)}</td>
+        <td style="font-size:11px;color:var(--text2)">${s.reason}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('userSignalsBody').innerHTML =
+      `<table><tr><th>优先级</th><th>操作</th><th>代码</th><th>名称</th><th>价格</th><th>理由</th></tr>${rows}</table>`;
+  }
+}
+
+function fmt(v) { return Math.round(v).toLocaleString(); }
+function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+load();
+setInterval(load, 120000);
+</script>
+</body>
+</html>
+"""
 
 
 @app.get("/")
 @app.get("/dashboard")
 def dashboard():
-    return responses.HTMLResponse(DASHBOARD_HTML)
+    return responses.HTMLResponse(UNIFIED_DASHBOARD_HTML)
+
+
+@app.get("/comparison")
+def comparison_page():
+    return responses.HTMLResponse(COMPARISON_HTML)
 
 
 if __name__ == "__main__":

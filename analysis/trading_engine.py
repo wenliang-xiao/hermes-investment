@@ -175,6 +175,41 @@ class BaseStrategy:
             "history": self.history[-100:]  # 只保留最近100条
         }
 
+    def execute_buy(self, signal):
+        """通用买入执行（各策略可覆盖）"""
+        sym = signal.symbol
+        price = signal.price
+        pct = signal.size_pct or 3.0
+        qty = max(100, int(self.cash * pct / 100 / price / 100) * 100)
+        cost = price * qty
+        if cost > self.cash:
+            return False
+        self.cash -= cost
+        self.positions[sym] = {
+            "entry_price": price, "quantity": qty,
+            "entry_date": date.today().strftime("%Y-%m-%d"),
+            "peak": price, "current_price": price
+        }
+        self.history.append({"date": str(date.today()), "symbol": sym,
+                             "action": "买入", "price": price, "cost": round(cost, 2),
+                             "reason": signal.reason})
+        return True
+
+    def execute_sell(self, signal):
+        """通用卖出执行（各策略可覆盖）"""
+        sym = signal.symbol
+        if sym not in self.positions:
+            return False
+        pos = self.positions[sym]
+        price = signal.price
+        pnl = (price - pos["entry_price"]) * pos["quantity"]
+        self.cash += price * pos["quantity"]
+        self.history.append({"date": str(date.today()), "symbol": sym,
+                             "action": "卖出", "price": price,
+                             "pnl": round(pnl, 2), "reason": signal.reason})
+        del self.positions[sym]
+        return True
+
 
 # ═══════════════════════════════════════════
 # 策略1: faceji（当前系统）
@@ -285,41 +320,6 @@ class FacejiStrategy(BaseStrategy):
         info = WATCHLIST.get(sym, {})
         return info.get("name", sym) if isinstance(info, dict) else str(info)
 
-    def execute_buy(self, signal):
-        """执行买入（内部状态更新）"""
-        sym = signal.symbol
-        price = signal.price
-        pct = signal.size_pct or 3.0
-        qty = max(100, int(self.cash * pct / 100 / price / 100) * 100)
-        cost = price * qty
-        if cost > self.cash:
-            return False
-        self.cash -= cost
-        self.positions[sym] = {
-            "entry_price": price, "quantity": qty,
-            "entry_date": date.today().strftime("%Y-%m-%d"),
-            "peak": price, "current_price": price
-        }
-        self.history.append({"date": str(date.today()), "symbol": sym,
-                             "action": "买入", "price": price, "cost": round(cost, 2),
-                             "reason": signal.reason})
-        return True
-
-    def execute_sell(self, signal):
-        """执行卖出（内部状态更新）"""
-        sym = signal.symbol
-        if sym not in self.positions:
-            return False
-        pos = self.positions[sym]
-        price = signal.price
-        pnl = (price - pos["entry_price"]) * pos["quantity"]
-        self.cash += price * pos["quantity"]
-        self.history.append({"date": str(date.today()), "symbol": sym,
-                             "action": "卖出", "price": price,
-                             "pnl": round(pnl, 2), "reason": signal.reason})
-        del self.positions[sym]
-        return True
-
 
 # ═══════════════════════════════════════════
 # 策略2: SilverQuant 组件化
@@ -417,18 +417,6 @@ class SilverQuantStrategy(BaseStrategy):
             "entry_date": str(date.today()), "peak": price, "current_price": price}
         self.history.append({"date": str(date.today()), "symbol": sym,
             "action": "买入", "price": price, "cost": round(cost, 2), "reason": signal.reason})
-        return True
-
-    def execute_sell(self, signal):
-        sym = signal.symbol
-        if sym not in self.positions: return False
-        pos = self.positions[sym]
-        price = signal.price
-        pnl = (price - pos["entry_price"]) * pos["quantity"]
-        self.cash += price * pos["quantity"]
-        self.history.append({"date": str(date.today()), "symbol": sym,
-            "action": "卖出", "price": price, "pnl": round(pnl, 2), "reason": signal.reason})
-        del self.positions[sym]
         return True
 
 
@@ -639,13 +627,29 @@ class TradingEngine:
                 print(f"    [{s.priority}] {s.action} {s.symbol}({s.name}) @{s.price:.2f} - {s.reason}", flush=True)
             all_signals.extend(sigs)
 
-        # 冲突解决
-        resolved = self._resolve_conflicts(all_signals)
-        print(f"\n  🔄 冲突解决后: {len(resolved)} 个信号", flush=True)
+        # === 自动执行模拟盘（每个策略独立执行自己的信号） ===
+        print(f"\n  🖥️ 自动执行模拟盘...", flush=True)
+        sim_trades = 0
+        for name, strategy in self.strategies.items():
+            strategy_sigs = [s for s in all_signals if s.strategy == name]
+            for sig in strategy_sigs:
+                if sig.action == "BUY":
+                    ok = strategy.execute_buy(sig)
+                elif sig.action == "SELL":
+                    ok = strategy.execute_sell(sig)
+                else:
+                    continue
+                if ok:
+                    sim_trades += 1
+        print(f"  ✅ 模拟盘执行 {sim_trades} 笔交易", flush=True)
 
-        # 周频过滤
+        # 冲突解决（仅用于给用户的建议信号）
+        resolved = self._resolve_conflicts(all_signals)
+        print(f"\n  🔄 冲突解决后: {len(resolved)} 个建议信号", flush=True)
+
+        # 周频过滤（仅用于给用户的建议信号）
         final = self._filter_by_weekly_rule(resolved)
-        print(f"\n  📋 周频过滤后: {len(final)} 个最终信号", flush=True)
+        print(f"\n  📋 周频过滤后: {len(final)} 个最终建议", flush=True)
 
         output = {
             "date": date_str,
@@ -655,12 +659,23 @@ class TradingEngine:
             "after_conflict_resolution": len(resolved),
             "after_weekly_filter": len(final),
             "signals": [s.to_dict() for s in final],
+            "simulated_trades": sim_trades,
             "positions": {
                 name: {sym: {"entry_price": pos["entry_price"],
                              "current_price": pos.get("current_price", pos["entry_price"]),
                              "quantity": pos["quantity"],
+                             "entry_date": pos.get("entry_date", ""),
                              "pnl_pct": round((pos.get("current_price", pos["entry_price"]) - pos["entry_price"]) / pos["entry_price"] * 100, 2)}
                         for sym, pos in strategy.positions.items()}
+                for name, strategy in self.strategies.items()
+            },
+            "portfolios": {
+                name: {
+                    "cash": strategy.cash,
+                    "position_count": len(strategy.positions),
+                    "total_invested": sum(pos["entry_price"] * pos["quantity"] for pos in strategy.positions.values()),
+                    "history_count": len(strategy.history),
+                }
                 for name, strategy in self.strategies.items()
             }
         }
@@ -670,7 +685,7 @@ class TradingEngine:
             with open(out_path, "w") as f:
                 json.dump(output, f, ensure_ascii=False, indent=2, default=str)
             self._save_states()
-            print(f"\n  💾 信号已保存: {out_path}", flush=True)
+            print(f"\n  💾 信号+模拟盘已保存: {out_path}", flush=True)
 
         return output
 
