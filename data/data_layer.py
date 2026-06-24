@@ -100,8 +100,9 @@ def get_stock_info(symbol: str) -> dict:
     try:
         rs = _bs_query_with_timeout(bs.query_stock_basic, code=_bs_code(symbol))
         if rs.error_code == "0":
-            while rs.next():
-                r = rs.get_row_data()
+            rows = _bs_iter_results(rs, timeout=15)
+            if rows:
+                r = rows[0]
                 return {"name": r[1], "list_date": r[2], "status": r[4]}
     except:
         pass
@@ -157,6 +158,25 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _bs_iter_results(rs, timeout=30):
+    """安全迭代baostock结果集，带alarm保护防止rs.next()静默挂死。"""
+    rows = []
+    old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)
+    old_alarm = _signal_module.alarm(timeout)
+    try:
+        while rs.next():
+            _signal_module.alarm(timeout)  # 每次迭代重置alarm
+            rows.append(rs.get_row_data())
+    except _BSTimeoutError:
+        print(f"[data] baostock rs.next() timed out ({timeout}s), returning partial data")
+    except Exception as e:
+        print(f"[data] baostock rs.next() exception: {e}")
+    finally:
+        _signal_module.alarm(0)
+        _signal_module.signal(_signal_module.SIGALRM, old_handler)
+    return rows
+
+
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
     """获取个股日线数据（含PE/PB）。baostock主力，失败直接返回空(不试AKShare以免挂死)。"""
     _bs_login()
@@ -173,9 +193,12 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
         if rs.error_code != "0":
             return pd.DataFrame()
 
+        raw_rows = _bs_iter_results(rs, timeout=30)
+        if not raw_rows:
+            return pd.DataFrame()
+
         rows = []
-        while rs.next():
-            r = rs.get_row_data()
+        for r in raw_rows:
             try:
                 rows.append({
                     "date": pd.to_datetime(r[0]),
@@ -285,8 +308,8 @@ def get_financial_report(symbol: str) -> dict:
                     year=datetime.now().year - year_off, quarter=quarter)
                 if rs.error_code != "0":
                     continue
-                while rs.next():
-                    r = rs.get_row_data()
+                raw_rows = _bs_iter_results(rs, timeout=15)
+                for r in raw_rows:
                     for idx, key in [(3, "净资产收益率"), (4, "营业收入同比增长率"), (5, "净利润同比增长率")]:
                         try:
                             if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
@@ -312,8 +335,8 @@ def get_financial_report(symbol: str) -> dict:
                         year=datetime.now().year - year_off, quarter=quarter)
                     if rs.error_code != "0":
                         continue
-                    while rs.next():
-                        r = rs.get_row_data()
+                    raw_rows = _bs_iter_results(rs, timeout=15)
+                    for r in raw_rows:
                         for idx, key in [(4, "毛利率"), (5, "净利率")]:
                             try:
                                 if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
@@ -359,8 +382,8 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
                 roe_val = None
                 rs_d = _bs_query_with_timeout(bs.query_dupont_data, code=bs_code, year=year, quarter=quarter)
                 if rs_d.error_code == "0":
-                    while rs_d.next():
-                        r = rs_d.get_row_data()
+                    dupont_rows = _bs_iter_results(rs_d, timeout=15)
+                    for r in dupont_rows:
                         try:
                             roe_raw = r[5] if len(r) > 5 else ""
                             if roe_raw and str(roe_raw).strip():
@@ -372,8 +395,8 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
                 rs_cf = _bs_query_with_timeout(bs.query_cash_flow_data, code=bs_code, year=year, quarter=quarter)
                 if rs_cf.error_code == "0":
                     fields = rs_cf.fields
-                    while rs_cf.next():
-                        r = rs_cf.get_row_data()
+                    cf_rows = _bs_iter_results(rs_cf, timeout=15)
+                    for r in cf_rows:
                         try:
                             row = dict(zip(fields, r))
                             ocf_raw = row.get("netCashFlowsFromOperatingActivities") or \
@@ -424,9 +447,9 @@ def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
         )
         if rs.error_code != "0":
             return pd.Series(dtype=float)
+        raw_rows = _bs_iter_results(rs, timeout=30)
         rows = []
-        while rs.next():
-            r = rs.get_row_data()
+        for r in raw_rows:
             try:
                 if r[1] and str(r[1]).strip():
                     pe = float(r[1])
@@ -522,9 +545,9 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
             bs.query_history_k_data_plus,
             bs_code, "date,close,volume",
             start_date=start, end_date=end, frequency="d", adjustflag="2")
+        raw_rows = _bs_iter_results(rs, timeout=30)
         rows = []
-        while rs.next():
-            r = rs.get_row_data()
+        for r in raw_rows:
             try:
                 rows.append({"date": pd.to_datetime(r[0]), "close": float(r[1]),
                              "volume": float(r[2]) if r[2] and r[2] != "" else 0})
