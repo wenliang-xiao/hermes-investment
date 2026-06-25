@@ -130,6 +130,97 @@ def generate_news_summary(events_by_symbol):
 
 
 # ═══════════════════════════════════════════
+# Tier 3: 新闻→评分偏移
+# ═══════════════════════════════════════════
+def compute_news_scoring_offset(events_by_symbol: dict[str, list]) -> dict[str, dict]:
+    """从新闻分析结果计算每只标的的评分偏移
+
+    规则:
+        - 正面新闻 → +0.3 ~ +0.5 (取决于强度)
+        - 负面新闻 → -0.3 ~ -0.5
+        - 中性新闻 → 0
+        - 重大利好 → +1.0 (如并购/业绩暴增)
+        - 重大利空 → -1.0 (如监管/退市风险)
+
+    Returns:
+        {symbol: {"offset": float, "reason": str, "articles": int}}
+    """
+    offsets = {}
+
+    for sym, events in events_by_symbol.items():
+        if not events:
+            continue
+
+        # 收集所有标题
+        titles = []
+        for ev in events[:5]:
+            title = ev.get("新闻标题", ev.get("title", ev.get("content", "")))
+            if title and len(title) > 5:
+                titles.append(title[:200])
+
+        if not titles:
+            continue
+
+        # 简单关键词情绪分析
+        scores = []
+        reasons = []
+
+        for title in titles:
+            title_lower = title.lower()
+
+            # 强正面信号
+            strong_positive = ["涨停", "大涨", "突破", "创新高", "业绩大增", "翻倍",
+                               "中标", "拿下", "签约", "投产", "量产",
+                               "获批", "注册", "准入", "纳入"]
+            # 正面信号
+            positive = ["增长", "利好", "回暖", "回升", "扩张", "合作", "增持",
+                        "回购", "分红", "超预期", "加速", "提振"]
+            # 强负面信号
+            strong_negative = ["跌停", "大跌", "暴雷", "亏损", "退市", "st",
+                               "立案", "调查", "处罚", "停产", "召回",
+                               "违约", "破产", "清算"]
+            # 负面信号
+            negative = ["下跌", "利空", "下滑", "萎缩", "减持", "减持",
+                        "诉讼", "仲裁", "降级", "警告", "风险"]
+
+            score = 0.0
+            reason = ""
+
+            if any(kw in title_lower for kw in strong_positive):
+                score += 1.0
+                reason += "重大利好 "
+            elif any(kw in title_lower for kw in strong_negative):
+                score -= 1.0
+                reason += "重大利空 "
+
+            if any(kw in title_lower for kw in positive):
+                score += 0.3
+                reason += "利好 "
+            elif any(kw in title_lower for kw in negative):
+                score -= 0.3
+                reason += "利空 "
+
+            scores.append(score)
+            if score != 0:
+                reasons.append(reason.strip())
+
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            # 限制偏移范围 [-0.5, +0.5] or [-1.0, +1.0] for strong signals
+            offset_val = max(-1.0, min(1.0, avg_score))
+            # 只有有明显倾向的才保存
+            if abs(offset_val) >= 0.2:
+                offsets[sym] = {
+                    "offset": round(offset_val, 2),
+                    "reason": "; ".join(reasons[:3]) if reasons else "新闻情绪分析",
+                    "articles": len(titles),
+                    "titles": titles[:3],
+                }
+
+    return offsets
+
+
+# ═══════════════════════════════════════════
 # 主入口
 # ═══════════════════════════════════════════
 def run(mode="full"):
@@ -177,6 +268,18 @@ def run(mode="full"):
     with open(summary_path, "w") as f:
         f.write(summary)
     print(f"   💾 已保存: {summary_path}")
+
+    # Tier 3: 新闻→评分偏移
+    print(f"\n📊 Tier 3: 新闻→评分偏移...")
+    try:
+        offset = compute_news_scoring_offset(events)
+        offset_path = os.path.join(DATA_DIR, "news_score_offset.json")
+        with open(offset_path, "w") as f:
+            json.dump(offset, f, ensure_ascii=False, indent=2)
+        total_offset = sum(abs(v["offset"]) for v in offset.values())
+        print(f"   {len(offset)} 只有偏移, 总偏移量{total_offset:.1f}")
+    except Exception as e:
+        print(f"   WARNING: offset failed: {e}")
 
     return {"events": events, "summary": summary}
 

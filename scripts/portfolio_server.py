@@ -664,6 +664,100 @@ def api_signals():
     return {"error": "no signals yet today", "signals": []}
 
 
+@app.get("/api/realtime")
+def api_realtime():
+    """实时行情（东财+A股+yfinance港美股）"""
+    try:
+        from scripts.realtime_price import get_realtime_summary
+        return get_realtime_summary()
+    except Exception as e:
+        return {"error": str(e), "realtime": {}}
+
+
+@app.get("/api/realtime/positions")
+def api_realtime_positions():
+    """仅返回持仓实时行情（轻量）"""
+    try:
+        from scripts.realtime_price import get_all_realtime
+        return {"realtime": get_all_realtime(), "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/metrics")
+def api_metrics():
+    """绩效指标 (OSkhQuant风格：Sortino/Alpha/Beta/连续盈亏)"""
+    try:
+        book = load_shadow()
+        summary = build_summary(book)
+        history = book.get("history", [])
+
+        # 计算绩效指标
+        import numpy as np
+
+        # 净值序列
+        capital = book.get("capital", 1000000)
+        equity_values = [capital]
+        for h in history:
+            if h.get("action") == "卖出" and h.get("pnl") is not None:
+                equity_values.append(equity_values[-1] + h["pnl"])
+        final_value = summary["total_value"]
+        equity_values.append(final_value)
+
+        equity_arr = np.array(equity_values, dtype=float)
+        n_periods = len(equity_arr) - 1
+
+        if n_periods >= 2:
+            returns = (equity_arr[1:] / equity_arr[:-1]) - 1
+            # Sharpe (0% RF)
+            sharpe = float(np.mean(returns)) / float(np.std(returns)) * np.sqrt(252) if float(np.std(returns)) > 0 else 0
+            # Sortino
+            downside = returns[returns < 0]
+            dstd = float(np.std(downside)) if len(downside) > 0 else 0.001
+            sortino = float(np.mean(returns)) / dstd * np.sqrt(252) if dstd > 0 else 0
+            # 最大回撤
+            running_max = np.maximum.accumulate(equity_arr)
+            drawdowns = (equity_arr - running_max) / running_max
+            max_dd = float(-np.min(drawdowns))
+            # 连续盈亏
+            win_streak = 0
+            loss_streak = 0
+            max_win_streak = 0
+            max_loss_streak = 0
+            for r in returns:
+                if r > 0:
+                    win_streak += 1
+                    loss_streak = 0
+                    max_win_streak = max(max_win_streak, win_streak)
+                else:
+                    loss_streak += 1
+                    win_streak = 0
+                    max_loss_streak = max(max_loss_streak, loss_streak)
+        else:
+            sharpe = sortino = max_dd = max_win_streak = max_loss_streak = 0
+
+        # 标的数
+        total_trades = len([h for h in history if h.get("action") == "卖出"])
+        wins = len([h for h in history if h.get("pnl") is not None and h["pnl"] > 0])
+
+        return {
+            "sharpe_ratio": round(sharpe, 4),
+            "sortino_ratio": round(sortino, 4),
+            "max_drawdown_pct": round(max_dd * 100, 2),
+            "total_return_pct": summary["total_return"],
+            "annualized_return_pct": summary["total_return"],  # simplified
+            "win_rate_pct": round(wins / total_trades * 100, 1) if total_trades > 0 else 0,
+            "total_trades": total_trades,
+            "max_win_streak": max_win_streak,
+            "max_loss_streak": max_loss_streak,
+            "position_count": summary["position_count"],
+            "capital": summary["capital"],
+            "total_value": summary["total_value"],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/simulated")
 def api_simulated():
     """三个策略模拟盘全方位数据"""
@@ -804,6 +898,11 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <div class="grid-3" id="strategyPanels"></div>
 
+  <div class="card" id="metricsPanel" style="margin-bottom:16px">
+    <div class="card-header"><h3>📊 绩效指标 (OSkhQuant)</h3></div>
+    <div id="metricsBody" class="grid-3" style="display:grid;gap:12px;padding:8px 0"></div>
+  </div>
+
   <div class="card" id="userSignals" style="display:none">
     <div class="card-header"><h3>执行建议（今日优先级）</h3></div>
     <div id="userSignalsBody"></div>
@@ -818,6 +917,9 @@ async function load() {
     document.getElementById('strategyPanels').innerHTML = '<div class="card">数据不可用</div>';
     return;
   }
+
+  // 加载绩效指标
+  loadMetrics();
 
   document.getElementById('runInfo').textContent =
     data.date + ' | ' + data.generated_at + ' | 模拟交易 ' + data.simulated_trades + ' 笔';
@@ -888,6 +990,30 @@ async function load() {
 function fmt(v) { return Math.round(v).toLocaleString(); }
 function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
 load();
+async function loadMetrics() {
+  try {
+    const r = await fetch('/api/metrics');
+    const m = await r.json();
+    if (m.error) return;
+    const metrics = [
+      {label:'Sharpe',val:m.sharpe_ratio.toFixed(2),color:m.sharpe_ratio>=1?'var(--green)':m.sharpe_ratio>=0?'var(--yellow)':'var(--red)'},
+      {label:'Sortino',val:m.sortino_ratio.toFixed(2),color:m.sortino_ratio>=1?'var(--green)':m.sortino_ratio>=0?'var(--yellow)':'var(--red)'},
+      {label:'最大回撤',val:'-'+m.max_drawdown_pct.toFixed(2)+'%',color:'var(--red)'},
+      {label:'总收益',val:(m.total_return_pct>=0?'+':'')+m.total_return_pct.toFixed(2)+'%',color:m.total_return_pct>=0?'var(--green)':'var(--red)'},
+      {label:'胜率',val:m.win_rate_pct+'% ('+m.total_trades+'笔)',color:'var(--text)'},
+      {label:'连胜/连败',val:m.max_win_streak+'/'+m.max_loss_streak,color:'var(--text)'},
+      {label:'持仓数',val:m.position_count+'只',color:'var(--text)'},
+      {label:'总资产',val:'¥'+Math.round(m.total_value).toLocaleString(),color:'var(--text)'},
+    ];
+    document.getElementById('metricsBody').innerHTML = metrics.map(m =>
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;text-align:center">'+
+        '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+m.label+'</div>'+
+        '<div style="font-size:18px;font-weight:700;color:'+m.color+'">'+m.val+'</div>'+
+      '</div>'
+    ).join('');
+  } catch(e) {}
+}
+loadMetrics();
 setInterval(load, 120000);
 </script>
 </body>

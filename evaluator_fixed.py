@@ -8,11 +8,13 @@ evaluator_fixed.py — 固定评估器
 ╚══════════════════════════════════════════════════════════╝
 
 用法:
-    python evaluator_fixed.py faceji         # 评估面基策略
-    python evaluator_fixed.py silverquant    # 评估SilverQuant
-    python evaluator_fixed.py tradingagents  # 评估TradingAgents
-    python evaluator_fixed.py --all          # 评估全部三个策略
-    python evaluator_fixed.py faceji --check-baseline  # 与已接受基线对比
+    python evaluator_fixed.py faceji                          # 评估面基策略
+    python evaluator_fixed.py silverquant                     # 评估SilverQuant
+    python evaluator_fixed.py tradingagents                   # 评估TradingAgents
+    python evaluator_fixed.py --all                           # 评估全部三个策略
+    python evaluator_fixed.py faceji --check-baseline         # 与已接受基线对比
+    python evaluator_fixed.py faceji --walk-forward --cycles 3  # Walk-Forward评估
+    python evaluator_fixed.py --all --walk-forward            # 全部策略WF评估
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 import functools
+from dataclasses import dataclass
 
 print = functools.partial(print, flush=True)
 
@@ -78,12 +81,72 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 HL_RUNS_DIR = _PROJECT_DIR / "data" / "hl_runs"
 HL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
+# ──────────────────────────────────────────────
+# Walk-Forward Split
+# ──────────────────────────────────────────────
+@dataclass
+class WalkForwardCycle:
+    """单次 Walk-Forward 滚动的起止索引"""
+    train_start: int
+    train_end: int
+    test_start: int
+    test_end: int
+
+class WalkForwardSplit:
+    """Walk-Forward 时间序列分割
+
+    Train{252d} + Test{63d}, 滚动 cycles 次, stride=63
+    每次移动 63 天（一个测试窗口的宽度），前一个 test 被纳入后一个 train。
+    共产生 cycles 个滚动窗。
+
+    时间线 (cycles=3):
+        W1: Train[0:252]   Test[252:315]   ← 第1个测试结果
+        W2: Train[63:315]  Test[315:378]    ← 第2个
+        W3: Train[126:378] Test[378:441]    ← 第3个
+        最终: 汇总 3 个 test 窗口的结果
+    """
+
+    def __init__(self, total_days: int, train_days: int = 252, test_days: int = 63, cycles: int = 3):
+        self.train_days = train_days
+        self.test_days = test_days
+        self.cycles = min(cycles, (total_days - train_days) // test_days)
+        self.total_days = total_days
+
+    def split(self) -> list[WalkForwardCycle]:
+        if self.cycles < 1:
+            return []
+        result = []
+        stride = self.test_days
+        for i in range(self.cycles):
+            test_start = self.train_days + i * stride
+            test_end = test_start + self.test_days
+            if test_end > self.total_days:
+                break
+            # For cycle 1: train starts at 0
+            # For cycle 2+: shift forward by stride each time (include previous test in new train)
+            train_start = i * stride
+            train_end = test_start
+            result.append(WalkForwardCycle(
+                train_start=train_start,
+                train_end=train_end,
+                test_start=test_start,
+                test_end=test_end,
+            ))
+        return result
+
+    def describe(self) -> str:
+        cycles = self.split()
+        lines = [f"Walk-Forward: {self.train_days}d train + {self.test_days}d test, {len(cycles)} cycles"]
+        for i, c in enumerate(cycles):
+            lines.append(f"  W{i+1}: Train[{c.train_start}:{c.train_end}] → Test[{c.test_start}:{c.test_end}]")
+        return "\n".join(lines)
+
 
 # ──────────────────────────────────────────────
 # 数据层：拉取并缓存日线数据
 # ──────────────────────────────────────────────
 def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | None:
-    """从 baostock 获取日线收盘价，缓存到本地 pickle"""
+    """从 data_router 获取日线收盘价，缓存到本地 pickle"""
     import numpy as np
     import pandas as pd
 
@@ -92,7 +155,23 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
         df = pd.read_pickle(cache_file)
         return df["close"].tolist()
 
-    # 从 data_layer 获取
+    # 使用新的 data_router
+    try:
+        from data.data_router import get_history
+        result = get_history(symbol, days=days)
+        if result and result.get("close"):
+            df = pd.DataFrame({
+                "close": result["close"],
+                "date": result.get("dates", list(range(len(result["close"])))),
+            })
+            df = df.dropna(subset=["close"]).sort_values("date")
+            if len(df) >= 60:
+                df.to_pickle(cache_file)
+                return df["close"].tolist()
+    except Exception:
+        pass
+
+    # 回退到旧的 data_layer
     sys.path.insert(0, str(_PARENT_DIR))
     sys.path.insert(0, str(_PROJECT_DIR))
     from investment_system.data.data_layer import get_stock_daily
@@ -111,12 +190,16 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
     return df["close"].tolist()
 
 
-def preload_all_data() -> dict[str, list[float]]:
-    """预加载所有标的日线数据"""
+def preload_all_data(days: int = FIXED_DAYS) -> dict[str, list[float]]:
+    """预加载所有标的日线数据
+
+    Args:
+        days: 需要的数据天数（Walk-Forward 需较大值如 500+）
+    """
     result: dict[str, list[float]] = {}
     for s in FIXED_UNIVERSE:
         sym = s["symbol"]
-        prices = load_price_history(sym, FIXED_DAYS)
+        prices = load_price_history(sym, days)
         if prices:
             result[sym] = prices
             print(f"  {sym} {s['name']}: {len(prices)} 天")
@@ -248,12 +331,15 @@ def run_backtest(
             if sig.action == "SELL" and sig.symbol in all_positions:
                 pos = all_positions[sig.symbol]
                 exec_price = price_map.get(sig.symbol, sig.price)
-                slippage_cost = exec_price * SLIPPAGE
-                exec_price_adj = exec_price - slippage_cost
-                proceeds = exec_price_adj * pos.quantity
-                commission = max(proceeds * COMMISSION_RATE, MIN_COMMISSION)
-                tax = proceeds * STAMP_TAX_RATE
-                net_proceeds = proceeds - commission - tax
+                # 使用成本模型
+                try:
+                    from analysis.cost_model import calc_adjusted_price
+                    adjusted_price, cost_detail = calc_adjusted_price(exec_price, pos.quantity, "sell", sig.symbol)
+                except Exception:
+                    slippage_cost = exec_price * SLIPPAGE
+                    adjusted_price = exec_price - slippage_cost
+                    cost_detail = {"total": max(exec_price * SLIPPAGE * pos.quantity, MIN_COMMISSION)}
+                net_proceeds = adjusted_price * pos.quantity
                 pnl = net_proceeds - (pos.entry_price * pos.quantity)
                 total_cash += net_proceeds
                 if pnl > 0:
@@ -262,16 +348,22 @@ def run_backtest(
                 all_trades.append({
                     "symbol": sig.symbol, "action": "SELL",
                     "price": round(exec_price, 2), "quantity": pos.quantity,
-                    "pnl": round(pnl, 2),
+                    "pnl": round(pnl, 2), "cost": round(cost_detail.get("total", 0), 2),
                     "reason": sig.reason,
                     "day": day_idx,
                 })
                 del all_positions[sig.symbol]
 
             elif sig.action == "BUY" and sig.symbol not in all_positions:
-                exec_price = price_map.get(sig.symbol, sig.price)
-                slippage_cost = exec_price * SLIPPAGE
-                exec_price_adj = exec_price + slippage_cost
+                exec_price = price_map.get(sig.symbol, sig.price) or sig.price
+                try:
+                    from analysis.cost_model import calc_adjusted_price, calc_trade_cost
+                    exec_price_adj, cost_detail = calc_adjusted_price(exec_price, 100, "buy", sig.symbol)
+                except Exception:
+                    slippage_cost = exec_price * SLIPPAGE
+                    exec_price_adj = exec_price + slippage_cost
+                    cost_detail = {"total": slippage_cost + max(exec_price * COMMISSION_RATE, MIN_COMMISSION),
+                                   "commission": max(exec_price * COMMISSION_RATE, MIN_COMMISSION)}
                 pct = (sig.size_pct or 3.0) / 100
                 qty = max(100, int(total_cash * pct / exec_price_adj / 100) * 100)
                 cost = exec_price_adj * qty
@@ -373,7 +465,257 @@ def _compute_metrics(
 
 
 # ──────────────────────────────────────────────
-# HL 实验账本
+# Walk-Forward 评估
+# ──────────────────────────────────────────────
+def run_walk_forward(
+    price_data: dict[str, list[float]],
+    decide_fn: Callable,
+    strategy_name: str,
+    train_days: int = 252,
+    test_days: int = 63,
+    cycles: int = 3,
+) -> dict:
+    """Walk-Forward 评估
+
+    将数据分为滚动 train/test 窗口，在 test 窗口上评估策略。
+    最后汇总所有 test 窗口结果。
+    """
+    # 找最短数据序列
+    min_days = min(len(p) for p in price_data.values()) if price_data else 0
+    if min_days < train_days + test_days:
+        return {"error": f"数据不足(需要至少{train_days+test_days}天, 实际{min_days}天)"}
+
+    wf = WalkForwardSplit(min_days, train_days=train_days, test_days=test_days, cycles=cycles)
+    windows = wf.split()
+    if not windows:
+        return {"error": "Walk-Forward 窗口数为0，请检查数据量"}
+
+    print(f"\n📊 Walk-Forward 配置:")
+    print(wf.describe())
+
+    cycle_results = []
+    all_trades = []
+
+    for i, window in enumerate(windows):
+        print(f"\n🔄 W{i+1}: Train[{window.train_start}:{window.train_end}] → Test[{window.test_start}:{window.test_end}]")
+
+        # 构建 test 窗口数据（只回测 test 段）
+        test_data: dict[str, list[float]] = {}
+        for sym, prices in price_data.items():
+            # 给策略提供到 test day 的数据（含 train 段用于技术指标计算）
+            test_end = window.test_end
+            if len(prices) >= test_end:
+                test_data[sym] = prices[:test_end]
+
+        # 运行回测，但只从 test_start 开始输出净值曲线
+        from strategies.base import PositionData, Signal
+
+        total_cash = INITIAL_CASH
+        all_positions: dict[str, PositionData] = {}
+        cycle_equity: list[float] = []
+        cycle_trades: list[dict] = []
+        trade_count = 0
+        win_count = 0
+
+        score_map = dict(FIXED_SCORE_MAP)
+
+        for day_idx in range(test_end):
+            tech_map: dict[str, dict] = {}
+            price_map: dict[str, float] = {}
+            for sym in test_data:
+                closes = test_data[sym][:day_idx + 1]
+                price = float(closes[-1])
+                price_map[sym] = price
+                tech_map[sym] = compute_technicals(closes, price)
+
+            positions_dict: dict[str, PositionData] = {}
+            for sym, pos in all_positions.items():
+                cp = price_map.get(sym, pos.current_price or pos.entry_price)
+                positions_dict[sym] = PositionData(
+                    symbol=sym, entry_price=pos.entry_price,
+                    quantity=pos.quantity, entry_date=pos.entry_date or "",
+                    peak=max(pos.peak or pos.entry_price, cp),
+                    current_price=cp,
+                )
+
+            signals = decide_fn(
+                score_map=score_map, tech_map=tech_map, price_map=price_map,
+                positions=positions_dict, cash=total_cash,
+            )
+
+            for sig in signals:
+                if sig.action == "SELL" and sig.symbol in all_positions:
+                    pos = all_positions[sig.symbol]
+                    exec_price = price_map.get(sig.symbol, sig.price)
+                    slippage_cost = exec_price * SLIPPAGE
+                    exec_price_adj = exec_price - slippage_cost
+                    proceeds = exec_price_adj * pos.quantity
+                    commission = max(proceeds * COMMISSION_RATE, MIN_COMMISSION)
+                    tax = proceeds * STAMP_TAX_RATE
+                    net_proceeds = proceeds - commission - tax
+                    pnl = net_proceeds - (pos.entry_price * pos.quantity)
+                    total_cash += net_proceeds
+                    if pnl > 0: win_count += 1
+                    trade_count += 1
+                    cycle_trades.append({
+                        "symbol": sig.symbol, "action": "SELL",
+                        "price": round(exec_price, 2), "quantity": pos.quantity,
+                        "pnl": round(pnl, 2), "reason": sig.reason,
+                        "day": day_idx, "cycle": i + 1,
+                    })
+                    del all_positions[sig.symbol]
+                elif sig.action == "BUY" and sig.symbol not in all_positions:
+                    exec_price = price_map.get(sig.symbol, sig.price)
+                    slippage_cost = exec_price * SLIPPAGE
+                    exec_price_adj = exec_price + slippage_cost
+                    pct = (sig.size_pct or 3.0) / 100
+                    qty = max(100, int(total_cash * pct / exec_price_adj / 100) * 100)
+                    cost = exec_price_adj * qty
+                    commission = max(cost * COMMISSION_RATE, MIN_COMMISSION)
+                    total_cost = cost + commission
+                    if total_cost <= total_cash:
+                        total_cash -= total_cost
+                        all_positions[sig.symbol] = PositionData(
+                            symbol=sig.symbol, entry_price=exec_price_adj,
+                            quantity=qty, entry_date=f"day{day_idx}",
+                            peak=exec_price_adj, current_price=exec_price_adj,
+                        )
+                        trade_count += 1
+                        cycle_trades.append({
+                            "symbol": sig.symbol, "action": "BUY",
+                            "price": round(exec_price, 2), "quantity": qty,
+                            "cost": round(total_cost, 2), "reason": sig.reason,
+                            "day": day_idx, "cycle": i + 1,
+                        })
+
+            position_value = sum(price_map.get(sym, 0) * pos.quantity for sym, pos in all_positions.items())
+            total_value = total_cash + position_value
+            cycle_equity.append(total_value)
+
+        # 平掉尾盘仓位
+        for sym, pos in list(all_positions.items()):
+            exec_price = price_map.get(sym, pos.entry_price)
+            proceeds = exec_price * pos.quantity
+            commission = max(proceeds * COMMISSION_RATE, MIN_COMMISSION)
+            tax = proceeds * STAMP_TAX_RATE
+            net_proceeds = proceeds - commission - tax
+            pnl = net_proceeds - (pos.entry_price * pos.quantity)
+            total_cash += net_proceeds
+            if pnl > 0: win_count += 1
+            trade_count += 1
+            cycle_trades.append({
+                "symbol": sym, "action": "SELL",
+                "price": round(exec_price, 2), "quantity": pos.quantity,
+                "pnl": round(pnl, 2), "reason": "WF平仓",
+                "day": test_end, "cycle": i + 1,
+            })
+
+        # 计算 test 段指标（只取 test 窗口的 equity）
+        test_start_idx = max(0, window.test_start - 1)  # include first day of test
+        test_equity = cycle_equity[test_start_idx:]
+
+        if len(test_equity) > 1:
+            import numpy as np
+            import pandas as pd
+
+            equity_s = pd.Series(test_equity)
+            test_return = equity_s.iloc[-1] / equity_s.iloc[0] - 1.0
+            daily_ret = equity_s.pct_change().dropna()
+            sharpe = float(daily_ret.mean()) / float(daily_ret.std()) * math.sqrt(252) if float(daily_ret.std()) > 0 else 0
+            dstd = float(daily_ret[daily_ret < 0].std())
+            sortino = float(daily_ret.mean()) / dstd * math.sqrt(252) if dstd > 0 else 0
+            running_max = equity_s.cummax()
+            dd = float(-((equity_s - running_max) / running_max).min())
+
+            cycle_result = {
+                "cycle": i + 1,
+                "test_days": len(test_equity),
+                "return_pct": round(test_return * 100, 2),
+                "sharpe": round(sharpe, 4),
+                "sortino": round(sortino, 4),
+                "max_drawdown_pct": round(dd * 100, 2),
+                "trade_count": trade_count,
+                "win_count": win_count,
+            }
+        else:
+            cycle_result = {
+                "cycle": i + 1,
+                "test_days": len(test_equity),
+                "return_pct": 0, "sharpe": 0, "sortino": 0,
+                "max_drawdown_pct": 0, "trade_count": 0, "win_count": 0,
+            }
+
+        cycle_results.append(cycle_result)
+        all_trades.extend(cycle_trades)
+
+        print(f"  W{i+1}: Return={cycle_result['return_pct']:+.2f}%  "
+              f"Sortino={cycle_result['sortino']:.4f}  "
+              f"DD={cycle_result['max_drawdown_pct']:.2f}%")
+
+    # ─── 汇总 ───
+    if not cycle_results:
+        return {"error": "无可用 cycle 结果"}
+
+    import numpy as np
+    returns = [c["return_pct"] for c in cycle_results]
+    sortinos = [c["sortino"] for c in cycle_results]
+    dd_list = [c["max_drawdown_pct"] for c in cycle_results]
+    total_trades = sum(c["trade_count"] for c in cycle_results)
+    total_wins = sum(c["win_count"] for c in cycle_results)
+
+    master_result = {
+        "strategy": strategy_name,
+        "mode": "walk_forward",
+        "cycles": len(cycle_results),
+        "avg_return_pct": round(np.mean(returns), 2),
+        "avg_sortino": round(np.mean(sortinos), 4),
+        "avg_max_drawdown_pct": round(np.mean(dd_list), 2),
+        "min_sortino": round(min(sortinos), 4),
+        "max_sortino": round(max(sortinos), 4),
+        "avg_sharpe": round(np.mean([c["sharpe"] for c in cycle_results]), 4),
+        "min_return_pct": round(min(returns), 2),
+        "max_return_pct": round(max(returns), 2),
+        "total_trades": total_trades,
+        "win_rate_pct": round(total_wins / total_trades * 100, 1) if total_trades > 0 else 0,
+        "cycle_details": cycle_results,
+    }
+
+    print(f"\n{'='*50}")
+    print(f"📊 Walk-Forward MASTER: {strategy_name}")
+    print(f"{'='*50}")
+    print(f"  平均收益     : {master_result['avg_return_pct']:+.2f}%")
+    print(f"  平均Sortino  : {master_result['avg_sortino']:.4f}")
+    print(f"  Sortino范围  : [{master_result['min_sortino']:.4f} ~ {master_result['max_sortino']:.4f}]")
+    print(f"  平均最大回撤 : {master_result['avg_max_drawdown_pct']:.2f}%")
+    print(f"  收益范围     : [{master_result['min_return_pct']:+.2f}% ~ {master_result['max_return_pct']:+.2f}%]")
+    print(f"  总交易       : {master_result['total_trades']}笔, 胜率{master_result['win_rate_pct']}%")
+
+    return master_result
+
+
+# ──────────────────────────────────────────────
+# 市场状态分析
+# ──────────────────────────────────────────────
+def analyze_market_regime(closes: list[float]) -> str:
+    """对市场状态做粗糙分类: 牛市/熊市/震荡"""
+    import numpy as np
+    if len(closes) < 60:
+        return "unknown"
+
+    ret_20d = closes[-1] / closes[-20] - 1
+    ret_60d = closes[-1] / closes[-60] - 1
+    vol_20d = float(np.std([closes[i] / closes[i-1] - 1 for i in range(-20, 0)]))
+    vol_60d = float(np.std([closes[i] / closes[i-1] - 1 for i in range(-60, 0)]))
+    ma60 = np.mean(closes[-60:])
+    ma200 = np.mean(closes[-200:]) if len(closes) >= 200 else ma60
+
+    if ret_60d > 0.05 and closes[-1] > ma60 > ma200:
+        return "bull"
+    elif ret_60d < -0.05 and closes[-1] < ma60 < ma200:
+        return "bear"
+    elif abs(ret_20d) < 0.03 and vol_20d < vol_60d:
+        return "consolidation"
+    return "mixed"
 # ──────────────────────────────────────────────
 def save_to_run_log(strategy: str, result: dict):
     """记录到实验账本"""
@@ -396,11 +738,22 @@ def save_to_run_log(strategy: str, result: dict):
 # ──────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────
-def evaluate_strategy(strategy_name: str) -> dict:
-    """评估单个策略"""
+def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
+                       cycles: int = 3, train_days: int = 252, test_days: int = 63) -> dict:
+    """评估单个策略
+
+    Args:
+        strategy_name: 策略名
+        walk_forward: 是否使用 Walk-Forward 评估
+        cycles: WF 滚动次数
+        train_days: WF 训练窗口天数
+        test_days: WF 测试窗口天数
+    """
+    data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100) if walk_forward else FIXED_DAYS
+
     # 加载数据
-    print(f"\n📦 加载数据...")
-    price_data = preload_all_data()
+    print(f"\n📦 加载数据{' (WF模式)' if walk_forward else ''}...")
+    price_data = preload_all_data(days=data_days)
     if not price_data:
         return {"error": "无有效数据"}
 
@@ -422,9 +775,13 @@ def evaluate_strategy(strategy_name: str) -> dict:
     except Exception as e:
         return {"error": f"导入策略失败: {e}"}
 
-    print(f"🏃 运行回测: {strategy_name}")
-    result = run_backtest(price_data, decide_fn, strategy_name)
-    return result
+    if walk_forward:
+        print(f"🏃 Walk-Forward 评估: {strategy_name} ({cycles} cycles)")
+        return run_walk_forward(price_data, decide_fn, strategy_name,
+                                 train_days=train_days, test_days=test_days, cycles=cycles)
+    else:
+        print(f"🏃 运行回测: {strategy_name}")
+        return run_backtest(price_data, decide_fn, strategy_name)
 
 
 def main():
@@ -434,6 +791,11 @@ def main():
     parser.add_argument("--all", action="store_true", help="评估全部策略")
     parser.add_argument("--check-baseline", action="store_true", help="与基线对比")
     parser.add_argument("--no-log", action="store_true", help="不写入实验账本")
+    parser.add_argument("--walk-forward", action="store_true", help="Walk-Forward 评估模式")
+    parser.add_argument("--cycles", type=int, default=3, help="Walk-Forward 滚动次数 (默认3)")
+    parser.add_argument("--train-days", type=int, default=252, help="WF 训练窗口天数 (默认252)")
+    parser.add_argument("--test-days", type=int, default=63, help="WF 测试窗口天数 (默认63)")
+    parser.add_argument("--with-dsr", action="store_true", help="DSR 统计检验")
 
     args = parser.parse_args()
 
@@ -448,7 +810,13 @@ def main():
 
     results = {}
     for strat_name in to_run:
-        result = evaluate_strategy(strat_name)
+        result = evaluate_strategy(
+            strat_name,
+            walk_forward=args.walk_forward,
+            cycles=args.cycles,
+            train_days=args.train_days,
+            test_days=args.test_days,
+        )
         results[strat_name] = result
 
         print(f"\n{'='*50}")
@@ -456,6 +824,12 @@ def main():
         print(f"{'='*50}")
         if "error" in result:
             print(f"  ❌ {result['error']}")
+        elif args.walk_forward:
+            print(f"  WF平均收益     : {result['avg_return_pct']:+.2f}%")
+            print(f"  WF平均Sortino  : {result['avg_sortino']:.4f}")
+            print(f"  WF排序范围     : [{result['min_sortino']:.4f} ~ {result['max_sortino']:.4f}]")
+            print(f"  WF平均回撤     : {result['avg_max_drawdown_pct']:.2f}%")
+            print(f"  总交易         : {result['total_trades']}笔, 胜率{result['win_rate_pct']}%")
         else:
             print(f"  SCORE (Sortino) : {result['score']}")
             print(f"  总收益         : {result['total_return_pct']:+.2f}%")
@@ -468,6 +842,23 @@ def main():
 
         if not args.no_log and "error" not in result:
             save_to_run_log(strat_name, result)
+
+        # DSR 统计检验
+        if args.with_dsr and "error" not in result and not args.walk_forward:
+            try:
+                from analysis.dsr_test import compute_dsr, dsr_verdict, compare_strategies_with_dsr
+                n_trials = 50  # 可调整
+                sortino_val = result.get("sortino_ratio") or result.get("score", 0)
+                n_days = result.get("total_days", 120)
+                dsr, comp = compute_dsr(
+                    sharpe_observed=sortino_val * 0.7,  # Sortino→Sharpe
+                    n_observations=n_days,
+                    n_trials=n_trials,
+                )
+                print(f"  DSR检验      : {dsr:.4f}")
+                print(f"  {dsr_verdict(dsr)}")
+            except Exception as e:
+                print(f"  DSR检验失败: {e}")
 
     # baseline check
     if args.check_baseline and results:

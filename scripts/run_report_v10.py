@@ -179,6 +179,53 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
         blocks.append(p(("今日无交易信号", True, 3)))
         blocks.append(p("所有标的评分均低于阈值, 三策略无信号"))
 
+    # --- 1.5 上周信号回顾 ---
+    blocks.append(h(3, "1a. 上周信号回顾"))
+    try:
+        today = date.today()
+        week_ago = (today - __import__("datetime").timedelta(days=7)).strftime("%Y-%m-%d")
+        # 从交易记录中提取
+        history_path = os.path.join(os.path.dirname(_SCRIPT_DIR), "data", "signal_history.jsonl")
+        past_signals = []
+        if os.path.exists(history_path):
+            with open(history_path) as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("date", "") >= week_ago:
+                            past_signals.append(entry)
+                    except:
+                        pass
+        if past_signals:
+            sig_lines = ["日期      策略           动作 标的    价格     结果"]
+            sig_lines.append("─" * 55)
+            for s in sorted(past_signals, key=lambda x: x.get("date", ""), reverse=True)[:10]:
+                pnl = s.get("pnl_pct", "")
+                pnl_str = f"{pnl:+.2f}%" if isinstance(pnl, (int, float)) else "待结算"
+                sig_lines.append(f"{s.get('date','')[:10]} {s.get('strategy',''):<12s} {s.get('action',''):<4s} {s.get('symbol',''):<8s} {s.get('price',0):>8.2f} {pnl_str}")
+            blocks.append(cd("\n".join(sig_lines)))
+        else:
+            # 从 shadow_account 的交易记录提取
+            shadow_path = os.path.join(os.path.dirname(_SCRIPT_DIR), "data", "shadow_account.json")
+            if os.path.exists(shadow_path):
+                with open(shadow_path) as f:
+                    shadow = json.load(f)
+                recent = [h for h in shadow.get("history", []) if h.get("time", "")[:10] >= week_ago]
+                if recent:
+                    r_lines = ["时间            标的  操作  价格     数量  盈亏"]
+                    r_lines.append("─" * 55)
+                    for h in recent[-10:]:
+                        pnl = h.get("pnl")
+                        pnl_s = f"¥{pnl:+.0f}" if pnl else "—"
+                        r_lines.append(f"{h.get('time','')[:16]} {h.get('symbol',''):<6s} {h.get('action',''):<4s} {h.get('price',0):>8.2f} {h.get('quantity',0):>4d} {pnl_s}")
+                    blocks.append(cd("\n".join(r_lines)))
+                else:
+                    blocks.append(p("过去7天无交易记录"))
+            else:
+                blocks.append(p("无交易记录"))
+    except Exception as e:
+        blocks.append(p(f"上周回顾不可用: {e}"))
+
     # --- 2. 三策略对比 ---
     blocks.append(h(2, "2. 三策略对比"))
     for sname, label in [("faceji", "faceji"), ("silverquant", "SilverQuant"), ("tradingagents", "TradingAgents")]:
@@ -195,6 +242,28 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
             (f"  {buys+sells} signals(B{buys}/S{sells}) pos{len(s_pos)}", False),
             (f"  {' | '.join(pnl_strs)}" if pnl_strs else ""),
         ))
+
+    # --- 2.5 回测vs模拟盘对照 ---
+    blocks.append(h(3, "2a. 回测vs模拟盘对照"))
+    try:
+        eval_path = os.path.join(_PROJECT_DIR, "data", "eval_cache", "baseline.json")
+        if os.path.exists(eval_path):
+            with open(eval_path) as f:
+                baseline = json.load(f)
+            lines = ["策略            回测Sortino  模拟盘收益  状态"]
+            lines.append("─" * 55)
+            for sname in ["faceji", "silverquant", "tradingagents"]:
+                bline = baseline.get(sname, {})
+                bt_score = bline.get("score", 0)
+                # 从信号数据获取模拟盘收益
+                sim_pnl = signals_data.get("portfolios", {}).get(sname, {}).get("total_return", 0) if signals_data else 0
+                status = "✅ 优于回测" if sim_pnl > bt_score else ("⚠️ 低于回测" if sim_pnl < bt_score else "✅ 持平")
+                lines.append(f"{sname:<16s} {bt_score:<14.4f} {sim_pnl:>+8.2f}%  {status}")
+            blocks.append(cd("\n".join(lines)))
+        else:
+            blocks.append(p("回测基线尚未建立（运行 evaluator_fixed.py --all 生成）"))
+    except Exception as e:
+        blocks.append(p(f"回测对照不可用: {e}"))
 
     # --- 3. 组合状态 ---
     blocks.append(h(2, "3. 组合状态"))
@@ -250,6 +319,38 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
                 blocks.append(bl(line.strip()))
     else:
         blocks.append(p("今日无显著个股新闻"))
+
+    # --- 5.5 因子贡献分解 ---
+    blocks.append(h(3, "5a. 因子贡献分解"))
+    try:
+        scan_path = os.path.join(_PROJECT_DIR, "data", "scan_snapshot_latest.json")
+        if os.path.exists(scan_path):
+            with open(scan_path) as f:
+                scan = json.load(f)
+            sc_rs = scan.get("results", [])
+            if sc_rs:
+                # 计算因子维度分布
+                factor_scores = {"评分": [], "技术": [], "趋势": []}
+                for r in sc_rs[:20]:
+                    score = r.get("score", 0)
+                    tech = r.get("tech", {}) or {}
+                    factor_scores["评分"].append(score)
+                    factor_scores["技术"].append(tech.get("total_tech_score", 5) if isinstance(tech, dict) else 5)
+                import statistics
+                avg_factors = {k: statistics.mean(v) if v else 0 for k, v in factor_scores.items()}
+                factor_lines = ["因子维度      平均分  说明"]
+                factor_lines.append("─" * 40)
+                factor_lines.append(f"基本面评分   {avg_factors['评分']:<6.2f}  行业景气+财务质量+管理层")
+                factor_lines.append(f"技术指标     {avg_factors['技术']:<6.2f}  RSI+MACD+均线偏离")
+                factor_lines.append(f"趋势信号     {'N/A':<10s}  MA20/MA60趋势过滤")
+                factor_lines.append(f"\n目前贡献最大者: {'基本面评分' if avg_factors['评分'] > avg_factors['技术'] else '技术指标'}")
+                blocks.append(cd("\n".join(factor_lines)))
+            else:
+                blocks.append(p("尚未建立因子分解基础"))
+        else:
+            blocks.append(p("尚未建立因子分解基础"))
+    except Exception as e:
+        blocks.append(p(f"因子分解不可用: {e}"))
 
     # --- 6. 行动指令 ---
     blocks.append(h(2, "6. 行动指令"))
