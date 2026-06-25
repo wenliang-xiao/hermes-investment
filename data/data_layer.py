@@ -10,8 +10,21 @@ import numpy as np
 import time
 import logging
 import requests
+import sys, os
 from datetime import datetime, timedelta
-from investment_system import config
+
+# Path setup: allow both standalone and package imports
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_DIR not in sys.path:
+    sys.path.insert(0, _PROJECT_DIR)
+_PARENT_DIR = os.path.dirname(_PROJECT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+try:
+    from investment_system import config
+except ImportError:
+    import config as config
 from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
 
 logger = logging.getLogger(__name__)

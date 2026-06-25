@@ -10,10 +10,24 @@
   5. 因子权重 → 动态配比
   6. 建议仓位 → 综合以上全部
 """
-import json, os, logging
+import json, os, sys, logging
 from datetime import datetime, timedelta
 import numpy as np
-from investment_system import config
+
+# Path setup: allow both standalone and package imports
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_DIR not in sys.path:
+    sys.path.insert(0, _PROJECT_DIR)
+_PARENT_DIR = os.path.dirname(_PROJECT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+# Ensure config can be imported both ways
+try:
+    from investment_system import config
+except ImportError:
+    # Running standalone - config.py is in PROJECT_DIR
+    import config as config
 from investment_system.data.data_layer import get_macro_data, get_index_data
 
 logger = logging.getLogger(__name__)
@@ -341,29 +355,29 @@ class MacroEngine:
 
     # ═══ 输出 ═══
     def summarize(self) -> dict:
-        t = self.trend_temp
+        t = getattr(self, "trend_temp", "unknown")
         trend_info = config.TREND_TEMP.get(t, {"max_deviation": 0.05, "action": "中性操作"})
 
         return {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "quadrant": self.quadrant,
-            "regime": self.regime,
+            "quadrant": getattr(self, "quadrant", "unknown"),
+            "regime": getattr(self, "regime", "unknown"),
             "trend_temp": t,
             "trend_action": trend_info["action"],
-            "strategy_switch": self.strategy_switch,
+            "strategy_switch": getattr(self, "strategy_switch", "off"),
             "strategy_reason": getattr(self, "strategy_reason", ""),
-            "factor_weights": self.factor_weights,
-            "suggested_position": round(self.suggested_position, 2),
-            "macro_data": {k: v for k, v in self.macro_data.items()
+            "factor_weights": getattr(self, "factor_weights", {}),
+            "suggested_position": round(getattr(self, "suggested_position", 0), 2),
+            "macro_data": {k: v for k, v in getattr(self, "macro_data", {}).items()
                           if k in ("cpi", "pmi", "m2_growth", "shibor", "cny_usd",
                                    "cpi_trend", "cpi_prev", "cpi_delta", "cpi_momentum_3m",
                                    "pmi_trend", "cpi_date", "pmi_date",
                                    "social_financing_growth")},
             "credit_signal_source": getattr(self, "_credit_signal_source", ""),
             "guoyun": {
-                "price": self.guoyun_price,
-                "deviation": self.price_deviation,
-                "note": self.guoyun_note,
+                "price": getattr(self, "guoyun_price", None),
+                "deviation": getattr(self, "price_deviation", None),
+                "note": getattr(self, "guoyun_note", ""),
             },
             "dual_gate": getattr(self, "dual_gate", {}),
             "sector_temp": getattr(self, "sector_temp_counts", {}),
