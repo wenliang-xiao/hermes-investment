@@ -313,3 +313,18 @@ bash scripts/harness.sh     # 门禁通过
 ---
 
 *计划状态：✅ 全部完成 (2026-06-25)*
+
+---
+
+## 🏁 后续追加（2026-06-25 补丁）
+
+以下 Gap 在第一轮 9PR 完成后发现并修复（commit `1d00f76`）:
+
+| 模块 | 说明 |
+|------|------|
+| `analysis/stop_list.py` | 段永平不为清单框架 — 10条规则(ROE/负债率/毛利率/护城河/资产轻重等), 评分调整-2.0~0 |
+| `analysis/audit.py` | 六层漏斗审计工具 — 宏观→配置→因子→找票→风控→纪律逐层审计, 打出覆盖率%+评级 |
+| `analysis/knowledge_ref.py` | 面基知识库动态引用 — 13篇飞书文档/12方法论的结构化查询 |
+| `analysis/delta_tracker.py` | 每日变化追踪 — 评分DeltaTop5/池子进出/因子漂移/MACD信号 |
+| `scripts/run_report_v10.py` | 新增5b ETF配置建议 + 5c 每日变化追踪段落 |
+| `analysis/deep_research.py` | 维度8改为动态查询面基知识库query_chain() |

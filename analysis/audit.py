@@ -19,13 +19,19 @@ analysis/audit.py — 六层漏斗审计工具
 """
 from __future__ import annotations
 
-import json, math, os
+import json, math, os, sys
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
+
+# 确保模块可以找到（独立运行或被调用皆可）
+if str(ROOT.parent) not in sys.path:
+    sys.path.insert(0, str(ROOT.parent))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def load_json(filename: str) -> dict:
