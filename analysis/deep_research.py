@@ -211,16 +211,63 @@ class ResearchReport:
 
     # ─── 维度8: 面基引用 ───
     def _dim_mianji_refs(self) -> dict:
-        return {
-            "dimension": "8. 面基引用",
-            "score": 6,
-            "analysis": "引用面基播客: E124 DCF方法论 / E153 凯利公式 / E81 Nick四问",
-            "details": {
-                "引用期数": ["E124 DCF", "E153 凯利/复利", "E81 Nick四问",
-                           "E7/E84 中观四层次", "E30/E77 贝叶斯"],
-                "概念来源": "面基播客154期知识体系",
+        from analysis.knowledge_ref import get_kb
+        kb = get_kb()
+        # 按名称和产业链标签查询
+        query_terms = [self.name, self.symbol[:3]]
+        # 从链扫描获取产业链信息
+        try:
+            from analysis.chain_scanner import get_chain_for_symbol
+            chains = get_chain_for_symbol(self.symbol)
+            if chains:
+                query_terms.extend([c.get("chain_name", "") for c in chains[:2]])
+        except Exception:
+            pass
+
+        refs = kb.query_chain(" ".join(query_terms))
+        methods = []
+        for m in ["dcf", "kelly", "nick", "bayers", "chain", "risk"]:
+            mr = kb.get_methodology(m)
+            if mr:
+                methods.append(mr)
+
+        if refs:
+            detail_refs = {}
+            for r in refs:
+                detail_refs[r.title] = {
+                    "episodes": r.episodes,
+                    "concepts": r.concepts[:4],
+                }
+            ref_episodes = set()
+            for r in refs:
+                ref_episodes.update(r.episodes)
+            episodes_str = ", ".join(sorted(ref_episodes, key=lambda x: int(x[1:]) if x[1:].isdigit() else 0))
+            score = 7 if len(refs) >= 2 else 5
+            return {
+                "dimension": "8. 面基引用",
+                "score": score,
+                "analysis": f"面基知识库匹配{len(refs)}篇文档: {', '.join(r.title for r in refs[:3])} (第{episodes_str}期)",
+                "details": {
+                    "引用文档": list(detail_refs.keys()),
+                    "引用期数": sorted(set(e for r in refs for e in r.episodes)),
+                    "方法论": [f"{m.topic}({', '.join(m.episodes)})" for m in methods[:4]],
+                    "概念来源": "面基播客154期知识体系",
+                    "飞书文档IDs": [r.doc_token for r in refs],
+                }
             }
-        }
+        else:
+            # 静态回退
+            return {
+                "dimension": "8. 面基引用",
+                "score": 5,
+                "analysis": "引用面基播客: E124 DCF方法论 / E153 凯利公式 / E81 Nick四问",
+                "details": {
+                    "引用期数": ["E124 DCF", "E153 凯利/复利", "E81 Nick四问",
+                               "E7/E84 中观四层次", "E30/E77 贝叶斯"],
+                    "方法论": [f"{m.topic}({', '.join(m.episodes)})" for m in methods[:4]],
+                    "概念来源": "面基播客154期知识体系",
+                }
+            }
 
     # ─── 汇总 ───
     def run(self) -> dict:

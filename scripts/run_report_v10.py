@@ -352,6 +352,55 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
     except Exception as e:
         blocks.append(p(f"因子分解不可用: {e}"))
 
+    # --- 5.6 ETF配置建议 ---
+    blocks.append(h(3, "5b. ETF配置建议"))
+    try:
+        from analysis.etf_backtest import compare_all_etf_strategies
+        # 尝试加载ETF价格数据
+        etf_symbols = ["SPY", "TLT", "QQQ", "GLD", "IEF"]
+        etf_data = {}
+        for s in etf_symbols:
+            try:
+                from data.data_router import get_history
+                hist = get_history(s, days=200)
+                if hist and hist.get("close"):
+                    etf_data[s] = hist["close"]
+            except Exception:
+                continue
+        if len(etf_data) >= 2:
+            results = compare_all_etf_strategies(etf_data)
+            r_lines = ["策略             收益%    Sharpe  最大回撤"]
+            r_lines.append("─" * 50)
+            for name, r in sorted(results.items(), key=lambda x: x[1].get("sortino_ratio", 0), reverse=True):
+                if "error" not in r:
+                    ret = r.get("total_return_pct", 0)
+                    sharpe = r.get("sharpe_ratio", 0)
+                    dd = r.get("max_drawdown_pct", 0)
+                    r_lines.append(f"{name:<16s} {ret:>+7.2f} {sharpe:>8.4f} {dd:>6.2f}%")
+            blocks.append(cd("\n".join(r_lines)))
+            # 推荐
+            best = max(results.items(), key=lambda x: x[1].get("sharpe_ratio", 0) if "error" not in x[1] else -999)
+            if best and "error" not in best[1]:
+                blocks.append(p((f"推荐: {best[0]} (Sharpe={best[1]['sharpe_ratio']:.2f})", True, 6)))
+        else:
+            blocks.append(p("ETF数据不足(需≥2只), 建议持仓待补充"))
+    except Exception as e:
+        blocks.append(p(f"ETF分析不可用: {e}"))
+
+    # --- 5.7 Delta追踪 ---
+    blocks.append(h(3, "5c. 每日变化追踪"))
+    try:
+        from analysis.delta_tracker import DeltaTracker
+        dt = DeltaTracker()
+        deltas = dt.compute_daily_deltas()
+        if "error" not in deltas:
+            dt_text = dt.format_delta_report(deltas)
+            blocks.append(cd(dt_text[:800]))
+        else:
+            blocks.append(p(deltas["error"]))
+    except Exception as e:
+        blocks.append(p(f"Delta追踪不可用: {e}"))
+
     # --- 6. 行动指令 ---
     blocks.append(h(2, "6. 行动指令"))
     if signals:
