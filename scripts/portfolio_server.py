@@ -26,6 +26,27 @@ except ImportError:
     ETF_NAMES = {}
     def get_name(code): return code
 
+# 产业链映射
+_CHAIN_NAMES = {
+    "300502": "AI算力-光模块", "688041": "AI算力-处理器", "688008": "半导体-接口",
+    "688256": "AI算力-处理器", "600519": "消费-白酒", "000858": "消费-白酒",
+    "300750": "新能源-动力电池", "002594": "新能源-整车", "000333": "消费-家电",
+    "300059": "金融-券商", "603259": "医药-CXO", "002371": "半导体-设备",
+    "600030": "金融-券商", "601318": "金融-保险", "600036": "金融-银行",
+    "002415": "AI算力-视觉", "300124": "新能源-工控", "688012": "半导体-设备",
+    "300274": "新能源-逆变器", "601012": "新能源-光伏", "300014": "新能源-电池",
+    "002304": "消费-白酒", "600585": "基建-建材", "000651": "消费-家电",
+    "300136": "消费电子-射频", "002475": "消费电子-连接器", "002129": "半导体-材料",
+    "002460": "新能源-锂资源", "002230": "AI算力-语音", "002129": "半导体-材料",
+    "NVDA": "AI算力-GPU", "AMD": "AI算力-GPU", "MU": "半导体-存储",
+    "TSM": "半导体-代工", "VST": "AI算力-电力", "CEG": "AI算力-电力",
+    "GEV": "AI算力-电力", "0700.HK": "互联网-平台", "9988.HK": "互联网-平台",
+    "BABA": "互联网-平台", "MSFT": "AI算力-软件", "META": "互联网-社交",
+    "AAPL": "消费电子-手机", "AMZN": "互联网-电商",
+}
+def _guess_chain(symbol):
+    return _CHAIN_NAMES.get(symbol, "其他")
+
 app = FastAPI(title="面基模拟盘 Dashboard", version="1.0.0")
 
 
@@ -847,7 +868,7 @@ def api_simulated():
 
 @app.get("/api/v2/pool")
 def api_v2_pool():
-    """三层票池数据 (watch/monitor/deep)"""
+    """三层票池数据 (watch/monitor/deep) + 名称+产业链映射"""
     pool_dir = ROOT / "data" / "pool"
     result = {}
     for tier in ("watch", "monitor", "deep"):
@@ -855,9 +876,15 @@ def api_v2_pool():
         if path.exists():
             with open(path) as f:
                 raw = f.read().strip()
-                result[tier] = json.loads(raw) if raw else []
+                items = json.loads(raw) if raw else []
         else:
-            result[tier] = []
+            items = []
+        # 加名称和产业链
+        for item in items:
+            sym = item.get("symbol", "")
+            item["name"] = get_name(sym)
+            item["chain"] = _guess_chain(sym)
+        result[tier] = items
     return result
 
 
@@ -1004,24 +1031,25 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
 <script>
 async function load() {
-  const r = await fetch('/api/simulated');
-  const data = await r.json();
-  if (data.error) {
-    document.getElementById('strategyPanels').innerHTML = '<div class="card">数据不可用</div>';
-    return;
-  }
+  try {
+    const r = await fetch('/api/simulated');
+    const data = await r.json();
+    if (data.error) {
+      document.getElementById('strategyPanels').innerHTML = '<div class="card">❌ ' + data.error + '</div>';
+      return;
+    }
 
-  // 加载绩效指标
-  loadMetrics();
+    // 加载绩效指标
+    loadMetrics();
 
-  document.getElementById('runInfo').textContent =
-    data.date + ' | ' + data.generated_at + ' | 模拟交易 ' + data.simulated_trades + ' 笔';
+    document.getElementById('runInfo').textContent =
+      data.date + ' | ' + data.generated_at + ' | 模拟交易 ' + data.simulated_trades + ' 笔';
 
-  // 三大策略面板
-  document.getElementById('strategyPanels').innerHTML =
-    ['faceji','silverquant','tradingagents'].map(sname => {
-      const p = data.portfolios[sname];
-      if (!p) return '';
+    // 三大策略面板
+    document.getElementById('strategyPanels').innerHTML =
+      ['faceji','silverquant','tradingagents'].map(sname => {
+        const p = data.portfolios && data.portfolios[sname];
+        if (!p) return '<div class="card">' + sname + ' 暂无数据</div>';
       const retCls = p.total_return >= 0 ? 'green' : 'red';
       const posRows = p.positions.map(pos => {
         const pnlCls = pos.pnl_pct >= 0 ? 'green' : 'red';
@@ -1088,6 +1116,8 @@ async function load() {
     }).join('');
     document.getElementById('userSignalsBody').innerHTML =
       `<table><tr><th>优先级</th><th>操作</th><th>代码</th><th>名称</th><th>价格</th><th>理由</th></tr>${rows}</table>`;
+  } catch(e) {
+    document.getElementById('strategyPanels').innerHTML = '<div class="card" style="color:var(--red)">⚠️ ' + e.message + '</div>';
   }
 }
 
@@ -1171,11 +1201,14 @@ async function loadPool() {
         html += '<div class="empty" style="padding:8px">暂无数据 — 需积累评分历史</div></div>';
         continue;
       }
-      html += '<table><tr><th>代码</th><th>综合评分</th><th>质量</th><th>价值</th><th>成长</th><th>动量</th><th>低波</th><th>情绪</th><th>风险</th><th>加入日期</th><th>理由</th></tr>';
+      html += '<table><tr><th>代码</th><th>名称</th><th>链/行业</th><th>综合评分</th><th>质量</th><th>价值</th><th>成长</th><th>动量</th><th>低波</th><th>情绪</th><th>风险</th><th>加入日期</th><th>理由</th></tr>';
       items.forEach(i => {
         const sc = i.scores || {};
+        const scoreDoc = '/score_explanation';
         html += `<tr class="tr-hover"><td><strong>${i.symbol}</strong></td>
-          <td style="color:${i.score>=0.5?'var(--green)':'var(--yellow)'}">${(i.score||0).toFixed(3)}</td>
+          <td style="color:var(--text2)">${i.name||i.symbol}</td>
+          <td style="font-size:11px;color:var(--yellow)">${i.chain||'—'}</td>
+          <td style="color:${i.score>=0.5?'var(--green)':'var(--yellow)'}"><a href="${scoreDoc}" target="_blank" style="color:inherit;text-decoration:underline;text-decoration-style:dotted;" title="点击查看评分体系">${(i.score||0).toFixed(3)}</a></td>
           <td>${(sc.quality||0).toFixed(2)}</td><td>${(sc.value||0).toFixed(2)}</td>
           <td>${(sc.growth||0).toFixed(2)}</td><td>${(sc.momentum||0).toFixed(2)}</td>
           <td>${(sc.low_vol||0).toFixed(2)}</td><td>${(sc.sentiment||0).toFixed(2)}</td>
@@ -1364,6 +1397,31 @@ def dashboard():
 @app.get("/comparison")
 def comparison_page():
     return responses.HTMLResponse(COMPARISON_HTML)
+
+
+# ─── 评分说明文档 ──────────────────────────────────
+
+
+@app.get("/score_explanation")
+def score_explanation():
+    path = ROOT / "docs" / "score_explanation.md"
+    if path.exists():
+        content = path.read_text(encoding="utf-8")
+        # Remove Python docstring markers
+        content = content.replace('"""', '').strip()
+        # Raw markdown in pre
+        import html as _h
+        escaped = _h.escape(content)
+        html_page = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>面基·评分体系说明</title>
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:monospace; background:#0d1117; color:#e6edf3; padding:20px; }}
+pre {{ white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.6; }}</style></head>
+<body><pre>{escaped}</pre></body></html>"""
+        return responses.HTMLResponse(html_page)
+    return responses.HTMLResponse("<h1>文档未生成</h1><p>请先运行 python3 scripts/run_factor_daily.py</p>")
 
 
 if __name__ == "__main__":
