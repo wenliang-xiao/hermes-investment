@@ -900,10 +900,30 @@ def api_v2_etf():
 
 @app.get("/api/v2/news")
 def api_v2_news():
-    """板块新闻"""
-    path = ROOT / "data" / "news_score_offset.json"
-    if path.exists():
-        with open(path) as f:
+    """板块新闻 — 优先 news_cache.json，回退 news_score_offset.json"""
+    cache_path = ROOT / "data" / "news_cache.json"
+    if cache_path.exists():
+        with open(cache_path) as f:
+            cache_data = json.load(f)
+            if cache_data and cache_data.get("categories"):
+                # 格式化为面板友好结构
+                categories = cache_data.get("categories", {})
+                summary = cache_data.get("summary", "")
+                items = []
+                for cat_name, cat_entries in categories.items():
+                    if isinstance(cat_entries, list):
+                        for entry in cat_entries:
+                            items.append({"category": cat_name, "content": str(entry)[:200]})
+                return {
+                    "total": cache_data.get("total", 0),
+                    "timestamp": cache_data.get("timestamp", ""),
+                    "summary": summary,
+                    "items": items[:50],
+                }
+    # 回退
+    fallback_path = ROOT / "data" / "news_score_offset.json"
+    if fallback_path.exists():
+        with open(fallback_path) as f:
             return json.load(f)
     return {}
 
@@ -1123,6 +1143,7 @@ async function load() {
 }
 
 function fmt(v) { return Math.round(v).toLocaleString(); }
+function fmtNum(v) { return (v || 0).toLocaleString(); }
 function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
 load();
 async function loadMetrics() {
@@ -1289,7 +1310,11 @@ async function loadComparison() {
       el.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${data.error}</div>`;
       return;
     }
-    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:16px;">最后更新: ${data.run_date||''} | 分析周期: ${data.days_analyzed||''}天</div>`;
+    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:16px;">最后更新: ${data.run_date||''} | 分析周期: <strong>${data.days_analyzed||0}天</strong>`;
+    if (data.note) {
+      html += ` | <span style="color:var(--yellow)">${data.note}</span>`;
+    }
+    html += '</div>';
     html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">';
     const strategies = [data.faceji, data.silverquant, data.tradingagents].filter(Boolean);
     const colors = {'faceji (面基)':'#58a6ff','silverquant (组件化)':'#3fb950','tradingagents (辩论制)':'#bc8cff'};
@@ -1344,11 +1369,24 @@ async function loadNews() {
   try {
     const r = await fetch('/api/v2/news');
     const data = await r.json();
-    if (!data || Object.keys(data).length === 0) {
-      el.innerHTML = '<div class="empty">暂无板块新闻数据</div>';
+    if (!data || Object.keys(data).length === 0 || (data.total === 0 && !data.summary)) {
+      el.innerHTML = '<div class="empty">暂无板块新闻数据 — 今日无显著新闻</div>';
       return;
     }
-    el.innerHTML = '<pre style="max-height:500px;overflow-y:auto;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all;">' + JSON.stringify(data, null, 2) + '</pre>';
+    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:8px;">📡 ${data.summary || ''} · 更新: ${data.timestamp || ''}</div>`;
+    if (data.items && data.items.length > 0) {
+      const catColors = {'宏观政策':'var(--blue)','市场动态':'var(--green)','大宗商品':'var(--yellow)','产业趋势':'var(--purple)','综合':'var(--text2)','产业消息':'var(--orange)'};
+      html += data.items.map(item => {
+        const catColor = catColors[item.category] || 'var(--text2)';
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+          <span class="badge" style="background:${catColor}22;color:${catColor};font-size:10px;">${item.category}</span>
+          <span style="margin-left:6px;">${item.content}</span>
+        </div>`;
+      }).join('');
+    } else {
+      html += '<div class="empty">暂无分类新闻条目</div>';
+    }
+    el.innerHTML = html;
   } catch(e) {
     el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
   }

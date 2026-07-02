@@ -527,7 +527,20 @@ def _generate_sample_comparison():
             "win_rate": 50.0,
             "max_drawdown_pct": 6.8,
             "daily_values": gen_daily_values("faceji", base),
-            "trades": []
+            "trades": [
+                {"date":"2026-07-01","symbol":"300750","action":"买入","price":185.50,"quantity":200,"cost":37100,"reason":"评分5.8+趋势向上"},
+                {"date":"2026-07-01","symbol":"002594","action":"买入","price":265.30,"quantity":100,"cost":26530,"reason":"评分5.6+新能源板块"},
+                {"date":"2026-06-28","symbol":"300059","action":"卖出","price":24.80,"quantity":1500,"pnl":1350,"reason":"评分<4.5"},
+                {"date":"2026-06-25","symbol":"600519","action":"买入","price":1580.00,"quantity":20,"cost":31600,"reason":"评分6.2+消费复苏"},
+                {"date":"2026-06-20","symbol":"000858","action":"卖出","price":148.50,"quantity":200,"pnl":-1120,"reason":"评分<4尾部风险"},
+                {"date":"2026-06-18","symbol":"002371","action":"买入","price":328.00,"quantity":100,"cost":32800,"reason":"评分5.9+半导体周期"},
+                {"date":"2026-06-15","symbol":"300502","action":"买入","price":98.60,"quantity":300,"cost":29580,"reason":"评分6.0+AI算力光模块"},
+                {"date":"2026-06-12","symbol":"688041","action":"卖出","price":72.30,"quantity":400,"pnl":2520,"reason":"评分<5+MA死叉"},
+                {"date":"2026-06-10","symbol":"601318","action":"买入","price":52.80,"quantity":600,"cost":31680,"reason":"评分5.4+保险估值修复"},
+                {"date":"2026-06-08","symbol":"300750","action":"卖出","price":178.20,"quantity":200,"pnl":-640,"reason":"MA死叉"},
+                {"date":"2026-06-05","symbol":"002594","action":"买入","price":258.00,"quantity":100,"cost":25800,"reason":"评分5.5+新能源政策"},
+                {"date":"2026-06-01","symbol":"300059","action":"买入","price":23.50,"quantity":1500,"cost":35250,"reason":"评分5.7+券商活跃"},
+            ]
         },
         "silverquant": {
             "name": "silverquant (组件化)",
@@ -541,7 +554,17 @@ def _generate_sample_comparison():
             "win_rate": 55.6,
             "max_drawdown_pct": 5.2,
             "daily_values": gen_daily_values("silverquant", base),
-            "trades": []
+            "trades": [
+                {"date":"2026-07-01","symbol":"300059","action":"买入","price":24.50,"quantity":1200,"cost":29400,"reason":"评分5.7+组件信号BUYER"},
+                {"date":"2026-06-30","symbol":"002415","action":"买入","price":42.80,"quantity":700,"cost":29960,"reason":"评分5.5+视觉AI"},
+                {"date":"2026-06-28","symbol":"000333","action":"卖出","price":68.50,"quantity":400,"pnl":1200,"reason":"MASeller(MA死叉)"},
+                {"date":"2026-06-25","symbol":"300750","action":"买入","price":182.00,"quantity":200,"cost":36400,"reason":"评分5.9+动力电池"},
+                {"date":"2026-06-22","symbol":"000651","action":"卖出","price":58.20,"quantity":500,"pnl":-900,"reason":"ScoreDrop(4.3)"},
+                {"date":"2026-06-18","symbol":"300502","action":"买入","price":95.00,"quantity":300,"cost":28500,"reason":"评分5.8+光模块"},
+                {"date":"2026-06-15","symbol":"600519","action":"买入","price":1560.00,"quantity":20,"cost":31200,"reason":"评分6.1+白酒龙头"},
+                {"date":"2026-06-10","symbol":"002594","action":"买入","price":260.00,"quantity":100,"cost":26000,"reason":"评分5.6+整车"},
+                {"date":"2026-06-05","symbol":"601318","action":"卖出","price":51.20,"quantity":500,"pnl":-1400,"reason":"HardSeller(-8%)"},
+            ]
         },
         "tradingagents": {
             "name": "tradingagents (辩论制)",
@@ -555,7 +578,15 @@ def _generate_sample_comparison():
             "win_rate": 62.5,
             "max_drawdown_pct": 4.5,
             "daily_values": gen_daily_values("tradingagents", base),
-            "trades": []
+            "trades": [
+                {"date":"2026-07-01","symbol":"NVDA","action":"买入","price":128.50,"quantity":300,"cost":38550,"reason":"辩论分8.2(bull:7.8/bear:6.0)"},
+                {"date":"2026-06-28","symbol":"300750","action":"买入","price":180.00,"quantity":200,"cost":36000,"reason":"辩论分7.5(bull:7.2/bear:5.8)"},
+                {"date":"2026-06-25","symbol":"300059","action":"卖出","price":24.00,"quantity":1200,"pnl":-600,"reason":"辩论分3.8<4"},
+                {"date":"2026-06-20","symbol":"300502","action":"买入","price":92.00,"quantity":300,"cost":27600,"reason":"辩论分7.2(bull:7.0/bear:5.5)"},
+                {"date":"2026-06-15","symbol":"600519","action":"买入","price":1540.00,"quantity":20,"cost":30800,"reason":"辩论分7.8(bull:7.5/bear:6.2)"},
+                {"date":"2026-06-10","symbol":"002594","action":"卖出","price":255.00,"quantity":100,"pnl":-500,"reason":"止损-5.8%"},
+                {"date":"2026-06-05","symbol":"002415","action":"卖出","price":40.50,"quantity":600,"pnl":-1800,"reason":"辩论分3.5+亏损"},
+            ]
         },
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "days_analyzed": 0,
