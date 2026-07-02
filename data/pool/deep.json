@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "300059",
+    "score": 0.6068,
+    "scores": {
+      "quality": 0.5439,
+      "value": 0.5617,
+      "growth": 0.8046,
+      "momentum": 0.5517,
+      "low_vol": 0.3621,
+      "sentiment": 0.8103,
+      "risk": 0.613
+    },
+    "date_added": "2026-07-02",
+    "stoplist_passed": true
+  },
+  {
+    "symbol": "GOOGL",
+    "score": 0.6027,
+    "scores": {
+      "quality": 0.48,
+      "value": 0.4667,
+      "growth": 0.6556,
+      "momentum": 0.7333,
+      "low_vol": 0.5,
+      "sentiment": 0.7,
+      "risk": 0.6833
+    },
+    "date_added": "2026-07-02",
+    "stoplist_passed": true
+  }
+]
