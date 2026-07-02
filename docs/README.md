@@ -10,6 +10,7 @@
 | [GLOSSARY.md](GLOSSARY.md) | 术语表 — 面基/LDS/双门/20+核心概念 | 2026-07-02 |
 | [API.md](API.md) | API 端点参考 — 所有路由和数据结构 | 2026-07-02 |
 | [WORKFLOW.md](WORKFLOW.md) | 开发工作流 — 5阶段流程/质量标准 | 2026-07-02 |
+| [score_explanation.md](score_explanation.md) | 7因子评分体系说明 | 2026-07-02 |
 | [CHANGELOG.md](../CHANGELOG.md) | 完整变更日志（根目录） | — |
 
 ## 实施计划 (`plans/`)
