@@ -833,6 +833,55 @@ def api_simulated():
     }
 
 
+# ─── V2 API 扩展 (Dashboard 7面板) ──────────────────
+
+
+@app.get("/api/v2/pool")
+def api_v2_pool():
+    """三层票池数据 (watch/monitor/deep)"""
+    pool_dir = ROOT / "data" / "pool"
+    result = {}
+    for tier in ("watch", "monitor", "deep"):
+        path = pool_dir / f"{tier}.json"
+        if path.exists():
+            with open(path) as f:
+                raw = f.read().strip()
+                result[tier] = json.loads(raw) if raw else []
+        else:
+            result[tier] = []
+    return result
+
+
+@app.get("/api/v2/etf")
+def api_v2_etf():
+    """ETF组合建议"""
+    path = ROOT / "data" / "etf_portfolio.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+@app.get("/api/v2/news")
+def api_v2_news():
+    """板块新闻"""
+    path = ROOT / "data" / "news_score_offset.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+@app.get("/api/v2/reports")
+def api_v2_reports():
+    """日报链接列表"""
+    path = ROOT / "data" / "daily_report_links.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return []
+
+
 UNIFIED_DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -888,8 +937,12 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 <body>
 <div class="container">
   <div class="nav">
-    <a href="/dashboard" class="active">模拟盘</a>
+    <a href="javascript:void(0)" class="active" onclick="switchTab(event,'dashboard')">模拟盘</a>
     <a href="/comparison">回测对比</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'pool')">票池</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'etf')">ETF</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'news')">新闻</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'reports')">日报</a>
     <a href="https://bytedance.feishu.cn/docx/Q3ojdDMNPoiRMMx6eppc0Pzkn9U" target="_blank">日报v9</a>
   </div>
 
@@ -906,6 +959,30 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
   <div class="card" id="userSignals" style="display:none">
     <div class="card-header"><h3>执行建议（今日优先级）</h3></div>
     <div id="userSignalsBody"></div>
+  </div>
+
+  <!-- ======== 票池面板 ======== -->
+  <div class="card" id="tab-pool" style="display:none">
+    <div class="card-header"><h3>🎯 三层票池</h3></div>
+    <div id="poolBody" style="font-size:13px;"></div>
+  </div>
+
+  <!-- ======== ETF面板 ======== -->
+  <div class="card" id="tab-etf" style="display:none">
+    <div class="card-header"><h3>📦 ETF组合建议</h3></div>
+    <div id="etfBody" style="font-size:13px;"></div>
+  </div>
+
+  <!-- ======== 新闻面板 ======== -->
+  <div class="card" id="tab-news" style="display:none">
+    <div class="card-header"><h3>📰 板块新闻</h3></div>
+    <div id="newsBody" style="font-size:13px;"></div>
+  </div>
+
+  <!-- ======== 日报面板 ======== -->
+  <div class="card" id="tab-reports" style="display:none">
+    <div class="card-header"><h3>📋 日报链接</h3></div>
+    <div id="reportsBody" style="font-size:13px;"></div>
   </div>
 </div>
 
@@ -1015,6 +1092,172 @@ async function loadMetrics() {
 }
 loadMetrics();
 setInterval(load, 120000);
+
+// ─── 7面板 Tab 切换 ─────────────────────────
+function switchTab(ev, tab) {
+  ev.preventDefault();
+  // 更新 nav active 状态
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  ev.currentTarget.classList.add('active');
+
+  // 显示/隐藏面板
+  const sections = ['tab-pool','tab-etf','tab-news','tab-reports'];
+  const mainEls = [
+    document.getElementById('strategyPanels'),
+    document.getElementById('metricsPanel'),
+    document.getElementById('userSignals'),
+  ];
+  sections.forEach(id => document.getElementById(id).style.display = 'none');
+  mainEls.forEach(el => { if(el) el.style.display = 'none'; });
+
+  if (tab === 'dashboard') {
+    mainEls.forEach(el => { if(el) el.style.display = ''; });
+    return;
+  }
+
+  const panel = document.getElementById('tab-'+tab);
+  if (panel) panel.style.display = '';
+
+  // 加载数据
+  if (tab === 'pool') loadPool();
+  else if (tab === 'etf') loadEtf();
+  else if (tab === 'news') loadNews();
+  else if (tab === 'reports') loadReports();
+}
+
+async function loadPool() {
+  const el = document.getElementById('poolBody');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const r = await fetch('/api/v2/pool');
+    const data = await r.json();
+    let html = '';
+    for (const tier of ['watch','monitor','deep']) {
+      const items = data[tier] || [];
+      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ ${tier.toUpperCase()}</strong> <span style="color:var(--text2);font-size:12px;">${items.length} 只</span>`;
+      if (items.length === 0) {
+        html += '<div class="empty" style="padding:8px">暂无数据</div></div>';
+        continue;
+      }
+      html += '<table><tr><th>代码</th><th>综合评分</th><th>质量</th><th>价值</th><th>成长</th><th>动量</th><th>低波</th><th>情绪</th><th>风险</th><th>加入日期</th><th>理由</th></tr>';
+      items.forEach(i => {
+        const sc = i.scores || {};
+        html += `<tr class="tr-hover"><td><strong>${i.symbol}</strong></td>
+          <td style="color:${i.score>=0.5?'var(--green)':'var(--yellow)'}">${(i.score||0).toFixed(3)}</td>
+          <td>${(sc.quality||0).toFixed(2)}</td><td>${(sc.value||0).toFixed(2)}</td>
+          <td>${(sc.growth||0).toFixed(2)}</td><td>${(sc.momentum||0).toFixed(2)}</td>
+          <td>${(sc.low_vol||0).toFixed(2)}</td><td>${(sc.sentiment||0).toFixed(2)}</td>
+          <td>${(sc.risk||0).toFixed(2)}</td>
+          <td style="font-size:11px;color:var(--text2)">${i.date_added||''}</td>
+          <td style="font-size:11px;color:var(--text2)">${i.reason||''}</td></tr>`;
+      });
+      html += '</table></div>';
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadEtf() {
+  const el = document.getElementById('etfBody');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const r = await fetch('/api/v2/etf');
+    const data = await r.json();
+    if (!data || Object.keys(data).length === 0) {
+      el.innerHTML = '<div class="empty">暂无ETF组合数据</div>';
+      return;
+    }
+    let html = '';
+    // timing_portfolio
+    if (data.timing_portfolio) {
+      const tp = data.timing_portfolio;
+      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ 趋势跟随组合 (MA20/MA60)</strong></div>`;
+      html += buildEtfTable(tp.symbols || []);
+    }
+    // non_timing_portfolio
+    if (data.non_timing_portfolio) {
+      const nt = data.non_timing_portfolio;
+      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ 风险平价组合 (季度再平衡)</strong></div>`;
+      html += buildEtfTable(nt.symbols || []);
+    }
+    // combined
+    if (data.combined && data.combined.length > 0) {
+      html += `<div style="margin-bottom:16px;"><strong style="color:var(--green);font-size:15px;">▸ 合并建议</strong></div>`;
+      html += buildEtfTable(data.combined);
+    }
+    if (data.timestamp) {
+      html += `<div style="font-size:11px;color:var(--text2);text-align:right;">更新时间: ${data.timestamp}</div>`;
+    }
+    el.innerHTML = html || '<div class="empty">暂无ETF组合数据</div>';
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+function buildEtfTable(symbols) {
+  if (!symbols || symbols.length === 0) return '<div class="empty">暂无数据</div>';
+  const actionLabel = {BUY:'买入','SELL':'卖出',HOLD:'持有'};
+  return '<table><tr><th>代码</th><th>名称</th><th>操作</th><th>权重</th><th>类型</th><th>理由</th></tr>' +
+    symbols.map(s => {
+      const act = s.action || 'HOLD';
+      const cls = act==='BUY'?'badge-buy':(act==='SELL'?'badge-sell':'');
+      return `<tr class="tr-hover"><td><strong>${s.etf_symbol}</strong></td>
+        <td>${s.name||''}</td>
+        <td><span class="badge ${cls}">${actionLabel[act]||act}</span></td>
+        <td>${((s.weight||0)*100).toFixed(1)}%</td>
+        <td style="font-size:11px;color:var(--text2)">${s.signal_type||''}</td>
+        <td style="font-size:11px;color:var(--text2)">${s.reason||''}</td></tr>`;
+    }).join('') + '</table>';
+}
+
+async function loadNews() {
+  const el = document.getElementById('newsBody');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const r = await fetch('/api/v2/news');
+    const data = await r.json();
+    if (!data || Object.keys(data).length === 0) {
+      el.innerHTML = '<div class="empty">暂无板块新闻数据</div>';
+      return;
+    }
+    el.innerHTML = '<pre style="max-height:500px;overflow-y:auto;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all;">' + JSON.stringify(data, null, 2) + '</pre>';
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadReports() {
+  const el = document.getElementById('reportsBody');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const r = await fetch('/api/v2/reports');
+    const data = await r.json();
+    if (!data || (Array.isArray(data) && data.length === 0) || (typeof data === 'object' && Object.keys(data).length === 0)) {
+      el.innerHTML = '<div class="empty">暂无日报链接</div>';
+      return;
+    }
+    let html = '';
+    const items = Array.isArray(data) ? data : (data.links || data.items || [data]);
+    if (items.length === 0) {
+      el.innerHTML = '<div class="empty">暂无日报链接</div>';
+      return;
+    }
+    html = '<table><tr><th>日期</th><th>标题</th><th>链接</th></tr>' +
+      items.map(item => {
+        const date = item.date || item.time || item.timestamp || '';
+        const title = item.title || item.name || '日报';
+        const link = item.link || item.url || item.href || '#';
+        return `<tr class="tr-hover"><td style="font-size:12px;color:var(--text2)">${date}</td>
+          <td>${title}</td>
+          <td><a href="${link}" target="_blank" style="color:var(--blue)">📄 查看</a></td></tr>`;
+      }).join('') + '</table>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
+}
 </script>
 </body>
 </html>

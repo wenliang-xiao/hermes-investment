@@ -389,6 +389,39 @@ class FactorEngine:
         except Exception:
             return []
 
+    def _get_pe_from_hist_or_rt(self, symbol: str, hist: dict) -> float | None:
+        """从历史数据或实时数据获取 PE，作为 fin_report fallback"""
+        # 先尝试从 hist 的 pe 字段获取
+        pe_arr = hist.get("pe", [])
+        if pe_arr:
+            for p in reversed(pe_arr):
+                if p is not None:
+                    try:
+                        fp = float(p)
+                        if fp > 0:
+                            return fp
+                    except (ValueError, TypeError):
+                        pass
+        # 再尝试从实时数据获取
+        try:
+            from data.data_router import get_rt
+            rt = get_rt(symbol)
+            if rt and rt.get("pe"):
+                return float(rt["pe"])
+        except Exception:
+            pass
+        # 尝试用 yfinance ticker.info 获取 (最可靠)
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(symbol)
+            info = ticker.info or {}
+            pe_val = info.get("trailingPE") or info.get("forwardPE") or info.get("peRatio")
+            if pe_val and float(pe_val) > 0:
+                return float(pe_val)
+        except Exception:
+            pass
+        return None
+
     def _get_sub_value(self, sub_key: str, symbol: str) -> float | None:
         """
         计算单个子因子原始值
@@ -401,7 +434,32 @@ class FactorEngine:
 
         if source == "fin_report":
             fin = self._get_fin(symbol)
-            return self._extract_fin_field(fin, sub_def["field"])
+            val = self._extract_fin_field(fin, sub_def["field"])
+            if val is not None:
+                return val
+            # Fallback: fin_report 为空时（港股/美股无A股财务数据），从 daily/derived 数据推算
+            # 尝试从 daily 获取 PE 作为价值因子的替代
+            if sub_def["field"] in ("资产负债率", "毛利率", "净利率", "每股经营现金流"):
+                # 这些字段无法从日线推算，返回 None
+                return None
+            if sub_def["field"] == "净资产收益率":
+                # 尝试从 hist 数据近似估算 ROE (PE倒数 * PB ≈ ROE)
+                hist = self._get_hist(symbol, 250)
+                if hist and "close" in hist:
+                    pe_val = self._get_pe_from_hist_or_rt(symbol, hist)
+                    if pe_val and float(pe_val) > 0:
+                        # 保守假设: ROE ≈ 1/PE * 100 (简化)
+                        return min(50.0, float(100.0 / float(pe_val)))
+                return None
+            if sub_def["field"] in ("营业收入同比增长率", "净利润同比增长率"):
+                # 用动量近似增长
+                hist = self._get_hist(symbol, 250)
+                if hist and hist.get("close") and len(hist["close"]) > 60:
+                    close = np.array(hist["close"], dtype=float)
+                    momentum = float(close[-1] / close[-61] - 1)
+                    # 将动量映射为增长率近似值
+                    return max(-50.0, min(100.0, momentum * 100))
+                return None
 
         elif source == "daily_row":
             hist = self._get_hist(symbol, 10)
@@ -412,11 +470,23 @@ class FactorEngine:
                 return None
             if sub_def["field"] == "pe":
                 pe = hist.get("pe", [None])[-1]
-                return float(pe) if pe and float(pe) > 0 else None
+                if pe and float(pe) > 0:
+                    return float(pe)
+                # Fallback: yfinance 日线不含 PE，从 get_rt 获取
+                pe_val = self._get_pe_from_hist_or_rt(symbol, hist)
+                if pe_val and float(pe_val) > 0:
+                    return float(pe_val)
+                return None
             elif sub_def["field"] == "pb":
-                # baostock 日线无pb字段，用PE推算接近值
-                pe = hist.get("pe", [None])[-1]
-                return None  # PB 暂不可直接从日线获取
+                # PB fallback: try from get_rt if available
+                try:
+                    from data.data_router import get_rt
+                    rt = get_rt(symbol)
+                    if rt and rt.get("pb"):
+                        return float(rt["pb"])
+                except Exception:
+                    pass
+                return None
 
         elif source == "derived":
             method = sub_def["method"]
