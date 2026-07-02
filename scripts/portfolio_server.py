@@ -233,10 +233,7 @@ td { padding: 6px; border-bottom: 1px solid var(--border); }
 <body>
 <div class="container">
   <div class="nav">
-    <a href="/dashboard">← 模拟盘</a>
-    <span style="color:var(--text2)">｜</span>
-    <a href="/comparison" style="color:var(--orange);font-weight:600">三方策略对比</a>
-    <a href="https://bytedance.feishu.cn/docx/Q3ojdDMNPoiRMMx6eppc0Pzkn9U" target="_blank">日报v9</a>
+    <a href="/dashboard" style="color:var(--orange);font-weight:600">← 返回Dashboard</a>
   </div>
 
   <h1>📊 三方策略对比</h1>
