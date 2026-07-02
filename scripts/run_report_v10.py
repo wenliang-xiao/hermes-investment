@@ -210,14 +210,14 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
             if os.path.exists(shadow_path):
                 with open(shadow_path) as f:
                     shadow = json.load(f)
-                recent = [h for h in shadow.get("history", []) if h.get("time", "")[:10] >= week_ago]
+                recent = [tx for tx in shadow.get("history", []) if tx.get("time", "")[:10] >= week_ago]
                 if recent:
                     r_lines = ["时间            标的  操作  价格     数量  盈亏"]
                     r_lines.append("─" * 55)
-                    for h in recent[-10:]:
-                        pnl = h.get("pnl")
+                    for tx in recent[-10:]:
+                        pnl = tx.get("pnl")
                         pnl_s = f"¥{pnl:+.0f}" if pnl else "—"
-                        r_lines.append(f"{h.get('time','')[:16]} {h.get('symbol',''):<6s} {h.get('action',''):<4s} {h.get('price',0):>8.2f} {h.get('quantity',0):>4d} {pnl_s}")
+                        r_lines.append(f"{tx.get('time','')[:16]} {tx.get('symbol',''):<6s} {tx.get('action',''):<4s} {tx.get('price',0):>8.2f} {tx.get('quantity',0):>4d} {pnl_s}")
                     blocks.append(cd("\n".join(r_lines)))
                 else:
                     blocks.append(p("过去7天无交易记录"))
