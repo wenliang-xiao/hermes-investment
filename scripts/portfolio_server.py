@@ -973,12 +973,12 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 <body>
 <div class="container">
   <div class="nav">
-    <a href="javascript:void(0)" class="active" onclick="switchTab(event,'dashboard')">📊 模拟盘</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'comparison')">📈 回测对比</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'pool')">🎯 票池</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'etf')">📦 ETF</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'news')">📰 新闻</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'reports')">📋 日报</a>
+    <a href="#" class="active" onclick="return switchTab(event,'dashboard')">📊 模拟盘</a>
+    <a href="#" onclick="return switchTab(event,'comparison')">📈 回测对比</a>
+    <a href="#" onclick="return switchTab(event,'pool')">🎯 票池</a>
+    <a href="#" onclick="return switchTab(event,'etf')">📦 ETF</a>
+    <a href="#" onclick="return switchTab(event,'news')">📰 新闻</a>
+    <a href="#" onclick="return switchTab(event,'reports')">📋 日报</a>
   </div>
 
   <h1>面基 · 三源融合模拟盘</h1>
@@ -1181,6 +1181,7 @@ function switchTab(ev, tab) {
   else if (tab === 'news') loadNews();
   else if (tab === 'reports') loadReports();
   else if (tab === 'comparison') loadComparison();
+  return false;
 }
 
 async function loadPool() {
