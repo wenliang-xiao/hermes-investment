@@ -239,7 +239,7 @@ def run(mode="full"):
                 core_symbols.append(sym)
 
     print(f"\n📡 Tier 1: AKShare个股事件 ({len(core_symbols)}只)")
-    events = fetch_all_stock_events(core_symbols, days=5)
+    events = fetch_all_stock_events(core_symbols, limit=5)
     total = sum(len(v) for v in events.values())
     syms_with_events = len(events)
     print(f"   {total}条事件 · {syms_with_events}只有事件")

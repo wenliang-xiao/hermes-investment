@@ -17,6 +17,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT.parent))
 
+# Stock name mapping
+sys.path.insert(0, str(ROOT))
+try:
+    from data.stock_names import STOCK_NAMES, ETF_NAMES, get_name
+except ImportError:
+    STOCK_NAMES = {}
+    ETF_NAMES = {}
+    def get_name(code): return code
+
 app = FastAPI(title="面基模拟盘 Dashboard", version="1.0.0")
 
 
@@ -802,11 +811,14 @@ def api_simulated():
             pnl = mkt_val - cost
             pnl_pct = pd.get("pnl_pct", 0)
             pos_list.append({
-                "symbol": sym, "name": sym,
+                "symbol": sym, "name": get_name(sym),
                 "entry_price": entry, "current_price": current,
                 "quantity": qty, "cost": cost, "market_value": mkt_val,
                 "pnl": round(pnl, 2), "pnl_pct": pnl_pct,
                 "entry_date": pd.get("entry_date", ""),
+                "reason": pd.get("reason", f"建仓评分{pd.get('entry_score','?')}分"),
+                "stop_loss": round(entry * 0.92, 2),
+                "peak_price": pd.get("peak_price", entry),
             })
 
         result[sname] = {
@@ -937,13 +949,12 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 <body>
 <div class="container">
   <div class="nav">
-    <a href="javascript:void(0)" class="active" onclick="switchTab(event,'dashboard')">模拟盘</a>
-    <a href="/comparison">回测对比</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'pool')">票池</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'etf')">ETF</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'news')">新闻</a>
-    <a href="javascript:void(0)" onclick="switchTab(event,'reports')">日报</a>
-    <a href="https://bytedance.feishu.cn/docx/Q3ojdDMNPoiRMMx6eppc0Pzkn9U" target="_blank">日报v9</a>
+    <a href="javascript:void(0)" class="active" onclick="switchTab(event,'dashboard')">📊 模拟盘</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'comparison')">📈 回测对比</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'pool')">🎯 票池</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'etf')">📦 ETF</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'news')">📰 新闻</a>
+    <a href="javascript:void(0)" onclick="switchTab(event,'reports')">📋 日报</a>
   </div>
 
   <h1>面基 · 三源融合模拟盘</h1>
@@ -959,6 +970,14 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
   <div class="card" id="userSignals" style="display:none">
     <div class="card-header"><h3>执行建议（今日优先级）</h3></div>
     <div id="userSignalsBody"></div>
+  </div>
+
+  <!-- ======== 回测对比面板 ======== -->
+  <div class="card" id="tab-comparison" style="display:none">
+    <div class="card-header"><h3>📈 三方策略回测对比</h3></div>
+    <div id="comparisonBody" style="font-size:13px;">
+      <div class="empty">加载中...</div>
+    </div>
   </div>
 
   <!-- ======== 票池面板 ======== -->
@@ -1009,13 +1028,18 @@ async function load() {
       const retCls = p.total_return >= 0 ? 'green' : 'red';
       const posRows = p.positions.map(pos => {
         const pnlCls = pos.pnl_pct >= 0 ? 'green' : 'red';
+        const stopLoss = pos.stop_loss || pos.entry_price * 0.92;
+        const nearStop = pos.current_price <= stopLoss * 1.05;
         return `<tr class="tr-hover">
-          <td>${pos.symbol}</td>
-          <td>${pos.quantity}</td>
+          <td><strong>${pos.symbol}</strong></td>
+          <td style="color:var(--text2)">${pos.name||pos.symbol}</td>
+          <td>${fmtNum(pos.quantity)}</td>
           <td>${pos.entry_price.toFixed(2)}</td>
           <td class="${pnlCls}">${pos.current_price.toFixed(2)}</td>
           <td class="${pnlCls}">${fmtPct(pos.pnl_pct)}</td>
-          <td style="font-size:11px;color:var(--text2)">${pos.entry_date}</td>
+          <td>${pos.entry_date||'—'}</td>
+          <td style="font-size:11px;color:var(--text2)" title="${pos.reason||''}">${(pos.reason||'').slice(0,20)}</td>
+          <td style="font-size:11px;${nearStop?'color:var(--red);font-weight:600':''}">${stopLoss.toFixed(2)}${nearStop?' 🚨':''}</td>
         </tr>`;
       }).join('');
 
@@ -1034,13 +1058,19 @@ async function load() {
         <div class="metric"><span class="metric-l">现金</span><span class="metric-v">¥${fmt(p.cash)}</span></div>
         <div class="metric"><span class="metric-l">已投</span><span class="metric-v">¥${fmt(p.invested)}</span></div>
         <div class="metric"><span class="metric-l">仓位</span><span class="metric-v">${p.position_count} 只</span></div>
-        <div style="margin-top:12px;font-size:12px;color:var(--text2)">持仓明细</div>
-        <div class="scroll" style="max-height:180px">
-          ${posRows || '<div class="empty">空仓</div>'}
+        <div style="margin-top:12px;font-size:12px;color:var(--text2)">📋 持仓明细</div>
+        <div class="scroll" style="max-height:220px">
+          <table>
+            <tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>收益</th><th>持仓</th><th>理由</th><th>止损</th></tr>
+            ${posRows || '<tr><td colspan="9" class="empty">空仓</td></tr>'}
+          </table>
         </div>
-        <div style="margin-top:12px;font-size:12px;color:var(--text2)">今日信号</div>
+        <div style="margin-top:12px;font-size:12px;color:var(--text2)">🔔 今日信号</div>
         <div class="scroll" style="max-height:120px">
-          ${sigRows || '<div class="empty">无信号</div>'}
+          <table>
+            <tr><th>操作</th><th>代码</th><th>价格</th><th>理由</th></tr>
+            ${sigRows || '<tr><td colspan="4" class="empty">无信号</td></tr>'}
+          </table>
         </div>
       </div>`;
     }).join('');
@@ -1101,7 +1131,7 @@ function switchTab(ev, tab) {
   ev.currentTarget.classList.add('active');
 
   // 显示/隐藏面板
-  const sections = ['tab-pool','tab-etf','tab-news','tab-reports'];
+  const sections = ['tab-pool','tab-etf','tab-news','tab-reports','tab-comparison'];
   const mainEls = [
     document.getElementById('strategyPanels'),
     document.getElementById('metricsPanel'),
@@ -1123,6 +1153,7 @@ function switchTab(ev, tab) {
   else if (tab === 'etf') loadEtf();
   else if (tab === 'news') loadNews();
   else if (tab === 'reports') loadReports();
+  else if (tab === 'comparison') loadComparison();
 }
 
 async function loadPool() {
@@ -1131,12 +1162,16 @@ async function loadPool() {
   try {
     const r = await fetch('/api/v2/pool');
     const data = await r.json();
+    const tierNames = {'watch':'🔍 发现层 (评分>0.50)','monitor':'👀 盯住层 (评分>0.55 ≥1周)','deep':'🧠 深度层 (评分>0.6 ≥2周+不为清单通过)'};
+    const tierColors = {'watch':'var(--blue)','monitor':'var(--yellow)','deep':'var(--green)'};
     let html = '';
     for (const tier of ['watch','monitor','deep']) {
       const items = data[tier] || [];
-      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ ${tier.toUpperCase()}</strong> <span style="color:var(--text2);font-size:12px;">${items.length} 只</span>`;
+      html += `<div style="margin-bottom:20px;">
+        <strong style="color:${tierColors[tier]};font-size:15px;">${tierNames[tier]||tier.toUpperCase()}</strong>
+        <span style="color:var(--text2);font-size:12px;"> ${items.length} 只</span>`;
       if (items.length === 0) {
-        html += '<div class="empty" style="padding:8px">暂无数据</div></div>';
+        html += '<div class="empty" style="padding:8px">暂无数据 — 需积累评分历史</div></div>';
         continue;
       }
       html += '<table><tr><th>代码</th><th>综合评分</th><th>质量</th><th>价值</th><th>成长</th><th>动量</th><th>低波</th><th>情绪</th><th>风险</th><th>加入日期</th><th>理由</th></tr>';
@@ -1210,6 +1245,65 @@ function buildEtfTable(symbols) {
         <td style="font-size:11px;color:var(--text2)">${s.signal_type||''}</td>
         <td style="font-size:11px;color:var(--text2)">${s.reason||''}</td></tr>`;
     }).join('') + '</table>';
+}
+
+async function loadComparison() {
+  const el = document.getElementById('comparisonBody');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const r = await fetch('/api/comparison');
+    const data = await r.json();
+    if (data.error) {
+      el.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${data.error}</div>`;
+      return;
+    }
+    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:16px;">最后更新: ${data.run_date||''} | 分析周期: ${data.days_analyzed||''}天</div>`;
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">';
+    const strategies = [data.faceji, data.silverquant, data.tradingagents].filter(Boolean);
+    const colors = {'faceji (面基)':'#58a6ff','silverquant (组件化)':'#3fb950','tradingagents (辩论制)':'#bc8cff'};
+    strategies.forEach(s => {
+      const retCls = s.total_return_pct >= 0 ? 'green' : 'red';
+      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px;"><span style="color:${colors[s.name]||'#fff'}">●</span> ${s.name}</div>
+        <div style="font-size:28px;font-weight:700;margin:8px 0;color:${retCls==='green'?'var(--green)':'var(--red)'}">${s.total_return_pct>=0?'+':''}${s.total_return_pct}%</div>
+        <div class="metric"><span class="metric-l">总资产</span><span class="metric-v">¥${fmt(s.value||0)}</span></div>
+        <div class="metric"><span class="metric-l">已实现盈亏</span><span class="metric-v" style="color:${s.realized_pnl>=0?'var(--green)':'var(--red)'}">${s.realized_pnl>=0?'+':''}¥${fmt(s.realized_pnl||0)}</span></div>
+        <div class="metric"><span class="metric-l">浮盈</span><span class="metric-v" style="color:${(s.unrealized_pnl||0)>=0?'var(--green)':'var(--red)'}">${(s.unrealized_pnl||0)>=0?'+':''}¥${fmt(s.unrealized_pnl||0)}</span></div>
+        <div class="metric"><span class="metric-l">持仓</span><span class="metric-v">${s.positions||0} 只</span></div>
+        <div class="metric"><span class="metric-l">交易次数</span><span class="metric-v">${s.total_trades||0} 笔</span></div>
+        <div class="metric"><span class="metric-l">胜率</span><span class="metric-v">${s.win_rate||0}%</span></div>
+        <div class="metric"><span class="metric-l">最大回撤</span><span class="metric-v" style="color:var(--red)">-${s.max_drawdown_pct||0}%</span></div>
+      </div>`;
+    });
+    html += '</div>';
+
+    // Trade history
+    html += '<div style="margin-top:16px;"><h3 style="font-size:14px;margin-bottom:8px;">📋 最近交易</h3></div>';
+    strategies.forEach(s => {
+      const trades = (s.trades || []).slice(-10).reverse();
+      html += `<div style="margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:500;margin-bottom:4px;color:${colors[s.name]||'#fff'}">${s.name}</div>
+        <table><tr><th>日期</th><th>代码</th><th>操作</th><th>价格</th><th>盈亏</th></tr>`;
+      if (trades.length === 0) {
+        html += '<tr><td colspan="5" class="empty">暂无交易</td></tr>';
+      } else {
+        trades.forEach(tx => {
+          const isBuy = tx.action === '买入' || tx.action === 'BUY';
+          html += `<tr class="tr-hover">
+            <td style="font-size:11px;color:var(--text2)">${tx.date||tx.time||''}</td>
+            <td>${tx.symbol||''}</td>
+            <td><span class="badge ${isBuy?'badge-buy':'badge-sell'}">${tx.action}</span></td>
+            <td>¥${(tx.price||0).toFixed(2)}</td>
+            <td class="${tx.pnl>0?'green':'red'}">${tx.pnl!=null ? (tx.pnl>0?'+':'')+'¥'+fmt(tx.pnl) : '—'}</td>
+          </tr>`;
+        });
+      }
+      html += '</table></div>';
+    });
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
 }
 
 async function loadNews() {
