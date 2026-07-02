@@ -1116,6 +1116,7 @@ async function load() {
     }).join('');
     document.getElementById('userSignalsBody').innerHTML =
       `<table><tr><th>优先级</th><th>操作</th><th>代码</th><th>名称</th><th>价格</th><th>理由</th></tr>${rows}</table>`;
+  }
   } catch(e) {
     document.getElementById('strategyPanels').innerHTML = '<div class="card" style="color:var(--red)">⚠️ ' + e.message + '</div>';
   }
