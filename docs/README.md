@@ -13,6 +13,20 @@
 | [score_explanation.md](score_explanation.md) | 7因子评分体系说明 | 2026-07-02 |
 | [CHANGELOG.md](../CHANGELOG.md) | 完整变更日志（根目录） | — |
 
+## 生产化设计方案 (`design/`)
+
+| 文档 | 说明 | 优先级 |
+|------|------|--------|
+| [README](design/README.md) | 设计方案总览与路线图 | — |
+| [security-hardening.md](design/security-hardening.md) | 安全加固：凭据管理、pickle 安全、API 认证 | 🔴 P0 |
+| [engineering-foundation.md](design/engineering-foundation.md) | 工程化基础：依赖管理、CI/CD、代码规范 | 🔴 P0 |
+| [testing-infrastructure.md](design/testing-infrastructure.md) | 测试基础设施：从零到覆盖关键路径 | 🔴 P0 |
+| [data-pipeline-reliability.md](design/data-pipeline-reliability.md) | 数据管线可靠性：原子写入、缓存、容错 | 🟡 P1 |
+| [factor-engine-unification.md](design/factor-engine-unification.md) | 因子引擎统一：v3.1 × v4.0 合并方案 | 🟡 P1 |
+| [architecture-split.md](design/architecture-split.md) | 架构拆分：超大文件分解 + 配置去重 | 🟡 P1 |
+| [observability.md](design/observability.md) | 可观测性：日志、健康检查、告警 | 🟢 P2 |
+| [dashboard-refactoring.md](design/dashboard-refactoring.md) | Dashboard 重构：前后端分离 + 交互增强 | 🟢 P2 |
+
 ## 实施计划 (`plans/`)
 
 | 文件 | 说明 | 状态 |
