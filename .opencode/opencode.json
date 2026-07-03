@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/AGENTS.md",
+    "~/.config/opencode/AGENTS.md"
+  ],
+  "env": {
+    "HERMES_BASE": "/Users/wenlix/project/hermes-investment"
+  }
+}
