@@ -28,7 +28,7 @@
 
 ## 外部链接
 
-- [飞书工作流 v3（三合一）](https://www.feishu.cn/docx/KdsrdiGa6o2e05xQAh8cRbMZnCf) — 当前有效（v2已废弃）
+- [飞书工作流 v4（四合一）](https://www.feishu.cn/docx/AYSadQ7QhoexZ3x64oaczthhnNh) — 当前有效（v3已废弃）
 - [飞书问题追溯表](https://www.feishu.cn/docx/S9A6dzJFbo7wWqxJ12Uc7K7Fn8y)（Dashboard 修复追踪）
 - [GitHub 仓库](https://github.com/wenliang-xiao/hermes-investment)
 - [Dashboard](http://47.85.161.255/dashboard)

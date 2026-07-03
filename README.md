@@ -104,6 +104,6 @@ watch = pm.load_pool("watch")                   # 读取发现层
 ## 🔗 相关链接
 
 - [GitHub 仓库](https://github.com/wenliang-xiao/hermes-investment)
-- [飞书工作流 v3（三合一）](https://www.feishu.cn/docx/KdsrdiGa6o2e05xQAh8cRbMZnCf)
+- [飞书工作流 v4（四合一）](https://www.feishu.cn/docx/AYSadQ7QhoexZ3x64oaczthhnNh)
 - [飞书问题追溯表](https://www.feishu.cn/docx/S9A6dzJFbo7wWqxJ12Uc7K7Fn8y)
 - [Dashboard](http://47.85.161.255/dashboard)
