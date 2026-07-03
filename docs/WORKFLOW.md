@@ -163,10 +163,22 @@ Agent 拆为 3-5 个纵向切片
 
 ---
 
-## 六、版本记录
+## 六、已安装工具
+
+| 工具 | 安装方式 | 位置 |
+|------|---------|------|
+| OpenSpec (opsx) | OpenCode 内置 | — |
+| Superpowers | `superpowers@git+https://github.com/obra/superpowers.git` | opencode plugin |
+| grill-me (Matt Pocock) | `npx skills@latest add mattpocock/skills --yes` | `~/.agents/skills/grill-me/` |
+| Trellis | `npm install -g @mindfoldhq/trellis@beta` | `/usr/local/bin/trellis` v0.6.0 |
+
+grill-me / to-prd / to-issues / tdd / implement / diagnose 等核心 skills 已复制到 `~/.agents/skills/`，全局可用。
+
+## 七、版本记录
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 7/3 | v4.1 | 安装 grill-me + Trellis 至全局；创建 `.opencode/AGENTS.md` 项目专属规则；更新工具清单 |
 | 7/3 | v4 | 四合一：OpenSpec 飞书评审 + grill-me 快车道双入口，共用 Trellis 执行 |
 | 7/3 | v3 | OpenSpec+grill-me+Trellis |
 | 7/3 | v2 | grill-me 轻问答 |

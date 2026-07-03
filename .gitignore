@@ -12,3 +12,4 @@ credentials/
 data/cache/
 data/eval_cache/
 data/hl_runs/
+.agents/
