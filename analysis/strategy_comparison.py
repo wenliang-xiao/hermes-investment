@@ -453,8 +453,16 @@ def run_comparison(days=60):
     score_history = load_score_history(days=days)
     
     if not score_history:
-        # 无历史数据，生成模拟数据用于展示
-        return _generate_sample_comparison()
+        # 无历史数据 — 返回空，Dashboard 显示"数据尚未积累"替代假数据
+        # 每日扫描自动积累，约60个交易日后有真实对比曲线
+        return {
+            "faceji": {"name": "faceji（面基）", "value": 1000000, "total_return_pct": 0,
+                       "daily_values": [], "trades": [], "note": "数据积累中…"},
+            "silverquant": {"name": "SilverQuant", "value": 1000000, "total_return_pct": 0,
+                            "daily_values": [], "trades": [], "note": "数据积累中…"},
+            "tradingagents": {"name": "TradingAgents", "value": 1000000, "total_return_pct": 0,
+                              "daily_values": [], "trades": [], "note": "数据积累中…"},
+        }
     
     # 逐日回放
     for day in score_history:

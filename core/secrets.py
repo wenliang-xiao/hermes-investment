@@ -11,7 +11,7 @@ except (PermissionError, OSError):
 JQDATA_USER = os.environ.get("JQDATA_USER", "")
 JQDATA_PASS = os.environ.get("JQDATA_PASS", "")
 
-TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "a123a8e0b24ac30890b65c6e83a8211a7309647066fd786b541873b3")
+TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
 
 FEISHU_TOOL = os.environ.get("FEISHU_TOOL", "/home/admin/.hermes/node_modules/.bin/feishu-tool")
 FEISHU_FOLDER_TOKEN = os.environ.get("FEISHU_FOLDER_TOKEN", "QhIOfB63Sl6Kqmd81fycjR6jnDd")

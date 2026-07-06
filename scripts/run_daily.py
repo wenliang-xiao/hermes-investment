@@ -27,7 +27,7 @@ from investment_system.output.fund_tracker import track_lds_portfolio_v2
 from investment_system.analysis.news_engine import get_news_with_impact
 from investment_system.data.yf_data_layer import get_global_market_snapshot
 from investment_system.data.data_layer import get_northbound_flow
-from investment_system.analysis.factor_scanner import FactorScanner
+from investment_system.analysis.factor_engine import FactorScannerCompatV4 as FactorScanner
 
 LF = '/tmp/report_daily_log.txt'
 with open(LF, 'w') as f: f.write('')

@@ -933,6 +933,202 @@ class PoolManager:
 
 
 # ═══════════════════════════════════════════════
+# FactorScannerCompatV4 — v3.1 兼容层
+# ═══════════════════════════════════════════════
+
+class FactorScannerCompatV4:
+    """v3.1 FactorScanner 兼容层 — 内部使用 FactorEngine v4.0
+
+    提供 scan_market_batch() / MAX_SCAN / .macro 等 v3.1 接口，
+    让 run_daily.py(v7日报) 等旧脚本无缝切换到新引擎。
+
+    输出评分转换为 v3 的 [1,10] 格式，兼容下游 display/阈值。
+    """
+
+    def __init__(self, macro_engine=None):
+        self._engine = FactorEngine()
+        self.macro = macro_engine
+        self.MAX_SCAN = 30
+        self._cache = {}
+
+    def _get_v3_score(self, symbol: str) -> dict:
+        """单只评分，用 v3 [1,10] 格式输出"""
+        try:
+            r = self._engine.score_symbol(symbol)
+            v3 = convert_v4_to_v3(r.get("composite", 0.5))
+
+            # 取收盘价
+            price = 0
+            try:
+                hist = self._engine._get_hist(symbol, 10)
+                if hist and hist.get("close"):
+                    price = float(hist["close"][-1])
+            except Exception:
+                pass
+
+            # 取变动
+            change_pct = 0
+            try:
+                hist = self._engine._get_hist(symbol, 20)
+                if hist and hist.get("close") and len(hist["close"]) >= 2:
+                    c = hist["close"]
+                    change_pct = float((c[-1] / c[-2] - 1) * 100)
+            except Exception:
+                pass
+
+            return {
+                "symbol": symbol,
+                "name": self._get_stock_name(symbol),
+                "score": round(v3, 2),
+                "composite_v4": r.get("composite", 0.5),
+                "scores": {k: round(v, 4) for k, v in r.get("scores", {}).items()},
+                "factor_breakdown": r.get("factor_breakdown", {}),
+                "change_pct": change_pct,
+                "price": price,
+                "sector": self._get_stock_sector(symbol),
+                "pe_percentile": None,
+                "roe": None,
+            }
+        except Exception as e:
+            return {"symbol": symbol, "score": 0, "error": str(e)[:100]}
+
+    def score_stock(self, symbol: str) -> dict:
+        """v3.1 兼容：返回 v3 评分格式"""
+        return self._get_v3_score(symbol)
+
+    # ── 跨cron分批续扫（从 v3.1 factor_scanner 移植，使用 v4.0 引擎）──
+
+    def scan_market_batch(self, progress_file=None, batch_size=15, top_n=10):
+        """兼容 v3.1 scan_market_batch()"""
+        from investment_system.domain.stock_universe import LDS_SECTORS, MACRO_TO_SECTORS
+
+        if progress_file is None:
+            from investment_system import config as _cfg
+            progress_file = os.path.join(getattr(_cfg, 'DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data')),
+                                         'scanner_progress.json')
+
+        today = str(date.today())
+        progress = self._load_progress(progress_file)
+        stale = progress is None or progress.get("date") != today
+
+        # 全完成
+        if progress and progress.get("completed"):
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        # MAX_SCAN变更
+        if progress and progress.get("date") == today and len(progress.get("universe", [])) != self.MAX_SCAN:
+            stale = True
+
+        # 过期或新扫描
+        if stale:
+            favored = MACRO_TO_SECTORS.get(
+                getattr(self.macro, 'regime', 'default') if self.macro else 'default',
+                MACRO_TO_SECTORS["default"]
+            )
+            universe, seen = [], set()
+            for sec in favored:
+                cnt = 0
+                for s in LDS_SECTORS.get(sec, []):
+                    if s not in seen and cnt < max(3, self.MAX_SCAN // len(favored)):
+                        seen.add(s); universe.append(s); cnt += 1
+                        if len(universe) >= self.MAX_SCAN: break
+                if len(universe) >= self.MAX_SCAN: break
+            other = [s for s in LDS_SECTORS if s not in favored]
+            for sec in other:
+                cnt = 0
+                for s in LDS_SECTORS.get(sec, []):
+                    if s not in seen and cnt < max(2, self.MAX_SCAN // len(LDS_SECTORS)):
+                        seen.add(s); universe.append(s); cnt += 1
+                        if len(universe) >= self.MAX_SCAN: break
+                if len(universe) >= self.MAX_SCAN: break
+            progress = {"date": today, "universe": universe, "scanned": [],
+                        "results": [], "completed": False, "total": len(universe)}
+            self._save_progress(progress_file, progress)
+
+        # 下一批
+        remaining = [s for s in progress["universe"] if s not in progress["scanned"]]
+        if not remaining:
+            progress["completed"] = True
+            self._save_progress(progress_file, progress)
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        batch = remaining[:batch_size]
+        done = len(progress["scanned"])
+        total = progress["total"]
+
+        for sym in batch:
+            s = self._get_v3_score(sym)
+            if not s.get("error"):
+                progress["results"].append(s)
+            progress["scanned"].append(sym)
+
+        self._save_progress(progress_file, progress)
+
+        now_done = len(progress["scanned"])
+        if now_done >= total:
+            progress["completed"] = True
+            self._save_progress(progress_file, progress)
+            results = progress["results"]
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            self._rm_progress(progress_file)
+            return results[:top_n], "complete"
+
+        partial = sorted(progress["results"], key=lambda x: x.get("score", 0), reverse=True)
+        return partial[:top_n], f"partial:{now_done}/{total}"
+
+    def _load_progress(self, path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def _save_progress(self, path, data):
+        import tempfile
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, ensure_ascii=False, default=str)
+        os.replace(tmp, path)
+
+    def _rm_progress(self, path):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+    def _get_stock_name(self, symbol):
+        if symbol in self._cache:
+            return self._cache[symbol]
+        try:
+            from data.data_layer import get_stock_info
+            info = get_stock_info(symbol)
+            name = info.get("name", "")
+            if name and name != symbol:
+                self._cache[symbol] = name
+                return name
+        except Exception:
+            pass
+        return symbol
+
+    def _get_stock_sector(self, symbol):
+        try:
+            from investment_system.domain.stock_universe import LDS_SECTORS
+            for sec, stocks in LDS_SECTORS.items():
+                if symbol in stocks:
+                    return sec
+        except Exception:
+            pass
+        return "其他"
+
+
+# ═══════════════════════════════════════════════
 # CLI 入口
 # ═══════════════════════════════════════════════
 
