@@ -965,9 +965,18 @@ def api_v2_news():
         with open(cache_path) as f:
             cache_data = json.load(f)
             if cache_data and cache_data.get("categories"):
-                # 格式化为面板友好结构
                 categories = cache_data.get("categories", {})
                 summary = cache_data.get("summary", "")
+                ts = cache_data.get("timestamp", "")
+                # 计算数据新鲜度
+                days_stale = 999
+                try:
+                    from datetime import datetime as _dt
+                    data_dt = _dt.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S") if "T" in ts else _dt.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
+                    days_stale = (_dt.now() - data_dt).days
+                except Exception:
+                    pass
+                freshness = "fresh" if days_stale < 1 else ("stale" if days_stale < 3 else "expired")
                 items = []
                 for cat_name, cat_entries in categories.items():
                     if isinstance(cat_entries, list):
@@ -975,11 +984,12 @@ def api_v2_news():
                             items.append({"category": cat_name, "content": str(entry)[:200]})
                 return {
                     "total": cache_data.get("total", 0),
-                    "timestamp": cache_data.get("timestamp", ""),
+                    "timestamp": ts,
+                    "days_stale": days_stale,
+                    "freshness": freshness,
                     "summary": summary,
                     "items": items[:50],
                 }
-    # 回退
     fallback_path = ROOT / "data" / "news_score_offset.json"
     if fallback_path.exists():
         with open(fallback_path) as f:
@@ -995,6 +1005,88 @@ def api_v2_reports():
         with open(path) as f:
             return json.load(f)
     return []
+
+
+# ─── 风险分析 API ─────────────────────────────────
+
+
+@app.get("/api/risk")
+def api_risk():
+    """组合风险指标 — VaR/集中度/波动率"""
+    from datetime import datetime as _dt, timedelta as _td
+    import numpy as _np
+
+    # 读取策略状态
+    st_path = ROOT / "data" / "strategy_states.json"
+    if not st_path.exists():
+        return {"error": "no strategy data", "var_95": None, "concentration": {}, "volatility": None}
+
+    with open(st_path) as f:
+        states = json.load(f)
+
+    # 1. 从交易历史计算日收益率序列
+    daily_returns = {}
+    all_positions = {}
+    for sname, state in states.items():
+        for h in state.get("history", []):
+            pnl = h.get("pnl")
+            cost = h.get("cost")
+            if pnl is not None and cost:
+                ret = pnl / cost
+                date = h.get("date", "")[:10]
+                if date not in daily_returns:
+                    daily_returns[date] = []
+                daily_returns[date].append(ret)
+        for sym, pos in state.get("positions", {}).items():
+            if sym not in all_positions:
+                all_positions[sym] = {
+                    "entry_price": pos.get("entry_price", 0),
+                    "quantity": pos.get("quantity", 0),
+                    "current_price": pos.get("current_price", pos.get("entry_price", 0)),
+                    "strategy": sname,
+                }
+
+    # 2. 年化波动率 (从日频PnL率推算)
+    rets = []
+    for date, rlist in daily_returns.items():
+        if rlist:
+            rets.append(sum(rlist) / len(rlist))
+    vol = None
+    if len(rets) >= 5:
+        vol = round(float(_np.std(rets) * _np.sqrt(252) * 100), 2)
+
+    # 3. VaR(95%) 历史模拟法
+    var_95 = None
+    if len(rets) >= 20:
+        sorted_rets = sorted(rets)
+        idx = max(0, int(len(sorted_rets) * 0.05) - 1)
+        var_95 = round(float(sorted_rets[idx]) * 100, 2)
+
+    # 4. 集中度 — 标的维度
+    total_value = sum(
+        p["current_price"] * p["quantity"] for p in all_positions.values()
+    ) if all_positions else 1
+    concentration = {}
+    for sym, p in all_positions.items():
+        mkt_val = p["current_price"] * p["quantity"]
+        pct = round(mkt_val / total_value * 100, 1) if total_value > 0 else 0
+        name = get_name(sym)
+        concentration[sym] = {"name": name, "pct": pct, "value": round(mkt_val, 2)}
+
+    # 按占比降序
+    sorted_conc = sorted(concentration.items(), key=lambda x: x[1]["pct"], reverse=True)
+    top_conc = [{"symbol": s, **v} for s, v in sorted_conc[:5]]
+    max_conc = top_conc[0]["pct"] if top_conc else 0
+
+    return {
+        "volatility_annual_pct": vol,
+        "var_95_daily_pct": var_95,
+        "max_concentration_pct": max_conc,
+        "top_positions": top_conc,
+        "total_positions": len(all_positions),
+        "total_trades_history": sum(len(state.get("history", [])) for state in states.values()),
+        "updated_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
+    }
 
 
 UNIFIED_DASHBOARD_HTML = r"""<!DOCTYPE html>
@@ -1432,7 +1524,15 @@ async function loadNews() {
       el.innerHTML = '<div class="empty">暂无板块新闻数据 — 今日无显著新闻</div>';
       return;
     }
-    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:8px;">📡 ${data.summary || ''} · 更新: ${data.timestamp || ''}</div>`;
+    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:8px;">📡 ${data.summary || ''} · 更新: ${data.timestamp || ''}`;
+    // 数据新鲜度标记
+    if (data.freshness) {
+      const freshnessColors = {fresh:'var(--green)',stale:'var(--yellow)',expired:'var(--red)'};
+      const freshnessLabels = {fresh:'新鲜',stale:'超过3天',expired:'超过7天'};
+      const fc = freshnessColors[data.freshness] || 'var(--text2)';
+      html += ` <span class="badge" style="background:${fc}22;color:${fc};font-size:10px;margin-left:4px;">${data.days_stale}d ${freshnessLabels[data.freshness] || ''}</span>`;
+    }
+    html += `</div>`;
     if (data.items && data.items.length > 0) {
       const catColors = {'宏观政策':'var(--blue)','市场动态':'var(--green)','大宗商品':'var(--yellow)','产业趋势':'var(--purple)','综合':'var(--text2)','产业消息':'var(--orange)'};
       html += data.items.map(item => {
