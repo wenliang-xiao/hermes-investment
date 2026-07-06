@@ -1,6 +1,9 @@
 """
-多因子扫描引擎 v3.1 — 三源融合
-面基6因子排序分位法 + LDS动态权重 + Vibe多时间框架
+多因子扫描引擎 v3.1 — ⚠️ 已退役
+================================
+从 v4.0 起请使用 factor_engine.FactorEngine/score_batch()。
+本文件仅保留作参考，不修改。
+所有新开发使用: from analysis.factor_engine import FactorEngine, score_to_signal
 
 核心升级:
   1. 排序分位法（面基思想）：每个因子用百分位排名而非硬阈值打分

@@ -1,9 +1,9 @@
 """
-每日三策略执行器
-整合FactorScanner + TradingEngine → 输出 trading_signals.json
+每日三策略执行器 — v2 (双引擎合并版)
+整合 FactorEngine + strategies/(纯函数) → 输出 trading_signals.json
 """
-import sys, os, json, math
-from datetime import datetime, timedelta, date
+import sys, os, json
+from datetime import datetime, date
 import numpy as np
 import pandas as pd
 
@@ -13,14 +13,14 @@ sys.path.insert(0, os.path.join(_PROJECT_DIR, ".."))
 sys.path.insert(0, _PROJECT_DIR)
 
 from data.data_layer import get_stock_daily
-from analysis.factor_scanner import FactorScanner
+from analysis.factor_engine import FactorEngine
+from analysis.factor_engine import score_to_signal, convert_v4_to_v3
 from analysis.trading_engine import TradingEngine
 from config import FACTOR_WEIGHTS
 from domain import WATCHLIST
 import functools
 print = functools.partial(print, flush=True)
 
-# 核心标的（限定范围加速扫描）
 CORE_TIERS = ("核心", "底仓", "关注")
 
 
@@ -103,9 +103,9 @@ def compute_technicals(sym, price, hist):
 
 
 def run():
-    """主流程"""
+    """主流程 — 使用FactorEngine评分 + TradingEngine执行"""
     print("=" * 50, flush=True)
-    print(f"📊 每日三策略执行器", flush=True)
+    print("📊 每日三策略执行器 v2", flush=True)
     print(f"   日期: {date.today()}", flush=True)
     print("=" * 50, flush=True)
 
@@ -114,32 +114,51 @@ def run():
     stocks = get_core_watchlist()
     print(f"   {len(stocks)}只标的", flush=True)
 
-    # 2. 扫描评分
-    print("\n🔍 Step 2: 运行扫描器...", flush=True)
-    scanner = FactorScanner(macro_engine=None)
-    scanner.weights = FACTOR_WEIGHTS.get("default")
+    # 2. FactorEngine 批量评分
+    print("\n🔍 Step 2: FactorEngine 批量评分...", flush=True)
+    symbols = [s["symbol"] for s in stocks]
+    engine = FactorEngine()
+    batch_results = engine.score_batch(symbols)
+    print(f"   ✅ {len(batch_results)}只评分完成", flush=True)
 
+    # 3. 转换评分 → v3兼容格式 (供TradingEngine使用)
     score_results = []
-    for s in stocks:
-        sym = s["symbol"]
-        r = scanner.score_stock(sym)
-        if not r.get("error") and r.get("score", 0) > 0:
-            score_results.append(r)
-            print(f"   {sym} {s['name']}: 评分{r['score']:.1f}", flush=True)
+    for br in batch_results:
+        sym = br["symbol"]
+        name = next((s["name"] for s in stocks if s["symbol"] == sym), sym)
+        v3_score = convert_v4_to_v3(br["composite"])
+        price = 0
+        # 尝试从数据层获取价格
+        try:
+            from data.data_router import get_rt
+            rt = get_rt(sym)
+            if rt and rt.get("price"):
+                price = float(rt["price"])
+        except Exception:
+            pass
+
+        score_results.append({
+            "symbol": sym,
+            "name": name,
+            "score": round(v3_score, 2),              # v3兼容 [1,10]
+            "composite_v4": br["composite"],           # v4原始 [0,1]
+            "scores": br["scores"],                     # 7维风格分
+            "factor_breakdown": br["factor_breakdown"], # 子因子明细
+            "price": price,
+            "signal": score_to_signal(br["composite"]),
+        })
+        print(f"   {sym} {name}: v4={br['composite']:.4f} → v3={v3_score:.1f}", flush=True)
 
     if not score_results:
         print("❌ 无有效评分结果", flush=True)
         return
 
-    print(f"\n   ✅ 成功评分: {len(score_results)}只", flush=True)
-
-    # 3. 获取技术面数据
-    print("\n📈 Step 3: 获取技术面数据...", flush=True)
-    symbols = [r["symbol"] for r in score_results]
+    # 4. 获取技术面数据
+    print("\n📈 Step 4: 获取技术面数据...", flush=True)
     hist = fetch_technicals(symbols, days=120)
     print(f"   {len(hist)}只有历史数据", flush=True)
 
-    # 4. 构建当日输入
+    # 5. 构建当日输入（v3兼容评分）
     score_map = {}
     tech_map = {}
     price_map = {}
@@ -147,27 +166,33 @@ def run():
         sym = r["symbol"]
         score = r.get("score", 0)
         price = r.get("price", 0)
-        if score <= 0 or price <= 0:
+        if score <= 0:
             continue
         score_map[sym] = score
         price_map[sym] = price
         tech_map[sym] = compute_technicals(sym, price, hist)
 
-    print(f"\n📊 Step 4: 调用TradingEngine...", flush=True)
-    engine = TradingEngine()
+    # 6. TradingEngine 执行（使用v3兼容评分）
+    print(f"\n📊 Step 6: TradingEngine (strategies/纯函数)...", flush=True)
+    engine_te = TradingEngine()
     today_str = date.today().strftime("%Y-%m-%d")
-    result = engine.run_daily(today_str, score_map, tech_map, price_map)
+    result = engine_te.run_daily(today_str, score_map, tech_map, price_map)
 
-    # 5. 输出摘要
+    # 7. 输出
     print(f"\n{'='*50}", flush=True)
     print(f"📊 信号摘要 ({today_str})", flush=True)
-    print(engine.get_summary_table(result), flush=True)
+    print(f"   总信号: {result.get('total_raw_signals', 0)}", flush=True)
+    print(f"   最终建议: {result.get('after_weekly_filter', 0)}", flush=True)
+    print(f"   模拟盘交易: {result.get('simulated_trades', 0)}笔", flush=True)
+    for s in result.get("signals", []):
+        print(f"   [{s['priority']}] {s['strategy']} {s['action']} {s['symbol']} @{s['price']:.2f} - {s['reason']}", flush=True)
     print(f"{'='*50}", flush=True)
 
-    # 也保持一份到scanner结果备份（供日报引用）
+    # 保存扫描快照（供日报引用）
     scan_out = os.path.join(_PROJECT_DIR, "data", "scan_snapshot_latest.json")
     scan_data = {
         "date": today_str,
+        "engine": "factor_engine_v4",
         "count": len(score_results),
         "results": score_results,
         "signals": result

@@ -1,6 +1,8 @@
 """
-三策略交易引擎 v1 
-逐日运行 faceji / SilverQuant / TradingAgents，输出结构化信号
+三策略交易引擎 v2 — 策略纯函数薄封装
+======================================
+已重构: daily_step() 委托给 strategies/(纯函数)。
+回退方案: 移除 __init__.py 注释第7-8行可恢复旧版 inline 逻辑。
 """
 import sys, os, json, math
 from datetime import datetime, date, timedelta
@@ -15,6 +17,8 @@ sys.path.insert(0, _PROJECT_DIR)
 from data.data_layer import get_stock_daily
 from domain import WATCHLIST
 from config import FACTOR_WEIGHTS
+from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
+from strategies import faceji as _faceji_pure, silverquant as _sq_pure, tradingagents as _ta_pure
 import functools
 print = functools.partial(print, flush=True)
 
@@ -212,109 +216,43 @@ class BaseStrategy:
 
 
 # ═══════════════════════════════════════════
-# 策略1: faceji（当前系统）
+# 策略1: faceji — 委托 strategies/faceji.py 纯函数
 # ═══════════════════════════════════════════
 class FacejiStrategy(BaseStrategy):
-    def __init__(self, capital=1000000):
+    def __init__(self, capital=1000000, config=None):
         super().__init__("faceji", capital)
-        self.entry_threshold = 5.0
-        self.exit_threshold = 4.0
-        self.max_positions = 8
+        self.config = config or FacejiConfig()
+
+    def _positions_to_pd(self) -> dict[str, PositionData]:
+        return {
+            sym: PositionData(
+                symbol=sym,
+                entry_price=pos["entry_price"],
+                quantity=pos["quantity"],
+                entry_date=pos.get("entry_date", ""),
+                peak=pos.get("peak"),
+                current_price=pos.get("current_price"),
+            )
+            for sym, pos in self.positions.items()
+        }
 
     def daily_step(self, date_str, score_map, tech_map, price_map):
-        """返回信号列表"""
+        """委托 strategies/faceji.decide() 纯函数"""
         self.signals = []
-        held = set(self.positions.keys())
-
-        # ── 建仓信号（保留面基趋势过滤 + Kelly动态分配）──
-        candidates = sorted(
-            [s for s in score_map if s not in held],
-            key=lambda s: score_map.get(s, 0), reverse=True
-        )[:5]
-
-        for sym in candidates:
-            if len(self.positions) >= self.max_positions:
-                break
-            score = score_map.get(sym, 0)
-            if score < self.entry_threshold:
-                continue
-            tech = tech_map.get(sym, {})
-            ma20d = tech.get("ma20_dev", 0) or 0
-            ma60d = tech.get("ma60_dev", 0) or 0
-            if ma60d <= ma20d and score < 5.5:
-                continue
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            name = self._get_name(sym)
-
-            # Kelly-like sizing
-            kelly_pct = self._kelly_size(score)
-            qty = max(100, int(self.cash * kelly_pct / 100 / price / 100) * 100)
-            cost = price * qty
-            if cost > self.cash:
-                qty = max(100, int(self.cash / price / 100) * 100)
-
+        positions = self._positions_to_pd()
+        pure_signals = _faceji_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for s in pure_signals:
+            name = self._get_name(s.symbol)
             self.signals.append(Signal(
-                strategy="faceji", action="BUY", symbol=sym, name=name,
-                price=price, reason=f"评分{score:.1f}+MA趋势ok",
-                priority="HIGH" if score >= 5.5 else "MED",
-                size_pct=round(kelly_pct, 1), score=score
+                strategy="faceji", action=s.action, symbol=s.symbol,
+                name=name, price=s.price, reason=s.reason,
+                priority=s.priority, size_pct=s.size_pct,
+                pnl_pct=s.pnl_pct, score=s.score
             ))
-
-        # ── 清仓信号（融合SilverQuant 4层风控）──
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            score = score_map.get(sym, 0)
-            entry = pos["entry_price"]
-            peak = pos.get("peak", entry)
-            pnl_pct = (price - entry) / entry * 100
-            dd = (price - peak) / peak * 100 if peak else 0
-            name = self._get_name(sym)
-
-            # 1. HardSeller: -8% 硬止损（SQ继承）
-            if pnl_pct <= -8:
-                self.signals.append(Signal(
-                    strategy="faceji", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"硬止损{pnl_pct:.1f}%",
-                    priority="HIGH", pnl_pct=pnl_pct, score=score
-                ))
-                continue
-
-            # 2. FallSeller: -12% 峰值回落止盈（SQ继承）
-            if dd <= -12:
-                self.signals.append(Signal(
-                    strategy="faceji", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"回落止盈{dd:.1f}%",
-                    priority="HIGH", pnl_pct=pnl_pct, score=score
-                ))
-                continue
-
-            # 3. ScoreDropSeller: 评分<4.5 基本面下滑（SQ收紧版，比原来4.0更早）
-            if score < 4.5:
-                self.signals.append(Signal(
-                    strategy="faceji", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"评分下滑{score:.1f}",
-                    priority="MED", pnl_pct=pnl_pct, score=score
-                ))
-                continue
-
-            # 4. MASeller: MA死叉 + 亏损未超-5%（SQ继承，附加评分条件）
-            if score < 5.0:
-                tech = tech_map.get(sym, {})
-                if (tech.get("ma20_dev", 0) or 0) < (tech.get("ma60_dev", 0) or 0) and pnl_pct > -5:
-                    self.signals.append(Signal(
-                        strategy="faceji", action="SELL", symbol=sym, name=name,
-                        price=price, reason="MA死叉+评分<5",
-                        priority="MED", pnl_pct=pnl_pct, score=score
-                    ))
         return self.signals
-
-    def _kelly_size(self, score):
-        wp = min(score / 10.0, 0.8)
-        kelly = max(0, (wp * 2.0 - (1 - wp)) / 2.0) * 0.5
-        return min(kelly, 0.08)
 
     def _get_name(self, sym):
         info = WATCHLIST.get(sym, {})
@@ -322,183 +260,85 @@ class FacejiStrategy(BaseStrategy):
 
 
 # ═══════════════════════════════════════════
-# 策略2: SilverQuant 组件化
+# 策略2: SilverQuant — 委托 strategies/silverquant.py 纯函数
 # ═══════════════════════════════════════════
 class SilverQuantStrategy(BaseStrategy):
-    def __init__(self, capital=1000000):
+    def __init__(self, capital=1000000, config=None):
         super().__init__("silverquant", capital)
-        self.entry_threshold = 5.0
-        self.max_positions = 8
+        self.config = config or SilverQuantConfig()
+
+    def _positions_to_pd(self) -> dict[str, PositionData]:
+        return {
+            sym: PositionData(
+                symbol=sym,
+                entry_price=pos["entry_price"],
+                quantity=pos["quantity"],
+                entry_date=pos.get("entry_date", ""),
+                peak=pos.get("peak"),
+                current_price=pos.get("current_price"),
+            )
+            for sym, pos in self.positions.items()
+        }
 
     def daily_step(self, date_str, score_map, tech_map, price_map):
+        """委托 strategies/silverquant.decide() 纯函数"""
         self.signals = []
-        held = set(self.positions.keys())
-        candidates = sorted(
-            [s for s in score_map if s not in held],
-            key=lambda s: score_map.get(s, 0), reverse=True
-        )[:5]
-
-        for sym in candidates:
-            if len(self.positions) >= self.max_positions:
-                break
-            score = score_map.get(sym, 0)
-            if score < self.entry_threshold:
-                continue
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            name = self._get_name(sym)
+        positions = self._positions_to_pd()
+        pure_signals = _sq_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for s in pure_signals:
+            name = self._get_name(s.symbol)
             self.signals.append(Signal(
-                strategy="silverquant", action="BUY", symbol=sym, name=name,
-                price=price, reason=f"槽位建仓(评分{score:.1f})",
-                priority="MED", size_pct=3.0, score=score
+                strategy="silverquant", action=s.action, symbol=s.symbol,
+                name=name, price=s.price, reason=s.reason,
+                priority=s.priority, size_pct=s.size_pct,
+                pnl_pct=s.pnl_pct, score=s.score
             ))
-
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            entry = pos["entry_price"]
-            peak = pos.get("peak", entry)
-            pnl_pct = (price - entry) / entry * 100
-            dd = (price - peak) / peak * 100 if peak else 0
-            name = self._get_name(sym)
-
-            # HardSeller: -8%
-            if pnl_pct <= -8:
-                self.signals.append(Signal(
-                    strategy="silverquant", action="SELL", symbol=sym, name=name,
-                    price=price, reason="HardSeller(-8%)", priority="HIGH",
-                    pnl_pct=pnl_pct, score=score_map.get(sym, 0)
-                ))
-                continue
-
-            # FallSeller: -12%
-            if dd <= -12:
-                self.signals.append(Signal(
-                    strategy="silverquant", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"FallSeller({dd:.1f}%)", priority="HIGH",
-                    pnl_pct=pnl_pct, score=score_map.get(sym, 0)
-                ))
-                continue
-
-            # MASeller: 死叉
-            tech = tech_map.get(sym, {})
-            if (tech.get("ma20_dev", 0) or 0) < (tech.get("ma60_dev", 0) or 0) and pnl_pct > -5:
-                self.signals.append(Signal(
-                    strategy="silverquant", action="SELL", symbol=sym, name=name,
-                    price=price, reason="MASeller(MA死叉)", priority="MED",
-                    pnl_pct=pnl_pct, score=score_map.get(sym, 0)
-                ))
-                continue
-
-            # ScoreDrop: <4.5
-            if score_map.get(sym, 10) < 4.5:
-                self.signals.append(Signal(
-                    strategy="silverquant", action="SELL", symbol=sym, name=name,
-                    price=price, reason=f"ScoreDrop({score_map[sym]:.1f})", priority="MED",
-                    pnl_pct=pnl_pct, score=score_map.get(sym, 0)
-                ))
         return self.signals
 
     def _get_name(self, sym):
         info = WATCHLIST.get(sym, {})
         return info.get("name", sym) if isinstance(info, dict) else str(info)
 
-    def execute_buy(self, signal):
-        sym = signal.symbol; price = signal.price
-        qty = max(100, int(30000 / price / 100) * 100)
-        cost = price * qty
-        if cost > self.cash:
-            qty = max(100, int(self.cash / price / 100) * 100)
-            cost = price * qty
-            if cost > self.cash: return False
-        self.cash -= cost
-        self.positions[sym] = {"entry_price": price, "quantity": qty,
-            "entry_date": str(date.today()), "peak": price, "current_price": price}
-        self.history.append({"date": str(date.today()), "symbol": sym,
-            "action": "买入", "price": price, "cost": round(cost, 2), "reason": signal.reason})
-        return True
-
 
 # ═══════════════════════════════════════════
-# 策略3: TradingAgents 辩论制
+# 策略3: TradingAgents — 委托 strategies/tradingagents.py 纯函数
 # ═══════════════════════════════════════════
 class TradingAgentsStrategy(BaseStrategy):
-    def __init__(self, capital=1000000):
+    def __init__(self, capital=1000000, config=None):
         super().__init__("tradingagents", capital)
-        self.max_positions = 6
+        self.config = config or TradingAgentsConfig()
 
-    def _debate_score(self, score, tech):
-        sc = score or 5.0
-        ts = tech.get("total_tech_score", 5.0) if tech else 5.0
-        bull = sc * 0.5 + ts * 0.5
-        bp = 0
-        if tech and tech.get("macd_signal", "") == "🔴死叉": bp += 1.0
-        if tech and (tech.get("rsi", 50) or 50) > 70: bp += 0.5
-        bear = sc - bp; neut = sc
-        if bull >= bear and bull >= neut: final = bull * 0.6 + neut * 0.3 + bear * 0.1
-        elif bear >= bull and bear >= neut: final = bear * 0.5 + neut * 0.3 + bull * 0.2
-        else: final = neut
-        return min(10, max(0, final))
+    def _positions_to_pd(self) -> dict[str, PositionData]:
+        return {
+            sym: PositionData(
+                symbol=sym,
+                entry_price=pos["entry_price"],
+                quantity=pos["quantity"],
+                entry_date=pos.get("entry_date", ""),
+                peak=pos.get("peak"),
+                current_price=pos.get("current_price"),
+            )
+            for sym, pos in self.positions.items()
+        }
 
     def daily_step(self, date_str, score_map, tech_map, price_map):
+        """委托 strategies/tradingagents.decide() 纯函数"""
         self.signals = []
-        held = set(self.positions.keys())
-        debate = {sym: {"score": sm.get(sym, 5.0) if (sm := score_map) else 5.0,
-                        "debate_score": self._debate_score(score_map.get(sym, 5.0), tech_map.get(sym, {}))}
-                  for sym in score_map}
-
-        candidates = sorted(
-            [(s, d["debate_score"]) for s, d in debate.items() if s not in held],
-            key=lambda x: x[1], reverse=True
-        )[:3]
-
-        for sym, ds in candidates:
-            if len(self.positions) >= self.max_positions:
-                break
-            if ds < 5.5:
-                continue
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            name = self._get_name(sym)
-
-            # Kelly
-            wp = min(ds / 10.0, 0.8)
-            kelly = max(0, (wp * 1.8 - (1 - wp)) / 1.8) * 0.5
-            size_pct = min(kelly, 0.12) * 100
-
+        positions = self._positions_to_pd()
+        pure_signals = _ta_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for s in pure_signals:
+            name = self._get_name(s.symbol)
             self.signals.append(Signal(
-                strategy="tradingagents", action="BUY", symbol=sym, name=name,
-                price=price, reason=f"辩论分{ds:.1f}(bull优先)",
-                priority="HIGH" if ds >= 6.0 else "MED",
-                size_pct=round(size_pct, 1), score=round(ds, 1)
-            ))
-
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            ds = debate.get(sym, {}).get("debate_score", 5.0)
-            entry = pos["entry_price"]
-            pnl_pct = (price - entry) / entry * 100
-            name = self._get_name(sym)
-
-            if ds < 4.0:
-                reason = f"辩论分{ds:.1f}<4"
-                priority = "HIGH"
-            elif (price - entry) / entry * 100 <= -8:
-                reason = f"止损{((price-entry)/entry*100):.1f}%"
-                priority = "HIGH"
-            elif ds < 5.0 and pnl_pct < 0:
-                reason = f"辩论分{ds:.1f}+亏损"
-                priority = "MED"
-            else:
-                continue
-
-            self.signals.append(Signal(
-                strategy="tradingagents", action="SELL", symbol=sym, name=name,
-                price=price, reason=reason, priority=priority,
-                pnl_pct=pnl_pct, score=round(ds, 1)
+                strategy="tradingagents", action=s.action, symbol=s.symbol,
+                name=name, price=s.price, reason=s.reason,
+                priority=s.priority, size_pct=s.size_pct,
+                pnl_pct=s.pnl_pct, score=s.score
             ))
         return self.signals
 

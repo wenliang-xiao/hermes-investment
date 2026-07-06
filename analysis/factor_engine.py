@@ -46,6 +46,8 @@ SUB_FACTOR_DEFS = {
     "value:pe_percentile":   {"source": "derived",    "method": "pe_hist_pct",     "higher_is_better": False, "label": "PE历史分位"},
     "value:pb":              {"source": "daily_row",  "field": "pb",               "higher_is_better": False, "label": "PB"},
     "value:pe_ttm":          {"source": "daily_row",  "field": "pe",               "higher_is_better": False, "label": "PE-TTM"},
+    # ── 股息因子（从 v3.1 factor_scanner 移植） ──
+    "dividend:yield":        {"source": "fin_report", "field": "股息率",           "higher_is_better": True,  "label": "股息率"},
     # ── 成长因子 ──
     "growth:rev_ttm":        {"source": "fin_report", "field": "营业收入同比增长率",   "higher_is_better": True, "label": "营收增速"},
     "growth:profit_ttm":     {"source": "fin_report", "field": "净利润同比增长率",     "higher_is_better": True, "label": "净利增速"},
@@ -79,17 +81,56 @@ STYLE_FACTORS = {
                   "label": "低波", "default_weight": 0.12},
     "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover"],
                   "label": "情绪/资金", "default_weight": 0.10},
-    "risk":      {"subs": ["risk:pe_excessive", "risk:volatility"],
-                  "label": "风险", "default_weight": 0.13},
+    "dividend":   {"subs": ["dividend:yield"],
+                   "label": "股息", "default_weight": 0.07},
+    "risk":       {"subs": ["risk:pe_excessive", "risk:volatility"],
+                   "label": "风险", "default_weight": 0.12},
 }
 
 # 宏观状态到风格因子的条件权重调整因子（乘数）
 MACRO_WEIGHT_ADJUST = {
-    "复苏期":  {"quality": 1.3, "value": 1.2, "growth": 1.1, "momentum": 0.8, "low_vol": 0.7, "sentiment": 0.9, "risk": 1.0},
-    "扩张期":  {"quality": 0.8, "value": 0.7, "growth": 1.4, "momentum": 1.5, "low_vol": 0.6, "sentiment": 1.2, "risk": 0.8},
-    "过热期":  {"quality": 1.1, "value": 1.3, "growth": 0.7, "momentum": 0.7, "low_vol": 1.2, "sentiment": 0.8, "risk": 1.3},
-    "衰退期":  {"quality": 1.4, "value": 0.7, "growth": 0.5, "momentum": 0.5, "low_vol": 1.5, "sentiment": 0.6, "risk": 1.4},
+    "复苏期":  {"quality": 1.3, "value": 1.2, "growth": 1.1, "momentum": 0.8, "low_vol": 0.7, "sentiment": 0.9, "risk": 1.0, "dividend": 1.4},
+    "扩张期":  {"quality": 0.8, "value": 0.7, "growth": 1.4, "momentum": 1.5, "low_vol": 0.6, "sentiment": 1.2, "risk": 0.8, "dividend": 0.6},
+    "过热期":  {"quality": 1.1, "value": 1.3, "growth": 0.7, "momentum": 0.7, "low_vol": 1.2, "sentiment": 0.8, "risk": 1.3, "dividend": 1.2},
+    "衰退期":  {"quality": 1.4, "value": 0.7, "growth": 0.5, "momentum": 0.5, "low_vol": 1.5, "sentiment": 0.6, "risk": 1.4, "dividend": 1.5},
 }
+
+
+# ═══════════════════════════════════════════════
+# 兼容辅助函数（从 v3.1 factor_scanner 移植）
+# ═══════════════════════════════════════════════
+
+def score_to_signal(composite: float, threshold_buy: float = 0.48,
+                    threshold_sell: float = 0.35) -> tuple[str, str]:
+    """将综合分 [0,1] 映射为信号标签 + 信号名称。
+
+    Args:
+        composite: 综合分 (factor_engine 输出 [0,1])
+        threshold_buy: 买入阈值 (默认 0.48 ≈ v3.1 的 5.0 分)
+        threshold_sell: 卖出阈值 (默认 0.35 ≈ v3.1 的 4.0 分)
+    Returns:
+        (signal_name, signal_label)
+    """
+    if composite >= threshold_buy + 0.15:
+        return ("STRONGBUY", "🟢强买入")
+    elif composite >= threshold_buy:
+        return ("BUY", "🟢买入")
+    elif composite >= threshold_sell:
+        return ("HOLD", "⚪持有")
+    elif composite >= threshold_sell - 0.10:
+        return ("SELL", "🔴卖出")
+    else:
+        return ("STRONGSELL", "🔴强卖出")
+
+
+def convert_v3_to_v4(score_v3: float) -> float:
+    """将 v3.1 (1-10) 评分映射到 v4.0 [0,1] 综合分。"""
+    return max(0.0, min(1.0, (score_v3 - 1.0) / 9.0))
+
+
+def convert_v4_to_v3(composite: float) -> float:
+    """将 v4.0 [0,1] 综合分映射回 v3.1 (1-10) 风格评分。"""
+    return 1.0 + 9.0 * max(0.0, min(1.0, composite))
 
 
 # ═══════════════════════════════════════════════
@@ -661,6 +702,7 @@ class FactorEngine:
             "value:pe_percentile":   (0, 100),
             "value:pb":              (0.5, 5),
             "value:pe_ttm":          (5, 40),
+            "dividend:yield":        (0, 5),
             "growth:rev_ttm":        (-20, 60),
             "growth:profit_ttm":     (-30, 80),
             "growth:roe_trend":      (-10, 10),
