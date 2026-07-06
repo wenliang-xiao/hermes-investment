@@ -14,3 +14,10 @@ data/cache/
 data/eval_cache/
 data/hl_runs/
 .agents/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

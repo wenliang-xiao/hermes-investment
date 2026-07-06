@@ -5,11 +5,11 @@ import subprocess, json, os, sys, time
 
 FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
 WORK_DIR = "/home/admin/.hermes"
-APP_ID = "cli_aa8445bca6f81bb7"
 
-# Get secret from credentials.json
+# Read credentials from central store (not hardcoded)
 with open("/home/admin/.feishu-user-plugin/credentials.json") as f:
     creds = json.load(f)
+APP_ID = creds["profiles"]["default"]["LARK_APP_ID"]
 APP_SECRET = creds["profiles"]["default"]["LARK_APP_SECRET"]
 
 FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"

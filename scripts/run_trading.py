@@ -18,6 +18,7 @@ from analysis.factor_engine import score_to_signal, convert_v4_to_v3
 from analysis.trading_engine import TradingEngine
 from config import FACTOR_WEIGHTS
 from domain import WATCHLIST
+from utils.atomic_io import atomic_write_json
 import functools
 print = functools.partial(print, flush=True)
 
@@ -197,8 +198,7 @@ def run():
         "results": score_results,
         "signals": result
     }
-    with open(scan_out, "w") as f:
-        json.dump(scan_data, f, ensure_ascii=False, indent=2, default=str)
+    atomic_write_json(scan_out, scan_data)
     print(f"\n💾 扫描+信号已保存: {scan_out}", flush=True)
 
     return result
@@ -206,3 +206,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

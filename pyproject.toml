@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "hermes-investment-system"
+version = "3.0.0"
+description = "面基三源融合投资系统 — 量化+价投双修, 多因子引擎+三策略模拟盘+日报管线"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "fastapi>=0.100",
+    "uvicorn>=0.22",
+    "pydantic>=2.0",
+    "baostock",
+    "akshare",
+    "yfinance",
+    "requests",
+    "httpx",
+    "tqdm",
+    "rich",
+    "matplotlib",
+    "python-dotenv",
+]
+
+[tool.setuptools.packages.find]
+include = ["investment_system*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "S", "BLE"]
+ignore = [
+    "E501",   # line too long — 120 is fine, ruff default is 88
+    "E402",   # module-import-not-at-top — needed for sys.path hack
+    "S104",   # bind to 0.0.0.0 — intentional for server
+    "S101",   # assert allowed in tests
+    "N802",   # function name lower-case — some legacy
+    "N803",   # argument name lower-case
+    "N806",   # variable name in function
+    "UP038",  # isinstance(Int) not needed
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*", "Test*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "-p", "no:warnings",
+    "--timeout=10",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["investment_system"]
+omit = ["tests/*", "output/*", "backup*"]

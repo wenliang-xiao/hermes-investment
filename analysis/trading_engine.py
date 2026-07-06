@@ -19,6 +19,7 @@ from domain import WATCHLIST
 from config import FACTOR_WEIGHTS
 from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
 from strategies import faceji as _faceji_pure, silverquant as _sq_pure, tradingagents as _ta_pure
+from utils.atomic_io import atomic_write_json
 import functools
 print = functools.partial(print, flush=True)
 
@@ -80,8 +81,7 @@ class TradeCalendar:
 
     def _save(self):
         os.makedirs(os.path.dirname(self.trade_log_path), exist_ok=True)
-        with open(self.trade_log_path, "w") as f:
-            json.dump(self.log, f, ensure_ascii=False, indent=2)
+        atomic_write_json(self.trade_log_path, self.log)
 
     def current_week(self):
         return date.today().isocalendar()[1]
@@ -381,8 +381,7 @@ class TradingEngine:
     def _save_states(self):
         """保存策略状态"""
         states = {name: s.save_state() for name, s in self.strategies.items()}
-        with open(self.state_path, "w") as f:
-            json.dump(states, f, ensure_ascii=False, indent=2)
+        atomic_write_json(self.state_path, states)
 
     def _check_black_swan(self):
         """检查是否黑天鹅（简单实现：依赖宏观看跌信号）"""
@@ -529,8 +528,7 @@ class TradingEngine:
 
         if save:
             out_path = os.path.join(_PROJECT_DIR, "data", "trading_signals.json")
-            with open(out_path, "w") as f:
-                json.dump(output, f, ensure_ascii=False, indent=2, default=str)
+            atomic_write_json(out_path, output)
             self._save_states()
             print(f"\n  💾 信号+模拟盘已保存: {out_path}", flush=True)
 

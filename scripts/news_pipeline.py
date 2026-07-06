@@ -15,6 +15,7 @@ _PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, _PROJECT_DIR)
 
 import functools
+from utils.atomic_io import atomic_write_json
 print = functools.partial(print, flush=True)
 
 from domain import WATCHLIST
@@ -245,14 +246,13 @@ def run(mode="full"):
     print(f"   {total}条事件 · {syms_with_events}只有事件")
 
     news_path = os.path.join(DATA_DIR, "news_events.json")
-    with open(news_path, "w") as f:
-        json.dump({
+    atomic_write_json(news_path, {
             "date": str(date.today()),
             "time": datetime.now().strftime("%H:%M"),
             "total_events": total,
             "symbols_with_events": syms_with_events,
             "events": {k: v[:5] for k, v in events.items()}  # 每只最多5条
-        }, f, ensure_ascii=False, indent=2)
+        })
     print(f"   💾 已保存: {news_path}")
 
     if mode == "quick":
@@ -274,8 +274,7 @@ def run(mode="full"):
     try:
         offset = compute_news_scoring_offset(events)
         offset_path = os.path.join(DATA_DIR, "news_score_offset.json")
-        with open(offset_path, "w") as f:
-            json.dump(offset, f, ensure_ascii=False, indent=2)
+        atomic_write_json(offset_path, offset)
         total_offset = sum(abs(v["offset"]) for v in offset.values())
         print(f"   {len(offset)} 只有偏移, 总偏移量{total_offset:.1f}")
     except Exception as e:
