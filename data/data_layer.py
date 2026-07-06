@@ -273,7 +273,7 @@ def _get_financial_em(symbol: str) -> dict:
             val = row.get(em_key)
             if val is not None and val != '':
                 try:
-                    result[bs_key] = abs(float(val))  # EM 已返回百分比(4.37=4.37%)，直接使用
+                    result[bs_key] = float(val)  # EM 已返回百分比(4.37=4.37%)，直接使用
                 except (ValueError, TypeError):
                     pass
 
@@ -328,7 +328,7 @@ def get_financial_report(symbol: str) -> dict:
                             if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
                                 v = float(r[idx])
                                 if not np.isnan(v) and key not in result:
-                                    result[key] = abs(v) * 100
+                                    result[key] = v * 100
                         except:
                             pass
                 if result:
@@ -355,15 +355,15 @@ def get_financial_report(symbol: str) -> dict:
                                 if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
                                     v = float(r[idx])
                                     if not np.isnan(v) and key not in result:
-                                        result[key] = abs(v) * 100
+                                        result[key] = v * 100
                             except:
                                 pass
-                        # 每股经营现金流绝对值不乘100
+                        # 每股经营现金流不乘100
                         try:
                             if len(r) > 7 and r[7] and str(r[7]).strip() != "":
                                 ocps = float(r[7])
                                 if not np.isnan(ocps) and "每股经营现金流" not in result:
-                                    result["每股经营现金流"] = abs(ocps)
+                                    result["每股经营现金流"] = ocps
                         except:
                             pass
                     break

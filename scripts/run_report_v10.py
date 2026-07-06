@@ -19,19 +19,19 @@ print = functools.partial(print, flush=True)
 # --- Feishu 配置 ---
 FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
 WORK_DIR = "/home/admin/.hermes"
-FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"
-USER_OPENID = "ou_e03d56632de9b44263adfc018f9d6e4d"
-APP_ID = "cli_aa8445bca6f81bb7"
+FOLDER_TOKEN = os.environ.get("FEISHU_FOLDER_TOKEN", "")
+USER_OPENID = os.environ.get("FEISHU_USER_OPENID", "")
+APP_ID = os.environ.get("FEISHU_APP_ID", "")
 
-with open("/home/admin/.feishu-user-plugin/credentials.json") as f:
-    creds = json.load(f)
-APP_SECRET = creds["profiles"]["default"]["LARK_APP_SECRET"]
+APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 
 def feishu_call(tool, payload):
     d = json.dumps(payload, ensure_ascii=False)
+    env = os.environ.copy()
+    env["FEISHU_SCOPE_VALIDATION"] = "false"
     r = subprocess.run(
-        ["bash", "-c", f"cd {WORK_DIR} && FEISHU_SCOPE_VALIDATION=false {FEISHU_TOOL} {tool} '{d}'"],
-        capture_output=True, text=True, timeout=30
+        [FEISHU_TOOL, tool, d],
+        capture_output=True, text=True, timeout=30, cwd=WORK_DIR, env=env
     )
     try: return json.loads(r.stdout)
     except: return {}

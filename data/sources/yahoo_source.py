@@ -61,6 +61,7 @@ def get_rt_yahoo(symbol: str):
         prev_close = info.get("previousClose", price)
         change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
         volume = info.get("volume") or info.get("regularMarketVolume", 0)
+        pe = info.get("trailingPE") or info.get("forwardPE") or info.get("peRatio")
 
         return {
             "symbol": symbol,
@@ -68,6 +69,7 @@ def get_rt_yahoo(symbol: str):
             "price": price,
             "change_pct": round(change_pct, 2),
             "volume": volume,
+            "pe": pe,
             "source": "yfinance",
         }
     except Exception:

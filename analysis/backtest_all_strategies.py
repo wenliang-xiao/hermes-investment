@@ -536,8 +536,9 @@ def build_daily_snapshots(results, hist_data, lookback=60):
                 prev_ema12 = pd.Series(close_series[:-1]).ewm(span=12).mean().iloc[-1] if len(close_series) > 26 else ema12
                 prev_ema26 = pd.Series(close_series[:-1]).ewm(span=26).mean().iloc[-1] if len(close_series) > 26 else ema26
                 prev_macd = prev_ema12 - prev_ema26
-                tech["macd_signal"] = "🟢金叉" if macd_line > signal and prev_macd <= prev_ema12 - prev_ema26 else \
-                                       "🔴死叉" if macd_line < signal else "⚪"
+                prev_signal = pd.Series(close_series[:-1]).ewm(span=9).mean().iloc[-1] if len(close_series) > 26 else signal
+                tech["macd_signal"] = "🟢金叉" if macd_line > signal and prev_macd <= prev_signal else \
+                                       "🔴死叉" if macd_line < signal and prev_macd >= prev_signal else "⚪"
                 tech["total_tech_score"] = 5.0 + (
                     1.0 if tech.get("rsi", 50) and 30 < tech["rsi"] < 70 else 0
                 ) + (1.5 if tech.get("macd_signal") == "🟢金叉" else 0)

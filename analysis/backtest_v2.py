@@ -290,7 +290,8 @@ def build_daily_snapshots(hist, lookback=60):
                 pe12 = pd.Series(close_arr[:-1]).ewm(span=12).mean().iloc[-1] if len(close_arr)>26 else e12
                 pe26 = pd.Series(close_arr[:-1]).ewm(span=26).mean().iloc[-1] if len(close_arr)>26 else e26
                 pmacd = pe12 - pe26
-                te["macd_signal"] = "🟢金叉" if macd > sig and pmacd <= pe12-pe26 else ("🔴死叉" if macd < sig else "⚪")
+                psig = pd.Series(close_arr[:-1]).ewm(span=9).mean().iloc[-1] if len(close_arr) > 26 else sig
+                te["macd_signal"] = "🟢金叉" if macd > sig and pmacd <= psig else ("🔴死叉" if macd < sig and pmacd >= psig else "⚪")
                 te["total_tech_score"] = 5.0 + (1.0 if 30 < te["rsi"] < 70 else 0) + (1.5 if te["macd_signal"]=="🟢金叉" else 0)
             else:
                 te["macd_signal"] = "⚪"; te["total_tech_score"] = 5.0

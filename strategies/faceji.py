@@ -59,7 +59,7 @@ def decide(
         tech = tech_map.get(sym, {})
         ma20d = tech.get("ma20_dev", 0) or 0
         ma60d = tech.get("ma60_dev", 0) or 0
-        if ma60d <= ma20d and score < cfg.ma_trend_boost_threshold:
+        if ma60d >= ma20d and score < cfg.ma_trend_boost_threshold:
             continue
         price = price_map.get(sym, 0)
         if price <= 0:

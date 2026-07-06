@@ -13,13 +13,13 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # 注册：tushare.pro → 个人中心 → 接口TOKEN
 # 120积分（注册即送）可用大部分接口；2000积分解锁北向资金历史
 # 也可通过环境变量 TUSHARE_TOKEN 设置（优先）
-TUSHARE_TOKEN = "a123a8e0b24ac30890b65c6e83a8211a7309647066fd786b541873b3"
+TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
 
 # ─── 飞书 ───
 FEISHU_TOOL = "/home/admin/.hermes/node_modules/.bin/feishu-tool"
-FEISHU_FOLDER_TOKEN = "QhIOfB63Sl6Kqmd81fycjR6jnDd"
-FEISHU_USER_OPENID = "ou_e03d56632de9b44263adfc018f9d6e4d"
-FEISHU_GROUP_CHAT = "oc_4c9d6445fab7f3a2ada0c410f3aa7043"
+FEISHU_FOLDER_TOKEN = os.environ.get("FEISHU_FOLDER_TOKEN", "")
+FEISHU_USER_OPENID = os.environ.get("FEISHU_USER_OPENID", "")
+FEISHU_GROUP_CHAT = os.environ.get("FEISHU_GROUP_CHAT", "")
 
 # ─── 宏观四象限判定阈值（面基框架）───
 MACRO_THRESHOLDS = {

@@ -634,7 +634,14 @@ class TradingEngine:
             strategy_sigs = [s for s in all_signals if s.strategy == name]
             for sig in strategy_sigs:
                 if sig.action == "BUY":
+                    # 周频检查: BUY信号受每周交易次数限制
+                    ok, msg = self.calendar.can_trade(sig.strategy, sig.symbol)
+                    if not ok:
+                        print(f"  📋 模拟盘跳过(周频限制): [{sig.strategy}] BUY {sig.symbol} - {msg}", flush=True)
+                        continue
                     ok = strategy.execute_buy(sig)
+                    if ok:
+                        self.calendar.record_trade(sig.strategy, sig.to_dict())
                 elif sig.action == "SELL":
                     ok = strategy.execute_sell(sig)
                 else:

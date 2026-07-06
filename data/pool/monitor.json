@@ -14,6 +14,20 @@
     "date_added": "2026-07-02"
   },
   {
+    "symbol": "GOOGL",
+    "score": 0.6027,
+    "scores": {
+      "quality": 0.48,
+      "value": 0.4667,
+      "growth": 0.6556,
+      "momentum": 0.7333,
+      "low_vol": 0.5,
+      "sentiment": 0.7,
+      "risk": 0.6833
+    },
+    "date_added": "2026-07-02"
+  },
+  {
     "symbol": "600030",
     "score": 0.5985,
     "scores": {
@@ -28,6 +42,20 @@
     "date_added": "2026-07-02"
   },
   {
+    "symbol": "AAPL",
+    "score": 0.5951,
+    "scores": {
+      "quality": 0.4267,
+      "value": 0.3778,
+      "growth": 0.6111,
+      "momentum": 0.6,
+      "low_vol": 0.5,
+      "sentiment": 0.9,
+      "risk": 0.75
+    },
+    "date_added": "2026-07-02"
+  },
+  {
     "symbol": "603259",
     "score": 0.5838,
     "scores": {
@@ -38,6 +66,20 @@
       "low_vol": 0.3448,
       "sentiment": 0.7414,
       "risk": 0.5006
+    },
+    "date_added": "2026-07-02"
+  },
+  {
+    "symbol": "AMZN",
+    "score": 0.5751,
+    "scores": {
+      "quality": 0.4533,
+      "value": 0.4222,
+      "growth": 0.5667,
+      "momentum": 0.5333,
+      "low_vol": 0.5333,
+      "sentiment": 0.8,
+      "risk": 0.7167
     },
     "date_added": "2026-07-02"
   },
@@ -66,6 +108,34 @@
       "low_vol": 0.5172,
       "sentiment": 0.6207,
       "risk": 0.7708
+    },
+    "date_added": "2026-07-02"
+  },
+  {
+    "symbol": "MSFT",
+    "score": 0.5513,
+    "scores": {
+      "quality": 0.52,
+      "value": 0.5333,
+      "growth": 0.4333,
+      "momentum": 0.2889,
+      "low_vol": 0.6667,
+      "sentiment": 0.7667,
+      "risk": 0.65
+    },
+    "date_added": "2026-07-02"
+  },
+  {
+    "symbol": "MU",
+    "score": 0.5509,
+    "scores": {
+      "quality": 0.5067,
+      "value": 0.5111,
+      "growth": 0.8111,
+      "momentum": 0.8444,
+      "low_vol": 0.2333,
+      "sentiment": 0.7,
+      "risk": 0.25
     },
     "date_added": "2026-07-02"
   }

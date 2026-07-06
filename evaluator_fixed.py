@@ -253,9 +253,10 @@ def compute_technicals(
         pe12 = float(pd.Series(close_arr[:-1]).ewm(span=12).mean().iloc[-1]) if n > 26 else e12
         pe26 = float(pd.Series(close_arr[:-1]).ewm(span=26).mean().iloc[-1]) if n > 26 else e26
         pmacd = pe12 - pe26
-        if macd > sig and pmacd <= (pe12 - pe26):
+        psig = float(pd.Series(close_arr[:-1]).ewm(span=9).mean().iloc[-1]) if n > 26 else sig
+        if macd > sig and pmacd <= psig:
             te["macd_signal"] = "金叉"
-        elif macd < sig:
+        elif macd < sig and pmacd >= psig:
             te["macd_signal"] = "死叉"
         else:
             te["macd_signal"] = "⚪"
