@@ -809,8 +809,9 @@ class FactorEngine:
             })
 
         results.sort(key=lambda x: x["composite"], reverse=True)
-        logger.info(f"[factor_engine] batch done: top={results[0]['symbol']} "
-                     f"score={results[0]['composite']}")
+        if results:
+            logger.info(f"[factor_engine] batch done: top={results[0]['symbol']} "
+                         f"score={results[0]['composite']}")
         return results
 
     def clear_cache(self):
