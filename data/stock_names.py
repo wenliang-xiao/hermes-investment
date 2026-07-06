@@ -1,8 +1,6 @@
-"""
-面基·A股名称映射表
-用于 Dashboard 持仓显示
-"""
+"""面基·名称映射表 — A股 + 港股 + 美股 + ETF 中文名"""
 STOCK_NAMES = {
+    # A股核心
     "300502": "新易盛", "688041": "海光信息", "688008": "澜起科技",
     "002371": "北方华创", "603259": "药明康德", "688256": "寒武纪",
     "600519": "贵州茅台", "000858": "五粮液", "300750": "宁德时代",
@@ -13,17 +11,25 @@ STOCK_NAMES = {
     "688012": "中微公司", "300274": "阳光电源", "601012": "隆基绿能",
     "300014": "亿纬锂能", "002460": "赣锋锂业", "300059": "东方财富",
     "002230": "科大讯飞", "002129": "中环股份", "300136": "信维通信",
-    "NVDA": "NVIDIA", "AMD": "AMD", "MU": "美光", "TSM": "台积电",
-    "VST": "Vistra", "CEG": "Constellation", "GEV": "GE Vernova",
+    # 美股
+    "NVDA": "英伟达", "AMD": "AMD", "MU": "美光", "TSM": "台积电",
+    "VST": "Vistra", "CEG": "Constellation",
+    "AMZN": "亚马逊", "AAPL": "苹果", "AVGO": "博通", "LLY": "礼来",
+    "JPM": "摩根大通", "XOM": "埃克森美孚", "COST": "好市多",
+    "MSFT": "微软", "META": "Meta", "GOOGL": "谷歌", "BABA": "阿里巴巴",
+    "ANET": "Arista网络", "COHR": "Coherent",
+    # 港股
     "0700.HK": "腾讯控股", "9988.HK": "阿里巴巴", "9618.HK": "京东",
-    "BABA": "阿里巴巴", "MSFT": "微软", "META": "Meta", "GOOGL": "谷歌",
+    # ETF
+    "GDX": "黄金矿场ETF", "GLD": "黄金ETF", "SLV": "白银ETF",
+    "IEF": "7-10年国债ETF", "TLT": "20+年国债ETF", "TIP": "抗通胀国债ETF",
+    "XLP": "必需消费ETF", "XLU": "公用事业ETF",
 }
 
-def get_name(code: str) -> str:
-    return STOCK_NAMES.get(code, code)
-
-# ETF names
 ETF_NAMES = {
     "510300": "沪深300ETF", "511010": "国债ETF", "512480": "半导体ETF",
     "518880": "黄金ETF", "513100": "纳指ETF", "159985": "豆粕ETF",
 }
+
+def get_name(code: str) -> str:
+    return STOCK_NAMES.get(code, code)

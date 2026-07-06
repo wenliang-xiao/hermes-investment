@@ -3,6 +3,7 @@ scripts/realtime_price.py — 实时行情服务
 
 从 data_router 获取全持仓实时行情。
 支持东财(A股) + yfinance(港美股) + AKShare(期货) 多源聚合。
+每个请求带 5s 超时，不阻塞 Dashboard。
 
 用法:
     from scripts.realtime_price import get_all_realtime
@@ -12,10 +13,16 @@ scripts/realtime_price.py — 实时行情服务
 """
 from __future__ import annotations
 
-import json, sys, time
+import json, sys, time, socket
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+try:
+    from data.data_router import get_rt
+except Exception:
+    get_rt = None
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -94,15 +101,16 @@ def get_all_realtime(
 
     if not symbols:
         return {}
-
-    sys.path.insert(0, str(ROOT.parent))
-    from data.data_router import get_rt
+    if not get_rt:  # 数据源不可用时直接返回
+        return {}
 
     result = {}
     for item in symbols:
         sym = item["symbol"]
         try:
-            rt = get_rt(sym)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(get_rt, sym)
+                rt = fut.result(timeout=6)
             if rt:
                 result[sym] = {
                     "symbol": sym,

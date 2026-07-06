@@ -183,6 +183,16 @@ def build_chart_data(book):
 @app.get("/api/portfolio")
 def api_portfolio():
     book = load_shadow()
+    
+    # shadow_account 为空时，从三策略模拟盘聚合真实数据
+    if not book.get("positions") and book.get("cash", 0) >= 1000000:
+        try:
+            aggr = _aggregate_strategy_portfolios()
+            if aggr:
+                book = aggr
+        except Exception:
+            pass
+    
     summary = build_summary(book)
     chart = build_chart_data(book)
     history = build_history(book)
@@ -192,6 +202,55 @@ def api_portfolio():
         "history": history[:100],
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "history_count": len(book.get("history", [])),
+    }
+
+
+def _aggregate_strategy_portfolios() -> dict | None:
+    """从策略状态文件聚合真实持仓和交易历史"""
+    st_path = ROOT / "data" / "strategy_states.json"
+    if not st_path.exists():
+        return None
+    with open(st_path) as f:
+        states = json.load(f)
+    
+    total_cash = 0
+    all_positions = {}
+    all_history = []
+    
+    for sname, state in states.items():
+        total_cash += state.get("cash", 0)
+        for h in state.get("history", []):
+            entry = {
+                "time": h.get("date", ""),
+                "symbol": h.get("symbol", ""),
+                "action": "买入" if h.get("action") == "买入" else "卖出",
+                "price": h.get("price", 0),
+                "quantity": h.get("quantity", 0),
+                "cost": h.get("cost", 0),
+                "pnl": h.get("pnl"),
+                "reason": h.get("reason", ""),
+                "strategy": sname,
+            }
+            all_history.append(entry)
+        for sym, pos in state.get("positions", {}).items():
+            if sym not in all_positions:
+                all_positions[sym] = {
+                    "symbol": sym,
+                    "entry_price": pos.get("entry_price", 0),
+                    "quantity": pos.get("quantity", 0),
+                    "entry_date": pos.get("entry_date", ""),
+                    "current_price": pos.get("current_price", pos.get("entry_price", 0)),
+                    "name": get_name(sym),
+                }
+    
+    total_invested = sum(p["entry_price"] * p["quantity"] for p in all_positions.values())
+    return {
+        "capital": total_cash + total_invested,
+        "cash": total_cash,
+        "positions": all_positions,
+        "history": sorted(all_history, key=lambda x: x.get("time", ""), reverse=True),
+        "created_at": "2026-06-24",
+        "realized_pnl": sum(h.get("pnl", 0) for h in all_history if h.get("pnl")),
     }
 
 
