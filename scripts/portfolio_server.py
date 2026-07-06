@@ -1010,6 +1010,24 @@ def api_v2_reports():
 # ─── 风险分析 API ─────────────────────────────────
 
 
+@app.get("/api/v2/backtest")
+def api_v2_backtest():
+    """回测历史列表"""
+    from analysis.backtest_storage import list_results
+    results = list_results()
+    return {"count": len(results), "results": results}
+
+
+@app.get("/api/v2/backtest/{run_id}")
+def api_v2_backtest_detail(run_id: str):
+    """回测详情"""
+    from analysis.backtest_storage import load_result
+    result = load_result(run_id)
+    if result is None:
+        return {"error": f"run_id '{run_id}' not found"}
+    return result
+
+
 @app.get("/api/risk")
 def api_risk():
     """组合风险指标 — VaR/集中度/波动率"""
