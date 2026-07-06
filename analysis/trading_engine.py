@@ -183,6 +183,9 @@ class BaseStrategy:
         """通用买入执行（各策略可覆盖）"""
         sym = signal.symbol
         price = signal.price
+        if not price or price <= 0:
+            print(f"  ⚠️ 跳过 buy({sym}): price={price} 无效", flush=True)
+            return False
         pct = signal.size_pct or 3.0
         qty = max(100, int(self.cash * pct / 100 / price / 100) * 100)
         cost = price * qty
@@ -203,6 +206,9 @@ class BaseStrategy:
         """通用卖出执行（各策略可覆盖）"""
         sym = signal.symbol
         if sym not in self.positions:
+            return False
+        if not signal.price or signal.price <= 0:
+            print(f"  ⚠️ 跳过 sell({sym}): price={signal.price} 无效", flush=True)
             return False
         pos = self.positions[sym]
         price = signal.price

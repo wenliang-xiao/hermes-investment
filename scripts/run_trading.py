@@ -124,6 +124,22 @@ def run():
 
     # 3. 转换评分 → v3兼容格式 (供TradingEngine使用)
     score_results = []
+
+    # 预加载已有持仓的最后价格作为降级用
+    st_path = os.path.join(_PROJECT_DIR, "data", "strategy_states.json")
+    fallback_prices = {}
+    try:
+        import json as _json
+        with open(st_path) as _f:
+            _states = _json.load(_f)
+        for _sname, _sdata in _states.items():
+            for _sym, _pos in _sdata.get("positions", {}).items():
+                _cp = _pos.get("current_price", 0) or _pos.get("entry_price", 0)
+                if _cp > 0:
+                    fallback_prices[_sym] = _cp
+    except Exception:
+        pass
+
     for br in batch_results:
         sym = br["symbol"]
         name = next((s["name"] for s in stocks if s["symbol"] == sym), sym)
@@ -137,6 +153,9 @@ def run():
                 price = float(rt["price"])
         except Exception:
             pass
+        # 降级: 用上次已知价格
+        if not price or price <= 0:
+            price = fallback_prices.get(sym, 0)
 
         score_results.append({
             "symbol": sym,
