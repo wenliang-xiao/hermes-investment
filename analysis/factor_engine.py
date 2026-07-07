@@ -183,6 +183,43 @@ def standardize_cross_section(raw_values: dict[str, float | None],
     return result
 
 
+def standardize_by_chain(raw_values: dict[str, float | None],
+                          chain_map: dict[str, str],
+                          higher_is_better: bool = True) -> dict[str, float]:
+    """
+    按产业链分组做截面分位数标准化（行业中性化）。
+
+    每条产业链算一个行业组，在组内独立做 rankdata 百分位排序。
+    不在任何产业链中的标的归入 '其他' 组单独排序。
+
+    Args:
+        raw_values: {symbol: raw_value or None}
+        chain_map: {symbol: chain_name} 产业链映射
+        higher_is_better: True=高分位数代表好, False=低分位数代表好
+
+    Returns:
+        {symbol: percentile_score [0,1]}
+    """
+    if not raw_values:
+        return {}
+
+    # Group symbols by chain
+    chain_groups: dict[str, list[str]] = {}
+    for sym in raw_values:
+        chain = chain_map.get(sym, "其他")
+        if chain not in chain_groups:
+            chain_groups[chain] = []
+        chain_groups[chain].append(sym)
+
+    result: dict[str, float] = {}
+    for chain, syms in chain_groups.items():
+        chain_raw = {s: raw_values[s] for s in syms}
+        chain_result = standardize_cross_section(chain_raw, higher_is_better)
+        result.update(chain_result)
+
+    return result
+
+
 def aggregate_style(style_name: str, sub_scores: dict[str, float],
                     weights: Optional[dict[str, float]] = None) -> float:
     """子因子加权平均 → 风格因子分"""
@@ -202,6 +239,39 @@ def aggregate_style(style_name: str, sub_scores: dict[str, float],
             total_w += w
 
     return weighted / total_w if total_w > 0 else 0.5
+
+
+def _build_chain_map(symbols: list[str]) -> dict[str, str]:
+    """
+    从 WATCHLIST 构建 {symbol: chain_name} 映射。
+
+    读取 config.WATCHLIST（或 domain.__init__.WATCHLIST fallback）
+    中每个标的的 'chain' 字段。找不到的标的标记为 '其他'。
+
+    Returns:
+        {symbol: chain_name}
+    """
+    watchlist = None
+    for mod_name in ("config", "domain"):
+        try:
+            mod = __import__(mod_name, fromlist=["WATCHLIST"])
+            watchlist = getattr(mod, "WATCHLIST", None)
+            if watchlist:
+                break
+        except (ImportError, AttributeError):
+            continue
+
+    if watchlist is None:
+        return {}
+
+    chain_map: dict[str, str] = {}
+    for sym in symbols:
+        info = watchlist.get(sym, {})
+        if isinstance(info, dict) and "chain" in info:
+            chain_map[sym] = info["chain"]
+        else:
+            chain_map[sym] = "其他"
+    return chain_map
 
 
 # ═══════════════════════════════════════════════
@@ -272,7 +342,12 @@ class ICWeightSystem:
 
     def rolling_ic_weights(self, lookback: int = 6) -> dict[str, float]:
         """
-        滚动IC → 等权缩放权重
+        滚动IC → 等权缩放权重（IC/IR 信噪比 + 半衰期衰减）
+
+        改进:
+          1. IC_IR = mean(IC) / std(IC)  — 信噪比加权（非仅均值）
+          2. 半衰期衰减: exp(-λ × t)     — 更近的IC权重更大
+
         只有有正IC的因子才参与分配
         """
         ic_hist = self.get_ic_history()
@@ -281,16 +356,37 @@ class ICWeightSystem:
             return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
 
         recent = ic_hist[-lookback:]
-        mean_ic = {}
+        if not recent:
+            return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
+
+        # 半衰期权重: λ=0.5 → 每2个月权重减半
+        _decay_lambda = 0.35
+        _weights = [np.exp(-_decay_lambda * i) for i in range(len(recent))]
+        _weights = [w / sum(_weights) for w in _weights]
+
+        weights = {}
         for f in STYLE_FACTORS:
             vals = [h.get(f, 0) for h in recent if f in h]
-            mean_ic[f] = max(0.0, np.mean(vals)) if vals else 0.0
+            if not vals or len(vals) < 2:
+                weights[f] = 0.0
+                continue
 
-        total = sum(mean_ic.values())
+            # 半衰期加权均值
+            wg = _weights[-len(vals):] if len(vals) == len(recent) else [1.0/len(vals)] * len(vals)
+            w_mean = np.average(vals, weights=wg)
+            w_std = np.std(vals, ddof=1) if len(vals) > 1 else 0.01
+
+            # IC/IR = 信噪比
+            ic_ir = w_mean / w_std if w_std > 1e-6 else 0.0
+
+            # 最终权重: IC_IR * 方向性(仅保留正IC的因子)
+            weights[f] = max(0.0, ic_ir * max(0.0, w_mean))
+
+        total = sum(weights.values())
         if total < 1e-6:
             return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
 
-        return {f: v / total for f, v in mean_ic.items()}
+        return {f: v / total for f, v in weights.items()}
 
     def conditional_weight(self, factor: str, macro_state: str,
                            n_samples: int) -> float:
@@ -746,11 +842,11 @@ class FactorEngine:
                     ic_samples: int = 0) -> list[dict[str, Any]]:
         """
         批量评分 — 这是主要入口。
-        与单标评分不同：批量评分做了**真截面百分位标准化**。
+        与单标评分不同：批量评分做了**产业链内截面百分位标准化（行业中性化）**。
 
         流程:
           1. 对所有标的计算所有子因子原始值
-          2. 对每个子因子做截面分位数标准化 (Layer 2)
+          2. 对每个子因子按产业链分组做截面分位数标准化 (Layer 2, Barra 行业中性)
           3. 聚合风格因子分 (Layer 1)
           4. IC加权综合分
 
@@ -771,11 +867,12 @@ class FactorEngine:
             if (i + 1) % 20 == 0:
                 logger.info(f"  [factor_engine] {i+1}/{n} symbols collected")
 
-        # Phase 2: 对每个子因子做截面分位数标准化
+        # Phase 2: 对每个子因子做产业链内截面分位数标准化（行业中性化）
+        chain_map = _build_chain_map(symbols)
         std_values: dict[str, dict[str, float]] = {}
         for sk, sub_def in SUB_FACTOR_DEFS.items():
             higher = sub_def.get("higher_is_better", True)
-            std_values[sk] = standardize_cross_section(raw_values[sk], higher)
+            std_values[sk] = standardize_by_chain(raw_values[sk], chain_map, higher)
 
         # Phase 3: 聚合风格因子分
         style_scores: dict[str, dict[str, float]] = {}

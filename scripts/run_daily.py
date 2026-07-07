@@ -965,9 +965,32 @@ try:
         log(f"Today actions failed (non-critical): {e}")
     log("Action done")
 
+    # ─── 6. 行为诊断 — 交易偏差监控 ───
+    try:
+        rpt.build_behavior_section(w, doc_id, section_prefix="6")
+        log("Behavior section written")
+    except Exception as e:
+        log(f"Behavior section failed (non-critical): {e}")
+
     log(f"URL: https://bytedance.feishu.cn/docx/{doc_id}")
     print(f"✅ 面基三源融合日报 {session} 已生成")
     print(f"📄 飞书文档: https://bytedance.feishu.cn/docx/{doc_id}")
+
+    # ── 策略状态快照 (WS1-2a: 行为诊断用) ──
+    try:
+        _ss_path = os.path.join(_PROJECT_DIR, "data", "strategy_states.json")
+        _ts_path = os.path.join(_PROJECT_DIR, "data", "trading_signals.json")
+        _sh_path = os.path.join(_PROJECT_DIR, "data", "state_history.jsonl")
+        _snapshot = {"date": today_short, "timestamp": now_time}
+        for _p in [_ss_path, _ts_path]:
+            if os.path.exists(_p):
+                with open(_p) as _f:
+                    _snapshot[os.path.basename(_p).replace(".json", "")] = json.load(_f)
+        with open(_sh_path, "a") as _f:
+            _f.write(json.dumps(_snapshot, ensure_ascii=False) + "\n")
+        log(f"State snapshot appended (date={today_short})")
+    except Exception as _e:
+        log(f"State snapshot failed (non-critical): {_e}")
 
 except Exception as e:
     log(f"FATAL: {e}")

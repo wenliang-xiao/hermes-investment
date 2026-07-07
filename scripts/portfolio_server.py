@@ -544,6 +544,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <tbody id="historyBody"></tbody>
     </table></div>
   </div>
+
+  <!-- 行为诊断卡片 -->
+  <div class="card behavior-section" id="behaviorCard" style="display:none;">
+    <div class="card-header"><h3>🧠 行为诊断</h3><span class="updated-small" id="behaviorUpdated"></span></div>
+    <div class="grid grid-4" id="behaviorMetrics" style="margin-top:12px;"></div>
+    <div id="behaviorActions" style="margin-top:8px;padding:8px 12px;background:rgba(187,128,9,0.1);border-radius:6px;border-left:3px solid var(--yellow);"></div>
+  </div>
 </div>
 
 <script>
@@ -646,6 +653,15 @@ function render(data) {
     }).join('');
     document.getElementById('historyBody').innerHTML = rows;
   }
+
+  // 🧠 Behavior diagnosis
+  try {
+    const br = await fetch('/api/behavior');
+    if (br.ok) {
+      const bd = await br.json();
+      renderBehavior(bd);
+    }
+  } catch(e) { /* behavior card stays hidden */ }
 }
 
 function renderEquityChart(chartData) {
@@ -718,6 +734,36 @@ function renderAllocationChart(s) {
   });
 }
 
+function renderBehavior(bd) {
+  const combined = bd.strategies?._combined;
+  if (!combined) return;
+  document.getElementById('behaviorCard').style.display = 'block';
+  document.getElementById('behaviorUpdated').textContent = bd.generated_at || '';
+
+  const metrics = [
+    { label: '过度交易', value: combined.overtrading_index + 'x', detail: (combined.overtrading_detail||'').slice(0,30), color: combined.overtrading_index > 3 ? 'var(--red)' : combined.overtrading_index > 1.5 ? 'var(--yellow)' : 'var(--green)' },
+    { label: '追涨分数', value: combined.chasing_score.toFixed(1), detail: (combined.chasing_detail||'').slice(0,30), color: combined.chasing_score > 5 ? 'var(--red)' : combined.chasing_score > 2 ? 'var(--yellow)' : 'var(--green)' },
+    { label: '处置效应', value: combined.disposition_ratio.toFixed(2), detail: (combined.disposition_detail||'').slice(0,30), color: combined.disposition_ratio > 1.5 ? 'var(--red)' : 'var(--green)' },
+    { label: '锚定指数', value: combined.anchoring_index.toFixed(2), detail: (combined.anchoring_detail||'').slice(0,30), color: combined.anchoring_index > 0.8 ? 'var(--red)' : 'var(--green)' },
+  ];
+
+  document.getElementById('behaviorMetrics').innerHTML = metrics.map(m =>
+    '<div class="card metric" style="padding:12px;">' +
+      '<span class="metric-label" style="font-size:13px;">' + m.label + '</span>' +
+      '<span class="metric-value" style="color:' + m.color + ';font-size:22px;">' + m.value + '</span>' +
+      '<span class="metric-sub" style="font-size:11px;color:var(--text2)">' + m.detail + '</span>' +
+    '</div>'
+  ).join('');
+
+  const actions = combined.recommended_actions || [];
+  if (actions.length > 0) {
+    document.getElementById('behaviorActions').innerHTML =
+      '<strong style="font-size:13px;">🎯 改善建议</strong><div style="margin-top:4px;font-size:12px;color:var(--text);">' +
+      actions.slice(0, 3).map(a => '<div style="padding:2px 0;">• ' + a.slice(0, 80) + '</div>').join('') +
+      '</div>';
+  }
+}
+
 function fmt(v) { return Math.round(v).toLocaleString(); }
 function fmtNum(v) { return (v || 0).toLocaleString(); }
 function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
@@ -759,6 +805,16 @@ def api_signals():
         data["signals"], _dropped = _clean_signals(data.get("signals", []), "api_signals")
         return data
     return {"error": "no signals yet today", "signals": []}
+
+
+@app.get("/api/behavior")
+def api_behavior():
+    """行为诊断（四维度：处置效应/过度交易/追涨/锚定）"""
+    path = ROOT / "data" / "behavior_diagnosis.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return {"error": "no behavior diagnosis data yet", "strategies": {}}
 
 
 @app.get("/api/realtime")

@@ -2573,3 +2573,66 @@ def build_concept_section(w, doc_id):
         w.write(doc_id, [("bullet", f"{title}: {desc}")])
     
     w.write(doc_id, [("text", w.ref("零、核心哲学"))])
+
+
+def build_behavior_section(w, doc_id, section_prefix="八"):
+    """行为诊断板块 — 处置效应/过度交易/追涨/锚定"""
+    import json
+    from pathlib import Path
+    _base = Path(__file__).resolve().parent.parent
+    _bp = _base / "data" / "behavior_diagnosis.json"
+    if not _bp.exists():
+        return
+
+    with open(_bp) as _f:
+        bd = json.load(_f)
+
+    combined = bd.get("strategies", {}).get("_combined", {})
+    if not combined or combined.get("trade_count", 0) == 0:
+        return
+
+    w.write(doc_id, [("divider", ""), ("h2", f"{section_prefix}. 🧠 行为诊断")])
+    w.write(doc_id, [("quote", "每日交易行为偏差监控 — 处置效应·过度交易·追涨·锚定")])
+
+    # 四指标卡片
+    items = [
+        ("过度交易", combined.get("overtrading_index", 0),
+         f"{combined.get('overtrading_detail', '')}"),
+        ("追涨分数", combined.get("chasing_score", 0),
+         f"{combined.get('chasing_detail', '')}"),
+        ("处置效应", f"{combined.get('disposition_ratio', 0):.2f}",
+         f"{combined.get('disposition_detail', '')}"),
+        ("锚定指数", f"{combined.get('anchoring_index', 0):.4f}",
+         f"{combined.get('anchoring_detail', '')}"),
+    ]
+    _icons = {True: "🟢", False: "🔴"}
+    for label, val, detail in items:
+        _ok = (isinstance(val, (int, float)) and val < 1.5) or (isinstance(val, str) and "正常" in detail)
+        w.write(doc_id, [("bullet",
+                          f"{_icons.get(_ok, '🟡')} {label}: {str(val)[:8]} | {detail[:60]}")])
+
+    # 总览
+    pnl = combined.get("pnl_analysis", {})
+    w.write(doc_id, [("text",
+                      f"总交易{combined.get('trade_count',0)}笔（买入{combined.get('buy_count',0)}/卖出{combined.get('sell_count',0)}），"
+                      f"胜率{pnl.get('win_rate',0):.0%}，净盈亏¥{pnl.get('net_pnl',0):+.0f}")])
+
+    # 各策略拆分
+    for sname in ["faceji", "silverquant", "tradingagents"]:
+        sr = bd.get("strategies", {}).get(sname, {})
+        if not sr or sr.get("trade_count", 0) == 0:
+            continue
+        w.write(doc_id, [("h3", f"▸ {sname}")])
+        w.write(doc_id, [("text",
+                         f"过度交易{sr.get('overtrading_index',0):.1f}x | "
+                         f"追涨{sr.get('chasing_score',0):.1f} | "
+                         f"处置{sr.get('disposition_ratio',0):.2f} | "
+                         f"交易{sr.get('trade_count',0)}笔 | "
+                         f"胜率{sr.get('pnl_analysis',{}).get('win_rate',0):.0%}")])
+
+    # 改善建议
+    actions = combined.get("recommended_actions", [])
+    if actions:
+        w.write(doc_id, [("h3", "🎯 改善建议")])
+        for a in actions[:3]:
+            w.write(doc_id, [("bullet", a[:80])])
