@@ -11,6 +11,12 @@ import pandas as pd
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
+from strategies import faceji as _faceji_pure
+from strategies import silverquant as _silverquant_pure
+from strategies import tradingagents as _tradingagents_pure
 
 # ─── 公共数据层 ───
 def load_score_history(days=7):
@@ -40,7 +46,7 @@ def get_watchlist():
     """获取当前WATCHLIST"""
     try:
         sys.path.insert(0, os.path.join(ROOT, ".."))
-        from investment_system.domain import WATCHLIST
+        from domain import WATCHLIST
         # Filter A-share stocks
         a_stocks = []
         for code, info in WATCHLIST.items():
@@ -74,6 +80,68 @@ class BaseStrategy:
     
     def record_value(self, date):
         self.daily_values.append({"date": date, "value": round(self.current_value(), 2)})
+    
+    def _update_prices(self, price_map):
+        """更新所有持仓的当前价格和峰值"""
+        for sym, pos in self.positions.items():
+            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
+            pos["current_price"] = price
+            pos["peak"] = max(pos.get("peak", price), price)
+
+    def _positions_to_pd(self):
+        """将内部持仓字典转换为 strategies/ 纯函数期望的 PositionData 格式"""
+        return {
+            sym: PositionData(
+                symbol=sym,
+                entry_price=pos["entry_price"],
+                quantity=pos["quantity"],
+                entry_date=pos.get("entry_date", ""),
+                peak=pos.get("peak"),
+                current_price=pos.get("current_price"),
+            )
+            for sym, pos in self.positions.items()
+        }
+
+    def _execute_buy_from_signal(self, signal, date, price_map):
+        """根据纯函数 BUY Signal 执行买入"""
+        sym = signal.symbol
+        price = signal.price
+        if not price or price <= 0 or sym in self.positions:
+            return
+        pct = signal.size_pct or 3.0
+        position_cash = self.cash * pct / 100
+        qty = max(100, int(position_cash / price / 100) * 100)
+        cost = price * qty
+        if cost > self.cash:
+            qty = max(100, int(self.cash / price / 100) * 100)
+            cost = price * qty
+            if cost > self.cash:
+                return
+        self.cash -= cost
+        self.positions[sym] = {
+            "entry_price": price, "quantity": qty,
+            "entry_date": date, "peak": price,
+            "current_price": price
+        }
+        self.history.append({"date": date, "symbol": sym, "action": "买入",
+                             "price": price, "quantity": qty, "cost": round(cost, 2),
+                             "reason": signal.reason})
+
+    def _execute_sell_from_signal(self, signal, date, price_map):
+        """根据纯函数 SELL Signal 执行卖出"""
+        sym = signal.symbol
+        if sym not in self.positions:
+            return
+        pos = self.positions[sym]
+        price = signal.price
+        if not price or price <= 0:
+            return
+        pnl = (price - pos["entry_price"]) * pos["quantity"]
+        self.cash += price * pos["quantity"]
+        self.history.append({"date": date, "symbol": sym, "action": "卖出",
+                             "price": price, "pnl": round(pnl, 2),
+                             "reason": signal.reason})
+        del self.positions[sym]
     
     def get_summary(self):
         realized_pnl = sum(h.get("pnl", 0) for h in self.history if h.get("action") == "卖出")
@@ -118,85 +186,24 @@ class BaseStrategy:
 # 策略1: faceji (当前系统逻辑)
 # ═══════════════════════════════════════════
 class FacejiStrategy(BaseStrategy):
-    """当前面基策略：评分驱动"""
+    """当前面基策略：评分驱动，委托 strategies/faceji.py 纯函数"""
     def __init__(self, capital=1000000):
         super().__init__("faceji (面基)", capital)
-        self.entry_threshold = 5.0
-        self.exit_threshold = 4.0
-        self.max_positions = 8
-    
+        self.config = FacejiConfig()
+
     def daily_step(self, date, score_map, tech_map, price_map):
-        """每日决策"""
-        # 建仓：TOP5中非持仓+评分>=5.0+趋势ok
-        held = set(self.positions.keys())
-        candidates = sorted(
-            [s for s in score_map if s not in held],
-            key=lambda s: score_map.get(s, 0), reverse=True
-        )[:5]
-        
-        for sym in candidates:
-            score = score_map.get(sym, 0)
-            if len(self.positions) >= self.max_positions:
-                break
-            if score < self.entry_threshold:
-                continue
-            # Trend check
-            tech = tech_map.get(sym, {})
-            ma20d = tech.get("ma20_dev", 0) or 0
-            ma60d = tech.get("ma60_dev", 0) or 0
-            if ma60d <= ma20d and score < 5.5:
-                continue
-            # Entry
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            qty = max(100, int(30000 / price))
-            cost = price * qty
-            if cost > self.cash:
-                qty = max(100, int(self.cash / price / 100) * 100)
-                cost = price * qty
-                if cost > self.cash:
-                    continue
-            self.cash -= cost
-            self.positions[sym] = {
-                "entry_price": price, "quantity": qty,
-                "entry_date": date, "peak": price,
-                "current_price": price
-            }
-            self.history.append({"date": date, "symbol": sym, "action": "买入",
-                                 "price": price, "quantity": qty, "cost": cost})
-        
-        # Update prices & check exits
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            pos["current_price"] = price
-            pos["peak"] = max(pos["peak"], price)
-            
-            score = score_map.get(sym, 0)
-            # Exit: score < 4
-            if score is not None and score < self.exit_threshold:
-                pnl = (price - pos["entry_price"]) * pos["quantity"]
-                self.cash += price * pos["quantity"]
-                self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                     "price": price, "pnl": round(pnl, 2),
-                                     "reason": f"评分{score:.1f}<{self.exit_threshold}"})
-                del self.positions[sym]
-                continue
-            
-            # Exit: score < 5 + trend death
-            if score is not None and score < 5.0:
-                tech = tech_map.get(sym, {})
-                ma20d = tech.get("ma20_dev", 0) or 0
-                ma60d = tech.get("ma60_dev", 0) or 0
-                if ma20d < ma60d:  # MA死叉
-                    pnl = (price - pos["entry_price"]) * pos["quantity"]
-                    self.cash += price * pos["quantity"]
-                    self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                         "price": price, "pnl": round(pnl, 2),
-                                         "reason": "MA死叉"})
-                    del self.positions[sym]
-        
+        """委托 strategies/faceji.decide() 纯函数"""
+        self._update_prices(price_map)
+        positions = self._positions_to_pd()
+        signals = _faceji_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for sig in signals:
+            if sig.action == "BUY":
+                self._execute_buy_from_signal(sig, date, price_map)
+            elif sig.action == "SELL":
+                self._execute_sell_from_signal(sig, date, price_map)
         self.record_value(date)
 
 
@@ -204,104 +211,24 @@ class FacejiStrategy(BaseStrategy):
 # 策略2: SilverQuant-inspired
 # ═══════════════════════════════════════════
 class SilverQuantStrategy(BaseStrategy):
-    """SilverQuant风格：组件化卖点"""
+    """SilverQuant风格：组件化卖点，委托 strategies/silverquant.py 纯函数"""
     def __init__(self, capital=1000000):
         super().__init__("silverquant (组件化)", capital)
-        self.entry_threshold = 5.0
-        self.max_positions = 8
-    
+        self.config = SilverQuantConfig()
+
     def daily_step(self, date, score_map, tech_map, price_map, hist_prices=None):
-        held = set(self.positions.keys())
-        candidates = sorted(
-            [s for s in score_map if s not in held],
-            key=lambda s: score_map.get(s, 0), reverse=True
-        )[:5]
-        
-        # ── SilverQuant-style BUYER ──
-        for sym in candidates:
-            if len(self.positions) >= self.max_positions:
-                break
-            score = score_map.get(sym, 0)
-            if score < self.entry_threshold:
-                continue
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            
-            # Slot-based sizing (SilverQuant: slot_capacity)
-            slot_cap = 30000
-            qty = max(100, int(slot_cap / price / 100) * 100)
-            cost = price * qty
-            if cost > self.cash:
-                qty = max(100, int(self.cash / price / 100) * 100)
-                cost = price * qty
-                if cost > self.cash:
-                    continue
-            
-            self.cash -= cost
-            self.positions[sym] = {
-                "entry_price": price, "quantity": qty,
-                "entry_date": date, "peak": price,
-                "current_price": price, "entry_close": price
-            }
-            self.history.append({"date": date, "symbol": sym, "action": "买入",
-                                 "price": price, "quantity": qty})
-        
-        # ── SilverQuant-style SELLER_COMPONENTS ──
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            pos["current_price"] = price
-            pos["peak"] = max(pos["peak"], price)
-            
-            entry = pos["entry_price"]
-            peak = pos["peak"]
-            pnl_pct = (price - entry) / entry * 100
-            dd = (price - peak) / peak * 100 if peak else 0
-            
-            # HardSeller: 硬止损 -8%
-            if pnl_pct <= -8:
-                pnl = (price - entry) * pos["quantity"]
-                self.cash += price * pos["quantity"]
-                self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                     "price": price, "pnl": round(pnl, 2),
-                                     "reason": "HardSeller(-8%)"})
-                del self.positions[sym]
-                continue
-            
-            # FallSeller: 峰值回落 >12%
-            if dd <= -12:
-                pnl = (price - entry) * pos["quantity"]
-                self.cash += price * pos["quantity"]
-                self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                     "price": price, "pnl": round(pnl, 2),
-                                     "reason": f"FallSeller({dd:.1f}%)"})
-                del self.positions[sym]
-                continue
-            
-            # MASeller: MA20死叉
-            tech = tech_map.get(sym, {})
-            ma20d = tech.get("ma20_dev", 0) or 0
-            ma60d = tech.get("ma60_dev", 0) or 0
-            if ma20d < ma60d and pnl_pct > -5:
-                pnl = (price - entry) * pos["quantity"]
-                self.cash += price * pos["quantity"]
-                self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                     "price": price, "pnl": round(pnl, 2),
-                                     "reason": "MASeller(MA死叉)"})
-                del self.positions[sym]
-                continue
-            
-            # VolumeDropSeller: 缩量 (if hist_prices available)
-            score = score_map.get(sym, 0)
-            if score is not None and score < 4.5:
-                pnl = (price - entry) * pos["quantity"]
-                self.cash += price * pos["quantity"]
-                self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                     "price": price, "pnl": round(pnl, 2),
-                                     "reason": f"ScoreDrop({score:.1f})"})
-                del self.positions[sym]
-        
+        """委托 strategies/silverquant.decide() 纯函数"""
+        self._update_prices(price_map)
+        positions = self._positions_to_pd()
+        signals = _silverquant_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for sig in signals:
+            if sig.action == "BUY":
+                self._execute_buy_from_signal(sig, date, price_map)
+            elif sig.action == "SELL":
+                self._execute_sell_from_signal(sig, date, price_map)
         self.record_value(date)
 
 
@@ -309,125 +236,24 @@ class SilverQuantStrategy(BaseStrategy):
 # 策略3: TradingAgents-inspired (辩论制信号)
 # ═══════════════════════════════════════════
 class TradingAgentsStrategy(BaseStrategy):
-    """TradingAgents风格：多信号辩论→综合裁决"""
+    """TradingAgents风格：多信号辩论→综合裁决，委托 strategies/tradingagents.py 纯函数"""
     def __init__(self, capital=1000000):
         super().__init__("tradingagents (辩论制)", capital)
-        self.max_positions = 6  # 集中度高
-    
-    def _debate_score(self, score, tech, vol_signal=""):
-        """模拟多Agent辩论：bull/bear/neutral 三方打分后裁决"""
-        score = score or 5.0
-        tech_score = (tech or {}).get("total_tech_score", 5.0)
-        
-        # Bull case: score + tech
-        bull = score * 0.5 + tech_score * 0.5
-        
-        # Bear case: volatility + weakness
-        bear_penalty = 0
-        if vol_signal in ("缩量", "极度缩量"):
-            bear_penalty += 1.5
-        if (tech or {}).get("macd_signal", "") == "🔴死叉":
-            bear_penalty += 1.0
-        if (tech or {}).get("rsi", 50) > 70:
-            bear_penalty += 0.5
-        bear = score - bear_penalty
-        
-        # Neutral: average
-        neutral = score
-        
-        # Research Manager裁决：取bull/bear的加权平均
-        if bull >= bear and bull >= neutral:
-            final = bull * 0.6 + neutral * 0.3 + bear * 0.1
-        elif bear >= bull and bear >= neutral:
-            final = bear * 0.5 + neutral * 0.3 + bull * 0.2
-        else:
-            final = neutral
-        
-        return min(10, max(0, final))
-    
+        self.config = TradingAgentsConfig()
+
     def daily_step(self, date, score_map, tech_map, price_map, vol_signals=None):
-        held = set(self.positions.keys())
-        
-        # 辩论制裁决每个标的
-        debate = {}
-        for sym in score_map:
-            score = score_map.get(sym, 5.0)
-            tech = tech_map.get(sym, {})
-            vsig = ""
-            if vol_signals:
-                vsig = vol_signals.get(sym, {}).get("signal", "")
-            debate[sym] = {
-                "score": score,
-                "debate_score": self._debate_score(score, tech, vsig),
-                "bull": score * 0.5 + (tech or {}).get("total_tech_score", 5.0) * 0.5,
-                "bear": score - (1.5 if vsig in ("缩量","极度缩量") else 0) - 
-                        (1.0 if (tech or {}).get("macd_signal") == "🔴死叉" else 0),
-            }
-        
-        # 建仓：辩论分高+集中度高
-        candidates = sorted(
-            [(s, d["debate_score"]) for s, d in debate.items() if s not in held],
-            key=lambda x: x[1], reverse=True
-        )[:3]
-        
-        for sym, dscore in candidates:
-            if len(self.positions) >= self.max_positions:
-                break
-            if dscore < 5.5:  # Debate entry threshold higher
-                continue
-            price = price_map.get(sym, 0)
-            if price <= 0:
-                continue
-            
-            # Kelly position sizing
-            win_p = min(dscore / 10.0, 0.8)
-            kelly = max(0, (win_p * 1.8 - (1 - win_p)) / 1.8) * 0.5
-            position_cash = int(self.cash * min(kelly, 0.12))  # Higher上限
-            qty = max(100, int(position_cash / price / 100) * 100)
-            cost = price * qty
-            if cost > self.cash:
-                continue
-            
-            self.cash -= cost
-            self.positions[sym] = {
-                "entry_price": price, "quantity": qty,
-                "entry_date": date, "peak": price,
-                "current_price": price,
-                "debate_score": dscore
-            }
-            self.history.append({"date": date, "symbol": sym, "action": "买入",
-                                 "price": price, "quantity": qty,
-                                 "reason": f"辩论分{dscore:.1f}(bull:{debate[sym]['bull']:.1f}/bear:{debate[sym]['bear']:.1f})"})
-        
-        # 清仓：辩论制风控
-        for sym in list(self.positions.keys()):
-            pos = self.positions[sym]
-            price = price_map.get(sym, pos.get("current_price", pos["entry_price"]))
-            pos["current_price"] = price
-            pos["peak"] = max(pos["peak"], price)
-            
-            dscore = debate.get(sym, {}).get("debate_score", 5.0)
-            entry = pos["entry_price"]
-            peak = pos["peak"]
-            pnl_pct = (price - entry) / entry * 100
-            dd = (price - peak) / peak * 100 if peak else 0
-            
-            # Risk Judge裁决
-            if dscore < 4.0:  # 强卖
-                reason = f"辩论分{dscore:.1f}<4"
-            elif pnl_pct <= -8:  # 硬止损
-                reason = f"止损{pnl_pct:.1f}%"
-            elif dscore < 5.0 and pnl_pct < 0:  # 弱势持仓
-                reason = f"辩论分{dscore:.1f}+亏损"
-            else:
-                continue
-            
-            pnl = (price - entry) * pos["quantity"]
-            self.cash += price * pos["quantity"]
-            self.history.append({"date": date, "symbol": sym, "action": "卖出",
-                                 "price": price, "pnl": round(pnl, 2), "reason": reason})
-            del self.positions[sym]
-        
+        """委托 strategies/tradingagents.decide() 纯函数"""
+        self._update_prices(price_map)
+        positions = self._positions_to_pd()
+        signals = _tradingagents_pure.decide(
+            score_map, tech_map, price_map,
+            positions, self.cash, self.config
+        )
+        for sig in signals:
+            if sig.action == "BUY":
+                self._execute_buy_from_signal(sig, date, price_map)
+            elif sig.action == "SELL":
+                self._execute_sell_from_signal(sig, date, price_map)
         self.record_value(date)
 
 
@@ -490,7 +316,7 @@ def run_comparison(days=60):
         
         faceji.daily_step(date, score_map, tech_map, price_map)
         silverquant.daily_step(date, score_map, tech_map, price_map)
-        tradingagents.daily_step(date, score_map, tech_map, price_map, vol_signals)
+        tradingagents.daily_step(date, score_map, tech_map, price_map)
     
     return {
         "faceji": faceji.get_summary(),
