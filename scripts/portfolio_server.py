@@ -137,33 +137,41 @@ def build_history(book):
 
 
 def build_chart_data(book):
-    """Build portfolio value over time from history"""
-    capital = book.get("capital", 1000000)
-    history = book.get("history", [])
+    """Build portfolio value over time from history
 
-    # Simulate portfolio value trajectory
-    # Start with initial capital
-    points = [{"date": book.get("created_at", datetime.now().strftime("%Y-%m-%d")), "value": capital}]
-    running_value = capital
+    从每笔交易的 pnl 推算每日净值变化。
+    策略初始资本 ×3 = ¥3,000,000（面基/SQ/TA 各 ¥1,000,000）。
+    每日净值 = 初始总资本 + 截至该日的累计已实现 PnL。
+    因为持仓字段可能不可靠，所以只从已平仓 pnl 推算。
+    """
+    capital = book.get("capital", 3000000)  # 三策略初始总资本
+    history = book.get("history", [])
+    # 历史最可能是倒序（newest first），但 pnl 累计不分方向
+    # 按日期累积：daily_cumulative_pnl[t] = 该日及之前所有 pnl 之和
+    daily_pnl = {}  # date -> sum of pnl for that date
     for h in history:
         pnl = h.get("pnl")
-        cost = h.get("cost")
-        action = h.get("action", "")
         time_str = h.get("time", "")
         date_part = time_str[:10] if time_str else ""
+        if pnl is not None and date_part:
+            daily_pnl[date_part] = daily_pnl.get(date_part, 0) + pnl
 
-        if action == "买入" and cost:
-            running_value -= cost
-            points.append({"date": date_part, "value": running_value, "type": "buy"})
-        elif action == "卖出" and pnl is not None:
-            running_value += pnl
-            points.append({"date": date_part, "value": running_value, "type": "sell"})
+    # 累计净值序列
+    sorted_dates = sorted(daily_pnl.keys())
+    cumulative = capital
+    points = []
+    if sorted_dates:
+        points.append({"date": sorted_dates[0], "value": capital})
+    for d in sorted_dates:
+        cumulative += daily_pnl[d]
+        points.append({"date": d, "value": cumulative})
 
-    # Add current total value as last point
+    # 加当前总值（可能含未平仓浮盈）
     summary = build_summary(book)
-    points.append({"date": datetime.now().strftime("%Y-%m-%d"), "value": summary["total_value"]})
+    final_val = summary.get("total_value", capital)
+    points.append({"date": datetime.now().strftime("%Y-%m-%d"), "value": final_val})
 
-    # Deduplicate by date, keep last value per day
+    # 去重（同日期保留最后一条）
     by_date = {}
     for p in points:
         if p["date"]:
@@ -245,7 +253,7 @@ def _aggregate_strategy_portfolios() -> dict | None:
     
     total_invested = sum(p["entry_price"] * p["quantity"] for p in all_positions.values())
     return {
-        "capital": total_cash + total_invested,
+        "capital": 3000000,  # 三策略各 ¥1,000,000 初始资本
         "cash": total_cash,
         "positions": all_positions,
         "history": sorted(all_history, key=lambda x: x.get("time", ""), reverse=True),
@@ -775,6 +783,15 @@ def api_metrics():
     """绩效指标 (OSkhQuant风格：Sortino/Alpha/Beta/连续盈亏)"""
     try:
         book = load_shadow()
+
+        # shadow_account 为空时，从三策略模拟盘聚合（与 /api/portfolio 一致）
+        if not book.get("positions") and book.get("cash", 0) >= 1000000:
+            try:
+                aggr = _aggregate_strategy_portfolios()
+                if aggr:
+                    book = aggr
+            except Exception:
+                pass
         summary = build_summary(book)
         history = book.get("history", [])
 

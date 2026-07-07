@@ -24,6 +24,8 @@ def save_result(strategy: str, result: dict) -> str:
     _ensure_dir()
     meta = result.get("meta", {})
     run_id = meta.get("run_id", f"{strategy}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    # 确保 run_id 写回 meta，供 list_results 返回
+    meta["run_id"] = run_id
     filename = f"bt_{run_id}.json"
     path = os.path.join(BACKTEST_DIR, filename)
     meta.setdefault("generated_at", datetime.now().isoformat())
