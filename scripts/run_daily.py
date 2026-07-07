@@ -12,22 +12,24 @@ Hermes cron:
 import socket
 socket.setdefaulttimeout(30)  # 全局网络超时，防止baostock/AKShare/yfinance无限期挂起
 import sys, time, json, os
-sys.path.insert(0, '/home/admin/.hermes')
-# 从.env加载正确的飞书凭据（不同于gateway的App ID）
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_DIR)
 try:
     from dotenv import load_dotenv
-    load_dotenv('/home/admin/.hermes/.env')
+    _env_path = os.environ.get("HERMES_ENV", os.path.join(os.path.dirname(_PROJECT_DIR), ".env"))
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
 except Exception:
     pass
-import investment_system.output.report_v6 as rpt
-from investment_system.output.full_asset_scanner import (
+import output.report_v6 as rpt
+from output.full_asset_scanner import (
     scan_commodities, scan_fx, scan_bonds, determine_bridgewater_quadrant
 )
-from investment_system.output.fund_tracker import track_lds_portfolio_v2
-from investment_system.analysis.news_engine import get_news_with_impact
-from investment_system.data.yf_data_layer import get_global_market_snapshot
-from investment_system.data.data_layer import get_northbound_flow
-from investment_system.analysis.factor_engine import FactorScannerCompatV4 as FactorScanner
+from output.fund_tracker import track_lds_portfolio_v2
+from analysis.news_engine import get_news_with_impact
+from data.yf_data_layer import get_global_market_snapshot
+from data.data_layer import get_northbound_flow
+from analysis.factor_engine import FactorScannerCompatV4 as FactorScanner
 
 LF = '/tmp/report_daily_log.txt'
 with open(LF, 'w') as f: f.write('')
@@ -75,7 +77,7 @@ try:
     
     # 链内扩展: 构建已知链股票集合, 用于发现不在WATCHLIST但属于同链的新标的
     try:
-        from investment_system.config import INDUSTRY_CHAINS, WATCHLIST as _CFG_WL
+        from config import INDUSTRY_CHAINS, WATCHLIST as _CFG_WL
         _chain_stocks = {}  # chain_name → set of codes
         _watchlist_codes = set(str(k) for k in _CFG_WL if str(k).isdigit())
         for cn, cd in INDUSTRY_CHAINS.items():
@@ -88,8 +90,8 @@ try:
     log("Scanner ready")
     stock_context = []
     try:
-        from investment_system.domain import WATCHLIST
-        from investment_system.analysis.anomaly_news import fetch_stock_news
+        from domain import WATCHLIST
+        from analysis.anomaly_news import fetch_stock_news
         core_codes = [k for k, v in WATCHLIST.items()
                       if str(k).isdigit() and v.get("tier") == "核心"][:15]
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
@@ -143,7 +145,7 @@ try:
 
     # ── 策略四模拟盘初始化 ──
     try:
-        from investment_system.output.shadow_account import init_portfolio as _sa_init, get_portfolio_metrics as _sa_metrics
+        from output.shadow_account import init_portfolio as _sa_init, get_portfolio_metrics as _sa_metrics
         _sa_init(1000000)
     except Exception:
         pass
@@ -213,13 +215,13 @@ try:
     # ─── 模拟盘风控：价格更新 + 自动止损 ───
     log("Shadow pre-check...")
     try:
-        from investment_system.output.shadow_account import (
+        from output.shadow_account import (
             load_shadow as _sa_load, update_prices as _sa_update,
             check_stops as _sa_check, exit_position as _sa_exit,
             is_on_cooldown as _sa_cool, entry as _sa_entry,
             get_shadow_summary as _sa_summary, get_cooldown_list as _sa_cdlist,
         )
-        from investment_system.output.report_v6 import _fetch_watchlist_prices as _sa_fetch
+        from output.report_v6 import _fetch_watchlist_prices as _sa_fetch
         _sa_book = _sa_load()
         _sa_syms = list(_sa_book.get("positions", {}).keys())
         if _sa_syms:
@@ -237,7 +239,7 @@ try:
         log(f"⚠️ Shadow price/stop update: {_e}")
     # 冷却期垃圾清理
     try:
-        from investment_system.output.shadow_account import clean_cooldown
+        from output.shadow_account import clean_cooldown
         clean_cooldown()
     except Exception:
         pass
@@ -261,8 +263,8 @@ try:
     w.write(doc_id, [('quote', '核心/底仓持续显示 | 有信号的关注票才展开')])
 
     try:
-        from investment_system.output.report_v6 import _fetch_watchlist_prices, _calc_tech_signal
-        from investment_system.domain import WATCHLIST
+        from output.report_v6 import _fetch_watchlist_prices, _calc_tech_signal
+        from domain import WATCHLIST
         prices = _fetch_watchlist_prices(list(WATCHLIST.keys()))
 
         # 谁在赢 — 实时价格信号
@@ -339,7 +341,7 @@ try:
         research_map = {}
         if flagged_codes:
             try:
-                from investment_system.analysis.research_report import batch_research_summary, format_research_line
+                from analysis.research_report import batch_research_summary, format_research_line
                 research_map = batch_research_summary(flagged_codes, days=30)
             except Exception:
                 pass
@@ -382,7 +384,7 @@ try:
     try:
         # 强制重置baostock连接状态 (_fetch_watchlist_prices可能已logout导致标志不同步)
         try:
-            from investment_system.data.data_layer import _bs_logout as _reset_bs
+            from data.data_layer import _bs_logout as _reset_bs
             _reset_bs()
         except Exception:
             pass
@@ -591,7 +593,7 @@ try:
     # ═══ 2.3 因子有效性 ═══
     if scan_results and scan_status == "complete":
         try:
-            from investment_system.analysis.factor_quality import save_snapshot, get_quality_report
+            from analysis.factor_quality import save_snapshot, get_quality_report
             # 从扫描结果提取价格（scan_one自带的price字段）
             _price_map = {str(s.get('symbol', '')): s.get('price') 
                          for s in scan_results if s.get('price') is not None}
@@ -773,7 +775,7 @@ try:
 
             # ── 不建仓原因（if块内最末）──
             try:
-                from investment_system.output.shadow_account import get_all_no_trade_reasons
+                from output.shadow_account import get_all_no_trade_reasons
                 _sa_sum5 = _sa_summary() if "summary" in dir() else _sa_summary()
                 _no_trade_rs = get_all_no_trade_reasons(
                     scan_results, _sa_sum5.get("positions", []),
@@ -799,7 +801,7 @@ try:
     # ═══ 3. 组合状态 ═══
     w.write(doc_id, [('divider', ''), ('h2', '💼 3. 组合状态')])
     try:
-        from investment_system.output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
+        from output.strategy4_portfolio import snapshot as _s4_snap, init as _s4_init, daily as _s4_daily
         _s4_init(regime)
         _s4_daily(macro, scan_results if scan_results else [])
         snap = _s4_snap()
@@ -866,7 +868,7 @@ try:
     if anomaly_stocks_for_news:
         w.write(doc_id, [('quote', f"发现 {len(anomaly_stocks_for_news)} 只异动股（≥5%），正在搜索驱动因素...")])
         try:
-            from investment_system.analysis.anomaly_news import (
+            from analysis.anomaly_news import (
                 analyze_anomaly_stocks, format_anomaly_analysis_for_report
             )
             anomaly_results = analyze_anomaly_stocks(anomaly_stocks_for_news)
@@ -911,7 +913,7 @@ try:
             w.write(doc_id, [('bullet', f"{title[:100]}{' → '+imp_str if imp_str else ''}")])
 
     try:
-        from investment_system.analysis.news_engine import _calc_sentiment_score, classify_impact
+        from analysis.news_engine import _calc_sentiment_score, classify_impact
         nl = classify_impact(news_list[:20]) if news_list else []
         # fallback: 如果RSS空，用个股新闻标题做情绪打分
         if not nl and stock_context:

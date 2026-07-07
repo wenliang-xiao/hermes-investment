@@ -8,22 +8,24 @@ Hermes cron: 每周日 18:00
   command: python /home/admin/.hermes/investment_system/scripts/run_weekly.py
 """
 import sys, time, json, os
-sys.path.insert(0, '/home/admin/.hermes')
-# 从.env加载正确的飞书凭据
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_DIR)
 try:
     from dotenv import load_dotenv
-    load_dotenv('/home/admin/.hermes/.env')
+    _env_path = os.environ.get("HERMES_ENV", os.path.join(os.path.dirname(_PROJECT_DIR), ".env"))
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
 except Exception:
     pass
-import investment_system.output.report_v6 as rpt
-from investment_system.output.full_asset_scanner import (
+import output.report_v6 as rpt
+from output.full_asset_scanner import (
     scan_all_etfs, scan_bonds, scan_commodities,
     scan_fx, determine_bridgewater_quadrant
 )
-from investment_system.output.fund_tracker import track_lds_portfolio_v2, scan_all_etf_groups
-from investment_system.analysis.universe_builder import build_daily_scan_plan
-from investment_system.analysis.multi_asset_engine import run_daily_multi_asset_scan
-from investment_system.analysis.news_engine import get_news_with_impact
+from output.fund_tracker import track_lds_portfolio_v2, scan_all_etf_groups
+from analysis.universe_builder import build_daily_scan_plan
+from analysis.multi_asset_engine import run_daily_multi_asset_scan
+from analysis.news_engine import get_news_with_impact
 
 LF = '/tmp/report_weekly_log.txt'
 with open(LF, 'w') as f: f.write('')
@@ -206,7 +208,7 @@ try:
         ('h2', '十二、📅 下周催化剂日历'),
         ('quote', '以下为各链预设催化剂，结合实际日历确认'),
     ])
-    from investment_system.output.report_v6 import _CHAIN_CONFIGS
+    from output.report_v6 import _CHAIN_CONFIGS
     for cfg in _CHAIN_CONFIGS[:8]:
         cats = cfg.get('catalysts', [])[:2]
         if cats:
@@ -223,7 +225,7 @@ try:
     log(f"Total: {dt:.1f}s")
 
     try:
-        from investment_system.analysis.score_history import save_scores, save_macro_gate
+        from analysis.score_history import save_scores, save_macro_gate
         today_str = time.strftime('%Y-%m-%d')
         scored = scanner.scan_market(top_n=60)
         score_snapshot = {s["symbol"]: s["score"] for s in scored if not s.get("error")}
@@ -235,9 +237,9 @@ try:
         log(f"双门状态已保存: {dg.get('macro_gate','?')}+{dg.get('trend_gate','?')}")
 
         try:
-            from investment_system.analysis.score_history import build_historical_scores_from_prices
-            from investment_system.data.data_layer import get_stock_daily
-            from investment_system.config import WATCHLIST, INDUSTRY_CHAINS
+            from analysis.score_history import build_historical_scores_from_prices
+            from data.data_layer import get_stock_daily
+            from config import WATCHLIST, INDUSTRY_CHAINS
             chain_syms = list({str(s) for c in INDUSTRY_CHAINS.values() for s in c.get("symbols", []) if str(s).isdigit()})
             watchlist_syms = [k for k in WATCHLIST.keys() if str(k).isdigit() and str(k) in set(chain_syms)]
             price_snap = {}
@@ -290,7 +292,7 @@ try:
         }
 
     try:
-        from investment_system.analysis.chain_scanner import scan_chain_candidates, format_candidate_for_report
+        from analysis.chain_scanner import scan_chain_candidates, format_candidate_for_report
         log("开始链内候选扫描...")
         candidates = scan_chain_candidates(regime=regime, dual_open=dual_open, verbose=True)
         chain_summary["candidates"] = candidates
@@ -305,7 +307,7 @@ try:
             candidate_syms = [c['symbol'] for c in candidates if c.get('symbol')]
             research_map = {}
             try:
-                from investment_system.analysis.research_report import batch_research_summary, format_research_line
+                from analysis.research_report import batch_research_summary, format_research_line
                 research_map = batch_research_summary(candidate_syms, days=30)
                 log(f"研报数据获取: {sum(1 for v in research_map.values() if v)} / {len(candidate_syms)} 只有数据")
             except Exception as e:

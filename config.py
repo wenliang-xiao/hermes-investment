@@ -5,8 +5,8 @@
 import os
 from pathlib import Path
 
-BASE = Path("/home/admin/.hermes/investment_system")
-DATA_DIR = BASE / "data"
+BASE = Path(os.environ.get("HERMES_BASE", str(Path(__file__).parent)))
+DATA_DIR = BASE / "data" if str(BASE) != str(Path(__file__).parent) else Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Tushare Pro（主力数据源：行情/PE历史5年/财务/社融/宏观）───

@@ -19,6 +19,13 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
 if _PROJECT_DIR not in sys.path:
     sys.path.insert(0, _PROJECT_DIR)
+try:
+    from dotenv import load_dotenv
+    _env_path = os.environ.get("HERMES_ENV", os.path.join(os.path.dirname(_PROJECT_DIR), ".env"))
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+except Exception:
+    pass
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
