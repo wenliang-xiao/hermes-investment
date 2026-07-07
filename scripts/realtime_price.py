@@ -64,6 +64,19 @@ def get_signals_symbols() -> list[str]:
     return list(symbols)
 
 
+def _is_trading_hours() -> bool:
+    """粗略判断是否在 A 股交易时段，非强制阻断仅用于提前返回"""
+    from datetime import datetime
+    now = datetime.now()
+    # 周末不交易
+    if now.weekday() >= 5:
+        return False
+    # 9:25-15:00 为交易时段（含集合竞价）
+    hour, minute = now.hour, now.minute
+    total_min = hour * 60 + minute
+    return 565 <= total_min <= 900  # 9:25 ~ 15:00
+
+
 def get_all_realtime(
     include_holdings: bool = True,
     include_signals: bool = True,
@@ -71,7 +84,8 @@ def get_all_realtime(
 ) -> dict[str, dict]:
     """获取所有相关标的的实时行情
 
-    自动轮询 data_router.get_rt()，带间隔保护(1.5s)。
+    自动轮询 data_router.get_rt()，带间隔保护(0.5s)。
+    非交易时段直接返回空（避免无效 API 调用）。
 
     Args:
         include_holdings: 是否包含持仓标的
@@ -81,6 +95,9 @@ def get_all_realtime(
     Returns:
         {symbol: {price, change_pct, volume, ...}}
     """
+    if not _is_trading_hours():
+        return {}  # 非交易时段跳过
+
     symbols = []
 
     if include_holdings:
@@ -104,9 +121,15 @@ def get_all_realtime(
     if not get_rt:  # 数据源不可用时直接返回
         return {}
 
+    # 总体10s硬超时（防止外网 API 卡死 Dashboard）
+    start_time = time.time()
     result = {}
     for item in symbols:
         sym = item["symbol"]
+        if time.time() - start_time > 8:
+            result[sym] = {"symbol": sym, "name": item.get("name", sym),
+                           "price": 0, "change_pct": 0, "error": "overall_timeout"}
+            continue
         try:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 fut = pool.submit(get_rt, sym)
@@ -131,7 +154,7 @@ def get_all_realtime(
                 "price": 0, "change_pct": 0,
                 "error": str(e),
             }
-        time.sleep(1.5)  # 防限流
+        time.sleep(0.5)  # 防限流
 
     return result
 
