@@ -32,12 +32,15 @@ Hermes Investment 是一个**个人级量化投资辅助系统**，覆盖 A 股 
 
 **项目规模**: ~50 个 Python 模块，核心代码 ~15,000 行（不含配置数据），config.py 1,035 行 + domain/__init__.py 881 行构成庞大的配置层。
 
+**借鉴谱系**: Hermes 不是从零造的。技术架构层借了 **hl-quant**（纯函数策略 + 固定评估器 + HL 循环）、**xalpha**（@cachedio 数据路由 + 缓存）、**OSkhQuant**（7 面板指标体系）、**Vibe-Trading**（IC/IR 因子分层验证方法论）；方法层借了 **OpenSpec**（切片交付）、**Superpowers**（三步工作流）、**Karpathy**（编码纪律）；策略层借了 **段永平**（不为清单）、**凯利**（仓位管理）、**面基播客**（产业认知）。Bloomberg/QuantConnect/Wind 是基准坐标——不是用来抄的，是用来知道目标在哪的。（详见 [2.4 参考来源与借鉴谱系](#24-参考来源与借鉴谱系)）
+
 ### 核心评价
 
 | 维度 | 评级 | 一句话评价 |
 |------|------|-----------|
 | **策略哲学完整性** | ⭐⭐⭐⭐ | 面基播客 154 期知识体系被深度结构化（concept_engine 881 行），投资逻辑自洽 |
 | **功能覆盖广度** | ⭐⭐⭐⭐ | 数据/因子/策略/回测/模拟盘/Dashboard/新闻/宏观/产业链全覆盖，远超个人项目平均水平 |
+| **借鉴谱系清晰度** | ⭐⭐⭐⭐ | hl-quant/xalpha/OSkhQuant/Vibe-Trading 架构理念直接落地，方法论借鉴有据可查 |
 | **代码架构质量** | ⭐⭐ | 多处重复实现（4-5 份策略副本）、配置双重维护已漂移、无抽象基类、无类型安全边界 |
 | **工程质量** | ⭐⭐ | 回测逻辑零测试、Dashboard 无认证、无 CI/CD、无监控告警、凭据硬编码 |
 | **生产级就绪度** | ⭐ | 无 point-in-time 数据、无幸存者偏差防护（代码写了未启用）、无执行成本模型接入、无事件溯源 |
@@ -45,7 +48,7 @@ Hermes Investment 是一个**个人级量化投资辅助系统**，覆盖 A 股 
 
 ### 一句话总结
 
-> **这是一个投资思考深度远超工程实现质量的系统**。策略哲学和领域建模是亮点，但代码架构已逼近可维护性极限，亟需重构以防止进一步腐化。不建议在当前架构下直接扩展功能，应先偿还技术债。
+> **这是一个投资思考深度远超工程实现质量的系统**。策略哲学和领域建模是亮点，借鉴谱系清晰且方向正确（hl-quant 纯函数策略、xalpha 数据路由、Vibe-Trading IC/IR 分层），但代码架构已逼近可维护性极限——问题不是设计方向错误，而是**副本漂移导致正确的架构理念被 4-5 处 inline 实现覆盖**。亟需收敛而非重写。
 
 ---
 
@@ -127,6 +130,74 @@ Hermes 是一个**研究 + 辅助决策系统**，而非自动交易系统。核
 | 缓存 | pickle / JSON 文件 (无数据库) |
 | 调度 | ECS Cron YAML |
 | 测试 | pytest (仅覆盖存储模块和部分因子) |
+
+### 2.4 参考来源与借鉴谱系
+
+> **重要说明**: Hermes 不是从零造的。在评审"为什么这么做"之前，必须先厘清 Hermes 站在谁的肩膀上。以下是在整个开发过程中深度调研、借鉴、讨论过的全部项目和原则。
+
+#### 2.4.1 直接借鉴的 GitHub 开源项目
+
+| 项目 | 借鉴了什么 | 落地位置 |
+|------|-----------|---------|
+| **hl-quant** | ① 纯函数策略层（`strategies/` 零IO）② 固定评估器（`evaluator_fixed.py`，同一组19只标的永远评）③ HL 循环（Probe→Diagnose→Propose→Patch→Evaluate→Replay→Decide→Compress）④ Walk-Forward 多周期验证 | `strategies/faceji.py`, `strategies/silverquant.py`, `strategies/tradingagents.py`, `evaluator_fixed.py`, `data/hl_runs/` |
+| **xalpha** | ① `@cachedio` 透明数据缓存装饰器（TTL 参数化 pickle 缓存）② 前缀路由数据源调度（`_detect_source` 自动识别代码来源） | `data/data_router.py` 的 `@cachedio` 和 `_detect_source()` |
+| **OSkhQuant** | 绩效指标面板风格：Sharpe/Sortino/Alpha/Beta/连续盈亏/最大回撤/胜率，7 面板 Dashboard 布局 | `/api/metrics` 端点 + Dashboard 7面板设计 |
+| **Vibe-Trading (HKUDS)** | ① Alpha 因子库架构哲学（452因子Zoo → 因子→风格→复合分层）② IC/IR 因子分层验证方法论 ③ 跨市场回测引擎思路（Composite→多策略并行）④ Shadow Account 行为诊断思路 | 启发了 `factor_engine.py` 的三层设计（19子因子→7风格→1复合）；影响了 IC 滚动权重 + James-Stein 收缩设计；启发了 `strategy_states.json` 历史记录 + 模拟盘追踪 |
+| **OpenSpec** | 方法论层面：先写方案文档再动手、切片式交付（不一次性做大改）、TDD 三阶段（RED→GREEN→REFACTOR）、每片独立可验证 | 所有方案文档 `docs/plans/`、三个 workstream 拆分 |
+| **Superpowers (SuperPower AI协同开发)** | 三步连推法（阻塞bug→工程基建→功能增量）、原子提交、每个切片独立可验证、修改前调研分析 | `three-workstream-execution` skill, 所有 P0/P1 执行流程 |
+| **Karpathy 编码原则** | 编码前思考、简洁优先、精准修改、目标驱动执行 | `karpathy-guidelines` skill（全局 always 加载） |
+
+**Vibe-Trading 的特殊说明**: 452 个 Alpha 因子全是加密期货因子（永续合约资金费率、订单簿失衡等），对 A 股/美股零意义，因此**没有直接移植因子**。Vibe-Trading 对 Hermes 的持久贡献是**因子验证方法论**（别只看 Alpha 数量，要看 IC/IR 分层筛选）和**回测架构思路**（Composite→多策略并行），这两个思想已融入 `factor_engine.py` 和 `backtest_storage.py`，但不是以直接 copy 代码的形式。
+
+#### 2.4.2 基准级参考（拿来对比、知道差距在哪的）
+
+| 项目/系统 | 对比维度 | 差距 |
+|-----------|---------|------|
+| **Bloomberg Terminal** | 条件单/一键执行/多屏联动/数据导出/新闻→情感→影响量化→实时推送 | Hermes 只有展示，没有操作和执行 |
+| **QuantConnect** | 事件驱动架构 + 券商 API 集成 + 数据湖 + ML 模型 | 架构层面差异，2-3 年工程差距 |
+| **Wind（万得）** | 中国金融终端标准：实时行情+深度研报+宏观数据+行业数据库 | 数据来源分散，缺少一站式深度数据 |
+| **LDS 全天候** | 全天候组合（12.5%回报/-15.2%回撤/0.85 Sharpe） | 唯一的可信回测基准 |
+
+#### 2.4.3 策略层借鉴的方法论
+
+| 方法论 | 来源 | 使用位置 |
+|--------|------|---------|
+| **段永平「不为清单」** | 段永平投资哲学 | `stop_list.py` 10 条规则（ROE/负债率/毛利率/护城河/管理层/现金流/能力圈等），三层选股漏斗的第二层 |
+| **凯利公式** (Kelly Criterion) | 信息论→赌博→仓位管理 | 三策略的 `_kelly_size()` 函数：Kelly 动态仓位上限 8-12% |
+| **James-Stein 收缩 / 贝叶斯收缩** | 统计学 | `factor_engine.py` IC 权重计算，样本量不足时向等权收缩 |
+| **Nick 四问** | Nick Sleep 投资框架 | `deep_research.py` 8 维框架维度 4 |
+| **DCF 估值** | 经典价值投资 | `deep_research.py` 维度 3（当前是占位符 `price×1.1`） |
+| **六层漏斗审计法** | Hermes 原创 | 系统审计方法论：宏观气候→资产配置→多因子引擎→找票→风控→纪律 |
+| **面基播客知识体系** | 154 期播客内容 | 12 主题 13 篇飞书文档，产业链引用（当前未接入分析流程） |
+| **银城量化 (SilverQuant)** | 用户带来的策略 | `strategies/silverquant.py`，固定槽位 ¥30K，全自动 |
+| **交易代理 (TradingAgents)** | 用户带来的策略 | `strategies/tradingagents.py`，辩论分≥5.5 建仓，多 agent 辩论 |
+
+#### 2.4.4 工程原则（自创并反复验证的）
+
+| 原则 | 内容 | 来源 |
+|------|------|------|
+| **只叠加不拆除** | 新模块独立于旧生产管线，不修改现有代码 | OpenSpec 方法 |
+| **原子写入** | tmpfile+rename 模式，防止写入中断留残篇 | `utils/atomic_io.py` |
+| **4 阶段防残篇日报** | Phase1收集→Phase2分析→Phase3创建文档→Phase4推送，要么全好要么全不推 | `run_report_v10.py` |
+| **数据缺失时 NOOP** | price=0 时不做任何交易决策，而非 panic sell | P0-EXTRA commit 教训 |
+| **TDD 硬性要求** | 任何修复/新功能必须先写测试 RED→GREEN→全量回归 | 整个开发流程 |
+| **Commit 即 Push** | GitHub 是唯一源码真相，修改后立即推送 | 用户硬性要求 |
+| **验证前置** | curl 验证/API 端点确认后才 claim 完成，不靠"刷新看看" | 用户硬性要求 |
+| **3 层防护** | 源头切断→策略加固→执行守卫，每层独立防止 price=0 事件 | P0-EXTRA |
+
+#### 2.4.5 借鉴谱系对架构评审的影响
+
+理解借鉴谱系后，评审的"为什么这么做"分析需要调整：
+
+1. **纯函数策略层不是"缺少抽象基类"**，而是**有意借鉴 hl-quant 的零IO设计哲学**——策略纯函数化以便回测和独立调用。问题不是设计方向错误，而是**副本漂移导致纯函数被 4-5 处 inline 实现覆盖**。
+
+2. **@cachedio 缓存不是"6层缓存不协调"**，而是**xalpha 的透明缓存装饰器被正确引入**——问题在于后续模块（data_source_layer、global_data）各自新增了独立缓存层，未统一到 @cachedio 模式。
+
+3. **固定评估器不是"版本管理混乱"**，而是**hl-quant 的 ADR-001 核心设计**——禁止为提分而改评估器参数。问题在于 `backtest_v2.py` 和 `backtest_all_strategies.py` 是 hl-quant 引入前的遗留，未按 ADR-001 收敛。
+
+4. **IC/IR 因子分层不是"硬编码不可扩展"**，而是**Vibe-Trading 的因子验证方法论落地**——用 IC/IR 筛选有效因子而非堆砌因子数量。问题在于因子定义硬编码而非 DSL，这是**下一步演进方向**而非设计缺陷。
+
+5. **Shadow Account 不是"模拟盘无审计溯源"**，而是**Vibe-Trading 的行为诊断思路部分落地**——`strategy_states.json` + `behavior.py` 已实现，完整 Shadow 诊断管线未实现是**范围决策**而非遗漏。
 
 ---
 
@@ -672,6 +743,73 @@ Hermes 与以上系统有一个本质区别：**它是"投资哲学驱动的"而
 
 这种"投资哲学代码化"的思路在上述开源系统中都不存在。**这是 Hermes 最大的差异化价值**。
 
+### 5.5 Hermes 实际借鉴的项目谱系
+
+> **重要澄清**: 5.1-5.3 的对比表列出的是"业界通用量化框架"（Qlib/NautilusTrader/VNPY 等），用于理解 Hermes 在整个量化开源生态中的位置。但 Hermes 的实际架构并非从零设计，而是**有明确借鉴谱系的**——在开发过程中深度调研并直接借鉴了以下项目。
+
+#### 5.5.1 直接借鉴 vs 通用参考的区分
+
+| 类别 | 项目 | 与 Hermes 的关系 |
+|------|------|-----------------|
+| **直接借鉴（代码级）** | hl-quant, xalpha, OSkhQuant, Vibe-Trading | 架构理念直接落地到 Hermes 代码中 |
+| **方法论借鉴（实践级）** | OpenSpec, Superpowers, Karpathy 原则 | 开发流程和工程纪律的直接来源 |
+| **通用参考（对比级）** | Qlib, NautilusTrader, VNPY, Zipline, RQAlpha, bt, backtrader | 知道业界标准在哪，知道差距有多大 |
+| **基准坐标（目标级）** | Bloomberg, QuantConnect, Wind, LDS全天候 | 知道目标在哪，不是用来抄的 |
+
+#### 5.5.2 直接借鉴项目的横向对比
+
+| 能力 | hl-quant | xalpha | OSkhQuant | Vibe-Trading | **Hermes 落地** |
+|------|----------|--------|-----------|-------------|----------------|
+| 纯函数策略（零IO） | ✅ 核心 | ❌ | ❌ | ❌ | ✅ `strategies/*.py` |
+| 固定评估器（防过拟合） | ✅ 核心 | ❌ | ❌ | ❌ | ✅ `evaluator_fixed.py` (ADR-001) |
+| HL 循环 | ✅ 核心 | ❌ | ❌ | ❌ | ✅ `data/hl_runs/` |
+| Walk-Forward 验证 | ✅ | ❌ | ❌ | ❌ | ✅ `evaluator_fixed.run_walk_forward()` |
+| 透明缓存装饰器 | ❌ | ✅ `@cachedio` | ❌ | ❌ | ✅ `data_router.py @cachedio` |
+| 前缀路由数据源 | ❌ | ✅ `_detect_source` | ❌ | ❌ | ✅ `data_router.py _detect_source()` |
+| 绩效指标面板 | ❌ | ❌ | ✅ 7面板 | ❌ | ✅ Dashboard 7面板 + `/api/metrics` |
+| IC/IR 因子分层验证 | ❌ | ❌ | ✅ | ✅ 452因子Zoo | ✅ `factor_engine.py` IC滚动权重 + 贝叶斯收缩 |
+| 因子→风格→复合分层 | ❌ | ❌ | ❌ | ✅ | ✅ `factor_engine.py` 19子→7风格→1复合 |
+| 跨市场回测 | ❌ | ❌ | ✅ | ✅ (加密+期货) | ✅ (A+H+US) `backtest_storage.py` |
+| Shadow Account 行为诊断 | ❌ | ❌ | ❌ | ✅ 核心 | ⚠️ 部分 (`behavior.py` + `strategy_states.json`) |
+| Broker API 实盘 | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+#### 5.5.3 借鉴方式说明
+
+**hl-quant — 架构骨架级借鉴**：
+- 纯函数策略层（`strategies/` 零IO）→ 解决策略可测试性和回测/实盘一致性
+- 固定评估器（`evaluator_fixed.py` + ADR-001）→ 解决回测过拟合问题，同一组 19 只标的永远评
+- HL 循环 → Probe→Diagnose→Propose→Patch→Evaluate→Replay→Decide→Compress 的策略迭代方法论
+- Walk-Forward → 多周期验证，防止单窗口回测偏差
+
+**xalpha — 数据基础设施级借鉴**：
+- `@cachedio` 透明缓存装饰器 → TTL 参数化 pickle 缓存，调用方无感知
+- `_detect_source` 前缀路由 → 6位数字→baostock、.HK→yfinance、=→akshare_futures
+- **问题**: 后续模块（data_source_layer、global_data）各自新增了独立缓存层，未统一到 @cachedio 模式
+
+**OSkhQuant — 输出层借鉴**：
+- 绩效指标面板风格 → Sharpe/Sortino/Alpha/Beta/连续盈亏/最大回撤/胜率
+- 7 面板 Dashboard 布局 → 直接影响了 `portfolio_server.py` 的统一 Dashboard 设计
+
+**Vibe-Trading (HKUDS) — 因子验证方法论借鉴**：
+- **没有直接移植 452 个 Alpha 因子**（全是加密期货因子，对 A 股零意义）
+- **持久贡献是因子验证方法论**：别只看 Alpha 数量，要看 IC/IR 分层筛选
+- **回测架构思路**：Composite→多策略并行，影响了 `backtest_storage.py` 的 schema 设计
+- **Shadow Account 思路**：启发了 `strategy_states.json` 历史记录 + 模拟盘追踪，完整 Shadow 诊断管线未实现是范围决策
+
+#### 5.5.4 借鉴谱系对重构建议的影响
+
+理解借鉴谱系后，重构建议需要调整优先级：
+
+1. **纯函数策略层是 hl-quant 的核心借鉴，方向正确**——重构不是"引入 Strategy 抽象基类"替代纯函数，而是**消除 inline 副本，让所有路径都委托 strategies/ 纯函数**。NautilusTrader 的 Strategy 基类可作为类型安全保障的参考，但不应替代 hl-quant 的纯函数哲学。
+
+2. **@cachedio 是 xalpha 的正确借鉴，应统一而非废弃**——重构方向是让 data_source_layer、global_data 等后续模块的缓存统一到 @cachedio 模式，而非引入 Redis/数据库替代。
+
+3. **固定评估器是 hl-quant 的 ADR-001 核心，不可废弃**——重构方向是让 backtest_v2.py 和 backtest_all_strategies.py 收敛到 evaluator_fixed，而非创建新评估器。
+
+4. **IC/IR 因子分层是 Vibe-Trading 的方法论贡献，应深化而非替换**——重构方向是修复 factor_quality.py 的数据源格式不匹配问题（当前读 v3.1 格式但日常数据已是 v4.0），而非引入新的因子验证体系。
+
+5. **因子表达式引擎（Qlib Expression Engine）是下一步演进方向，不是当前重构重点**——Hermes 当前 19 子因子的 IC/IR 分层验证已落地，DSL 化是 P3 长期演进。
+
 ---
 
 ## 6. 生产级差距分析
@@ -843,10 +981,16 @@ Hermes 与以上系统有一个本质区别：**它是"投资哲学驱动的"而
 ### 7.3 重构原则
 
 1. **保留投资哲学代码化**：`concept_engine.py`、`stop_list.py`、`behavior.py`、`macro_engine.py` 是 Hermes 的核心价值，重构应保留而非重写
-2. **先统一再优化**：先消除副本和双重维护，再考虑架构升级
-3. **测试先行**：在重构前先补充关键路径的测试（策略逻辑、回测正确性），确保重构不引入回归
-4. **渐进式重构**：不要一次性重写，按 P0→P1→P2→P3 优先级逐步推进
-5. **保持可运行**：每个重构步骤后系统必须可运行，不允许"大爆炸"式重构
+2. **保留已借鉴的架构哲学**：纯函数策略层（hl-quant）、@cachedio 缓存（xalpha）、固定评估器（hl-quant ADR-001）、IC/IR 因子分层（Vibe-Trading）、7面板 Dashboard（OSkhQuant）——这些是经过深度调研后的正确设计决策，重构方向是**统一和深化**而非替代：
+   - 纯函数策略：消除 inline 副本，让所有路径委托 `strategies/`，而非引入 NautilusTrader 式 Strategy 基类替代
+   - @cachedio 缓存：让后续模块的独立缓存层统一到 @cachedio 模式，而非引入 Redis 替代
+   - 固定评估器：让 backtest_v2/backtest_all 收敛到 evaluator_fixed，而非创建新评估器
+   - IC/IR 因子分层：修复 factor_quality.py 数据源格式不匹配，而非引入新验证体系
+   - 因子表达式 DSL（Qlib Expression Engine）是 P3 长期演进，不是当前重构重点
+3. **先统一再优化**：先消除副本和双重维护，再考虑架构升级
+4. **测试先行**：在重构前先补充关键路径的测试（策略逻辑、回测正确性），确保重构不引入回归
+5. **渐进式重构**：不要一次性重写，按 P0→P1→P2→P3 优先级逐步推进
+6. **保持可运行**：每个重构步骤后系统必须可运行，不允许"大爆炸"式重构
 
 ---
 
@@ -885,17 +1029,18 @@ Hermes Investment 是一个**投资哲学深度代码化的个人量化辅助决
 
 ### 8.4 一句话评价
 
-> Hermes 的投资思考深度值得 8/10 分，但代码架构质量只有 4/10 分。先用 1 天修 Bug，再用 2 周收敛副本，然后再谈架构升级。
+> Hermes 的投资思考深度值得 8/10 分，借鉴谱系清晰度 8/10 分（hl-quant/xalpha/OSkhQuant/Vibe-Trading 架构理念正确落地），但代码架构质量只有 4/10 分——问题不是设计方向错误，而是副本漂移导致正确的架构理念被覆盖。先用 1 天修 Bug，再用 2 周收敛副本（让所有路径回归 hl-quant 纯函数 + xalpha @cachedio + 固定评估器的正确设计），然后再谈架构升级。
 
 ---
 
 ## 附录 A：调研方法
 
-本报告基于 8 个并行调研任务：
+本报告基于 8 个并行调研任务 + 用户提供的借鉴谱系补充：
 - 6 个 explore agent 扫描项目各层（入口/数据/因子/策略/回测/输出），所有结论有代码行号佐证
-- 2 个 librarian agent 调研 8 个开源量化系统架构 + 8 维度生产级特性
+- 2 个 librarian agent 调研 8 个通用开源量化系统架构 + 8 维度生产级特性
+- 用户提供 Hermes 开发过程中深度调研并直接借鉴的项目谱系（hl-quant / xalpha / OSkhQuant / Vibe-Trading / OpenSpec / Superpowers / Karpathy），补充了"为什么这么做"的架构决策背景
 
-调研耗时约 3 分钟，覆盖 ~50 个 Python 模块、~15,000 行核心代码。
+调研覆盖 ~50 个 Python 模块、~15,000 行核心代码。
 
 ## 附录 B：AGENTS.md Bug 清单纠正
 
