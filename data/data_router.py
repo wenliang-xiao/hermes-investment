@@ -11,9 +11,9 @@ data/data_router.py — 统一数据路由
     .HK 结尾       → yfinance (港股)
     ^ 开头          → yfinance (指数/美债收益率)
     CL=/GC=/HG=    → AKShare (期货)
-    51/15/16 开头  → baostock (A股ETF)
-    全数字(6位)    → baostock (A股)
-    其他           → yfinance (美股/美ETF)
+    全数字(6位)    → baostock (A股+ETF，含51/15/16/159开头)
+    已知短代码     → yfinance (美股/美ETF)
+    其他           → yfinance (默认)
 """
 from __future__ import annotations
 from pathlib import Path
@@ -88,11 +88,7 @@ def _detect_source(symbol: str) -> str:
     if "=" in symbol and "CNY" not in symbol and "USD" not in symbol:
         return "akshare_futures"
 
-    # A股ETF — 优先用AKShare ETF历史（比baostock稳定）
-    if symbol.startswith(("51", "15", "16", "159")):
-        return "akshare_etf"
-
-    # A股 (6位数字)
+    # A股 (6位数字，含ETF — baostock 统一获取 A股+ETF)
     if symbol.isdigit() and len(symbol) == 6:
         return "baostock"
 
@@ -134,9 +130,6 @@ def get_history(symbol: str, days: int = 1200) -> Optional[dict]:
     elif source == "akshare_futures":
         from data.sources.akshare_source import get_history_futures
         return get_history_futures(symbol, days)
-    elif source == "akshare_etf":
-        from data.sources.akshare_source import get_history_etf
-        return get_history_etf(symbol, days)
     return None
 
 

@@ -1,22 +1,7 @@
 [
   {
-    "symbol": "300059",
-    "score": 0.6068,
-    "scores": {
-      "quality": 0.5439,
-      "value": 0.5617,
-      "growth": 0.8046,
-      "momentum": 0.5517,
-      "low_vol": 0.3621,
-      "sentiment": 0.8103,
-      "risk": 0.613
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.607"
-  },
-  {
     "symbol": "GOOGL",
-    "score": 0.6027,
+    "score": 0.5899,
     "scores": {
       "quality": 0.48,
       "value": 0.4667,
@@ -24,29 +9,15 @@
       "momentum": 0.7333,
       "low_vol": 0.5,
       "sentiment": 0.7,
+      "dividend": 0.5,
       "risk": 0.6833
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.603"
-  },
-  {
-    "symbol": "600030",
-    "score": 0.5985,
-    "scores": {
-      "quality": 0.4483,
-      "value": 0.6481,
-      "growth": 0.6092,
-      "momentum": 0.6667,
-      "low_vol": 0.3448,
-      "sentiment": 0.7931,
-      "risk": 0.6794
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.599"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.590"
   },
   {
     "symbol": "AAPL",
-    "score": 0.5951,
+    "score": 0.5832,
     "scores": {
       "quality": 0.4267,
       "value": 0.3778,
@@ -54,29 +25,15 @@
       "momentum": 0.6,
       "low_vol": 0.5,
       "sentiment": 0.9,
+      "dividend": 0.5,
       "risk": 0.75
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.595"
-  },
-  {
-    "symbol": "603259",
-    "score": 0.5838,
-    "scores": {
-      "quality": 0.5568,
-      "value": 0.5864,
-      "growth": 0.5862,
-      "momentum": 0.7701,
-      "low_vol": 0.3448,
-      "sentiment": 0.7414,
-      "risk": 0.5006
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.584"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.583"
   },
   {
     "symbol": "AMZN",
-    "score": 0.5751,
+    "score": 0.5657,
     "scores": {
       "quality": 0.4533,
       "value": 0.4222,
@@ -84,149 +41,47 @@
       "momentum": 0.5333,
       "low_vol": 0.5333,
       "sentiment": 0.8,
+      "dividend": 0.5,
       "risk": 0.7167
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.575"
-  },
-  {
-    "symbol": "002129",
-    "score": 0.5547,
-    "scores": {
-      "quality": 0.4666,
-      "value": 0.5,
-      "growth": 0.8391,
-      "momentum": 0.7931,
-      "low_vol": 0.2241,
-      "sentiment": 0.6724,
-      "risk": 0.3879
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.555"
-  },
-  {
-    "symbol": "601318",
-    "score": 0.5516,
-    "scores": {
-      "quality": 0.469,
-      "value": 0.7593,
-      "growth": 0.4713,
-      "momentum": 0.2529,
-      "low_vol": 0.5172,
-      "sentiment": 0.6207,
-      "risk": 0.7708
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.552"
-  },
-  {
-    "symbol": "MSFT",
-    "score": 0.5513,
-    "scores": {
-      "quality": 0.52,
-      "value": 0.5333,
-      "growth": 0.4333,
-      "momentum": 0.2889,
-      "low_vol": 0.6667,
-      "sentiment": 0.7667,
-      "risk": 0.65
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.551"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.566"
   },
   {
     "symbol": "MU",
-    "score": 0.5509,
+    "score": 0.549,
     "scores": {
-      "quality": 0.5067,
-      "value": 0.5111,
+      "quality": 0.52,
+      "value": 0.5333,
       "growth": 0.8111,
       "momentum": 0.8444,
       "low_vol": 0.2333,
       "sentiment": 0.7,
+      "dividend": 0.5,
       "risk": 0.25
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.551"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.549"
   },
   {
-    "symbol": "600036",
-    "score": 0.543,
+    "symbol": "MSFT",
+    "score": 0.5404,
     "scores": {
-      "quality": 0.4828,
-      "value": 0.8333,
-      "growth": 0.3218,
-      "momentum": 0.3103,
-      "low_vol": 0.5517,
-      "sentiment": 0.431,
-      "risk": 0.8704
+      "quality": 0.5067,
+      "value": 0.5111,
+      "growth": 0.4333,
+      "momentum": 0.2889,
+      "low_vol": 0.6667,
+      "sentiment": 0.7667,
+      "dividend": 0.5,
+      "risk": 0.65
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.543"
-  },
-  {
-    "symbol": "601398",
-    "score": 0.5348,
-    "scores": {
-      "quality": 0.4345,
-      "value": 0.7716,
-      "growth": 0.3793,
-      "momentum": 0.4138,
-      "low_vol": 0.4138,
-      "sentiment": 0.5517,
-      "risk": 0.7791
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.535"
-  },
-  {
-    "symbol": "688256",
-    "score": 0.5319,
-    "scores": {
-      "quality": 0.5957,
-      "value": 0.2654,
-      "growth": 0.7586,
-      "momentum": 0.8276,
-      "low_vol": 0.1552,
-      "sentiment": 0.5862,
-      "risk": 0.5345
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.532"
-  },
-  {
-    "symbol": "002460",
-    "score": 0.531,
-    "scores": {
-      "quality": 0.324,
-      "value": 0.5494,
-      "growth": 0.5402,
-      "momentum": 0.3908,
-      "low_vol": 0.6897,
-      "sentiment": 0.5517,
-      "risk": 0.6711
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.531"
-  },
-  {
-    "symbol": "600519",
-    "score": 0.5307,
-    "scores": {
-      "quality": 0.6713,
-      "value": 0.7346,
-      "growth": 0.2644,
-      "momentum": 0.2644,
-      "low_vol": 0.6724,
-      "sentiment": 0.3966,
-      "risk": 0.7114
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.531"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.540"
   },
   {
     "symbol": "GEV",
-    "score": 0.5303,
+    "score": 0.5265,
     "scores": {
       "quality": 0.44,
       "value": 0.4,
@@ -234,74 +89,15 @@
       "momentum": 0.8889,
       "low_vol": 0.4333,
       "sentiment": 0.5333,
+      "dividend": 0.5,
       "risk": 0.3167
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.530"
-  },
-  {
-    "symbol": "000333",
-    "score": 0.5251,
-    "scores": {
-      "quality": 0.5099,
-      "value": 0.5988,
-      "growth": 0.4023,
-      "momentum": 0.5632,
-      "low_vol": 0.4138,
-      "sentiment": 0.5345,
-      "risk": 0.6533
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.525"
-  },
-  {
-    "symbol": "688041",
-    "score": 0.521,
-    "scores": {
-      "quality": 0.6255,
-      "value": 0.216,
-      "growth": 0.7701,
-      "momentum": 0.8046,
-      "low_vol": 0.5172,
-      "sentiment": 0.5517,
-      "risk": 0.1616
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.521"
-  },
-  {
-    "symbol": "300750",
-    "score": 0.5194,
-    "scores": {
-      "quality": 0.495,
-      "value": 0.6235,
-      "growth": 0.4253,
-      "momentum": 0.3793,
-      "low_vol": 0.5,
-      "sentiment": 0.6207,
-      "risk": 0.592
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.519"
-  },
-  {
-    "symbol": "600585",
-    "score": 0.5185,
-    "scores": {
-      "quality": 0.3629,
-      "value": 0.7593,
-      "growth": 0.4138,
-      "momentum": 0.1149,
-      "low_vol": 0.8448,
-      "sentiment": 0.2414,
-      "risk": 0.8927
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.518"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.526"
   },
   {
     "symbol": "META",
-    "score": 0.5183,
+    "score": 0.516,
     "scores": {
       "quality": 0.5333,
       "value": 0.5556,
@@ -309,29 +105,15 @@
       "momentum": 0.5778,
       "low_vol": 0.4333,
       "sentiment": 0.5667,
+      "dividend": 0.5,
       "risk": 0.4833
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.518"
-  },
-  {
-    "symbol": "300502",
-    "score": 0.5176,
-    "scores": {
-      "quality": 0.6291,
-      "value": 0.3025,
-      "growth": 0.6552,
-      "momentum": 0.7701,
-      "low_vol": 0.2069,
-      "sentiment": 0.8966,
-      "risk": 0.1628
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.518"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.516"
   },
   {
     "symbol": "0700.HK",
-    "score": 0.5049,
+    "score": 0.5043,
     "scores": {
       "quality": 0.5733,
       "value": 0.6222,
@@ -339,29 +121,15 @@
       "momentum": 0.3778,
       "low_vol": 0.4333,
       "sentiment": 0.6,
+      "dividend": 0.5,
       "risk": 0.5833
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.505"
-  },
-  {
-    "symbol": "688012",
-    "score": 0.5003,
-    "scores": {
-      "quality": 0.4316,
-      "value": 0.216,
-      "growth": 0.5632,
-      "momentum": 0.977,
-      "low_vol": 0.431,
-      "sentiment": 0.7069,
-      "risk": 0.1762
-    },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.500"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.504"
   },
   {
     "symbol": "NVDA",
-    "score": 0.496,
+    "score": 0.4965,
     "scores": {
       "quality": 0.4667,
       "value": 0.4444,
@@ -369,84 +137,122 @@
       "momentum": 0.4889,
       "low_vol": 0.4667,
       "sentiment": 0.5333,
+      "dividend": 0.5,
       "risk": 0.55
     },
-    "date_added": "2026-07-02",
+    "date_added": "2026-07-07",
     "reason": "综合分0.496"
   },
   {
-    "symbol": "000651",
-    "score": 0.4947,
+    "symbol": "AMD",
+    "score": 0.4743,
     "scores": {
-      "quality": 0.4697,
-      "value": 0.6111,
-      "growth": 0.4138,
-      "momentum": 0.4368,
-      "low_vol": 0.5345,
-      "sentiment": 0.3276,
-      "risk": 0.6692
+      "quality": 0.4,
+      "value": 0.3333,
+      "growth": 0.8111,
+      "momentum": 0.9333,
+      "low_vol": 0.1333,
+      "sentiment": 0.4,
+      "dividend": 0.5,
+      "risk": 0.2833
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.495"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.474"
   },
   {
-    "symbol": "300014",
-    "score": 0.4876,
+    "symbol": "BABA",
+    "score": 0.4674,
     "scores": {
-      "quality": 0.3941,
-      "value": 0.537,
-      "growth": 0.4023,
-      "momentum": 0.4483,
-      "low_vol": 0.5172,
-      "sentiment": 0.5517,
-      "risk": 0.5626
+      "quality": 0.6,
+      "value": 0.6667,
+      "growth": 0.2111,
+      "momentum": 0.0444,
+      "low_vol": 0.9667,
+      "sentiment": 0.2333,
+      "dividend": 0.5,
+      "risk": 0.5167
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.488"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.467"
   },
   {
-    "symbol": "688008",
-    "score": 0.4857,
+    "symbol": "9618.HK",
+    "score": 0.4596,
     "scores": {
-      "quality": 0.5623,
-      "value": 0.2099,
-      "growth": 0.8046,
-      "momentum": 0.977,
-      "low_vol": 0.2931,
-      "sentiment": 0.5172,
-      "risk": 0.0358
+      "quality": 0.56,
+      "value": 0.6,
+      "growth": 0.3,
+      "momentum": 0.2667,
+      "low_vol": 0.6667,
+      "sentiment": 0.1667,
+      "dividend": 0.5,
+      "risk": 0.6167
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.486"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.460"
   },
   {
-    "symbol": "002415",
-    "score": 0.4782,
+    "symbol": "TSM",
+    "score": 0.4579,
     "scores": {
-      "quality": 0.4832,
-      "value": 0.5864,
-      "growth": 0.1379,
-      "momentum": 0.6552,
-      "low_vol": 0.3793,
-      "sentiment": 0.5172,
-      "risk": 0.5881
+      "quality": 0.4133,
+      "value": 0.3556,
+      "growth": 0.7444,
+      "momentum": 0.8,
+      "low_vol": 0.1,
+      "sentiment": 0.4,
+      "dividend": 0.5,
+      "risk": 0.35
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.478"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.458"
   },
   {
-    "symbol": "002371",
-    "score": 0.4708,
+    "symbol": "9988.HK",
+    "score": 0.4421,
     "scores": {
-      "quality": 0.5441,
-      "value": 0.2346,
-      "growth": 0.6322,
-      "momentum": 0.9195,
-      "low_vol": 0.4655,
-      "sentiment": 0.3276,
-      "risk": 0.1724
+      "quality": 0.5867,
+      "value": 0.6444,
+      "growth": 0.1667,
+      "momentum": 0.0222,
+      "low_vol": 0.7,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 0.4167
     },
-    "date_added": "2026-07-02",
-    "reason": "综合分0.471"
+    "date_added": "2026-07-07",
+    "reason": "综合分0.442"
+  },
+  {
+    "symbol": "CEG",
+    "score": 0.4246,
+    "scores": {
+      "quality": 0.5467,
+      "value": 0.5778,
+      "growth": 0.2556,
+      "momentum": 0.1333,
+      "low_vol": 0.8,
+      "sentiment": 0.2,
+      "dividend": 0.5,
+      "risk": 0.3833
+    },
+    "date_added": "2026-07-07",
+    "reason": "综合分0.425"
+  },
+  {
+    "symbol": "VST",
+    "score": 0.4026,
+    "scores": {
+      "quality": 0.4933,
+      "value": 0.4889,
+      "growth": 0.3889,
+      "momentum": 0.4667,
+      "low_vol": 0.4333,
+      "sentiment": 0.0,
+      "dividend": 0.5,
+      "risk": 0.45
+    },
+    "date_added": "2026-07-07",
+    "reason": "综合分0.403"
   }
 ]

@@ -737,11 +737,13 @@ def get_comparison():
     try:
         from investment_system.analysis.strategy_comparison import run_comparison
         result = run_comparison(days=60)
-        # 附加实时信号
+        # 附加实时信号（第三层防护：过滤 price≤0）
         sig_path = ROOT / "data" / "trading_signals.json"
         if sig_path.exists():
             with open(sig_path) as f:
-                result["live_signals"] = json.load(f)
+                live = json.load(f)
+            live["signals"], _dropped = _clean_signals(live.get("signals", []), "comparison")
+            result["live_signals"] = live
         return result
     except Exception as e:
         return {"error": str(e)}
@@ -749,11 +751,12 @@ def get_comparison():
 
 @app.get("/api/signals")
 def api_signals():
-    """今日实时信号"""
+    """今日实时信号（第三层防护：过滤 price≤0）"""
     sig_path = ROOT / "data" / "trading_signals.json"
     if sig_path.exists():
         with open(sig_path) as f:
             data = json.load(f)
+        data["signals"], _dropped = _clean_signals(data.get("signals", []), "api_signals")
         return data
     return {"error": "no signals yet today", "signals": []}
 
@@ -861,6 +864,22 @@ def api_metrics():
         return {"error": str(e)}
 
 
+def _clean_signals(signals, context="signal"):
+    """第三层防护：读路径过滤 price≤0 的毒信号"""
+    if not signals:
+        return signals, 0
+    filtered = []
+    dropped = 0
+    for s in signals:
+        p = s.get("price", 0)
+        if p is None or p <= 0:
+            dropped += 1
+            continue
+        filtered.append(s)
+    if dropped:
+        print(f"  🛡️ _clean_signals({context}): 过滤 {dropped}/{len(signals)} 条 price≤0 信号", flush=True)
+    return filtered, dropped
+
 @app.get("/api/simulated")
 def api_simulated():
     """三个策略模拟盘全方位数据"""
@@ -873,7 +892,7 @@ def api_simulated():
 
     portfolios = data.get("portfolios", {})
     positions = data.get("positions", {})
-    signals = data.get("signals", [])
+    signals, _dropped = _clean_signals(data.get("signals", []), "api_simulated")
 
     # 各策略汇总
     result = {}
@@ -915,6 +934,14 @@ def api_simulated():
                 "peak_price": pd.get("peak_price", entry),
             })
 
+        # 每个策略的信号也要做 price=0 过滤
+        s_sigs = []
+        for s in signals:
+            if s.get("strategy", "") == sname:
+                s_sigs.append(s)
+        # 再过滤一遍标的位置中 price=0 的（持仓中已平的无效标的）
+        pos_list = [p for p in pos_list if p.get("current_price", 0) > 0]
+
         result[sname] = {
             "label": label.get("name", sname),
             "color": label.get("color", "#fff"),
@@ -924,10 +951,10 @@ def api_simulated():
             "total_value": round(total_value, 2),
             "total_pnl": round(total_pnl, 2),
             "total_return": round(total_return, 2),
-            "position_count": len(pos),
+            "position_count": sum(1 for p in pos_list if p.get("current_price", 0) > 0),
             "history_count": pf.get("history_count", 0),
             "positions": pos_list,
-            "signals": [s for s in signals if s["strategy"] == sname],
+            "signals": s_sigs,
         }
 
     return {

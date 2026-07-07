@@ -1,21 +1,7 @@
 [
   {
-    "symbol": "300059",
-    "score": 0.6068,
-    "scores": {
-      "quality": 0.5439,
-      "value": 0.5617,
-      "growth": 0.8046,
-      "momentum": 0.5517,
-      "low_vol": 0.3621,
-      "sentiment": 0.8103,
-      "risk": 0.613
-    },
-    "date_added": "2026-07-02"
-  },
-  {
     "symbol": "GOOGL",
-    "score": 0.6027,
+    "score": 0.5899,
     "scores": {
       "quality": 0.48,
       "value": 0.4667,
@@ -23,27 +9,14 @@
       "momentum": 0.7333,
       "low_vol": 0.5,
       "sentiment": 0.7,
+      "dividend": 0.5,
       "risk": 0.6833
     },
     "date_added": "2026-07-02"
   },
   {
-    "symbol": "600030",
-    "score": 0.5985,
-    "scores": {
-      "quality": 0.4483,
-      "value": 0.6481,
-      "growth": 0.6092,
-      "momentum": 0.6667,
-      "low_vol": 0.3448,
-      "sentiment": 0.7931,
-      "risk": 0.6794
-    },
-    "date_added": "2026-07-02"
-  },
-  {
     "symbol": "AAPL",
-    "score": 0.5951,
+    "score": 0.5832,
     "scores": {
       "quality": 0.4267,
       "value": 0.3778,
@@ -51,27 +24,14 @@
       "momentum": 0.6,
       "low_vol": 0.5,
       "sentiment": 0.9,
+      "dividend": 0.5,
       "risk": 0.75
     },
     "date_added": "2026-07-02"
   },
   {
-    "symbol": "603259",
-    "score": 0.5838,
-    "scores": {
-      "quality": 0.5568,
-      "value": 0.5864,
-      "growth": 0.5862,
-      "momentum": 0.7701,
-      "low_vol": 0.3448,
-      "sentiment": 0.7414,
-      "risk": 0.5006
-    },
-    "date_added": "2026-07-02"
-  },
-  {
     "symbol": "AMZN",
-    "score": 0.5751,
+    "score": 0.5657,
     "scores": {
       "quality": 0.4533,
       "value": 0.4222,
@@ -79,35 +39,8 @@
       "momentum": 0.5333,
       "low_vol": 0.5333,
       "sentiment": 0.8,
+      "dividend": 0.5,
       "risk": 0.7167
-    },
-    "date_added": "2026-07-02"
-  },
-  {
-    "symbol": "002129",
-    "score": 0.5547,
-    "scores": {
-      "quality": 0.4666,
-      "value": 0.5,
-      "growth": 0.8391,
-      "momentum": 0.7931,
-      "low_vol": 0.2241,
-      "sentiment": 0.6724,
-      "risk": 0.3879
-    },
-    "date_added": "2026-07-02"
-  },
-  {
-    "symbol": "601318",
-    "score": 0.5516,
-    "scores": {
-      "quality": 0.469,
-      "value": 0.7593,
-      "growth": 0.4713,
-      "momentum": 0.2529,
-      "low_vol": 0.5172,
-      "sentiment": 0.6207,
-      "risk": 0.7708
     },
     "date_added": "2026-07-02"
   },
