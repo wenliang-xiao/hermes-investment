@@ -33,7 +33,7 @@ def fetch_stock_events_akshare(symbol, limit=10):
     """获取个股新闻 via AKShare stock_news_em"""
     try:
         import akshare as ak
-        df = ak.stock_news_em(symbol=symbol, limit=limit)
+        df = ak.stock_news_em(symbol=symbol)  # always returns 10 rows
         if df is None or df.empty:
             return []
         events = []
@@ -43,6 +43,8 @@ def fetch_stock_events_akshare(symbol, limit=10):
                 ev[c.lower()] = str(row[c])[:300]
             ev["symbol"] = symbol
             events.append(ev)
+            if len(events) >= limit:
+                break
         return events
     except Exception as e:
         return [{"symbol": symbol, "error": str(e)[:100]}]
