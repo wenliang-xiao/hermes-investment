@@ -48,9 +48,9 @@ def save_snapshot(scan_results, prices_map=None):
         if not sym: continue
         entry = {
             "symbol": sym,
-            "score": s.get("score", 0),
+            "score": s.get("score", s.get("composite", 0)),
         }
-        factors = s.get("factors", {})
+        factors = s.get("factors", s.get("scores", s.get("factor_breakdown", {})))
         if factors:
             entry["factors"] = {k: round(v, 2) for k, v in factors.items()}
         scores_entry.append(entry)

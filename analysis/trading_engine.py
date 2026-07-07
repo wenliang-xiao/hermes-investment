@@ -18,6 +18,7 @@ from data.data_layer import get_stock_daily
 from domain import WATCHLIST
 from config import FACTOR_WEIGHTS
 from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
+from analysis.cost_model import calc_adjusted_price
 from strategies import faceji as _faceji_pure, silverquant as _sq_pure, tradingagents as _ta_pure
 from utils.atomic_io import atomic_write_json
 import functools
@@ -180,7 +181,7 @@ class BaseStrategy:
         }
 
     def execute_buy(self, signal):
-        """通用买入执行（各策略可覆盖）"""
+        """通用买入执行（各策略可覆盖）— 含滑点+手续费成本模型"""
         sym = signal.symbol
         price = signal.price
         if not price or price <= 0:
@@ -188,22 +189,23 @@ class BaseStrategy:
             return False
         pct = signal.size_pct or 3.0
         qty = max(100, int(self.cash * pct / 100 / price / 100) * 100)
-        cost = price * qty
-        if cost > self.cash:
+        adj_price, cost_detail = calc_adjusted_price(price, qty, "buy", sym)
+        total_cost = adj_price * qty
+        if total_cost > self.cash:
             return False
-        self.cash -= cost
+        self.cash -= total_cost
         self.positions[sym] = {
-            "entry_price": price, "quantity": qty,
+            "entry_price": adj_price, "quantity": qty,
             "entry_date": date.today().strftime("%Y-%m-%d"),
-            "peak": price, "current_price": price
+            "peak": adj_price, "current_price": adj_price
         }
         self.history.append({"date": str(date.today()), "symbol": sym,
-                             "action": "买入", "price": price, "cost": round(cost, 2),
+                             "action": "买入", "price": adj_price, "cost": round(total_cost, 2),
                              "reason": signal.reason})
         return True
 
     def execute_sell(self, signal):
-        """通用卖出执行（各策略可覆盖）"""
+        """通用卖出执行（各策略可覆盖）— 含滑点+印花税成本模型"""
         sym = signal.symbol
         if sym not in self.positions:
             return False
@@ -212,10 +214,11 @@ class BaseStrategy:
             return False
         pos = self.positions[sym]
         price = signal.price
-        pnl = (price - pos["entry_price"]) * pos["quantity"]
-        self.cash += price * pos["quantity"]
+        adj_price, cost_detail = calc_adjusted_price(price, pos["quantity"], "sell", sym)
+        pnl = (adj_price - pos["entry_price"]) * pos["quantity"]
+        self.cash += adj_price * pos["quantity"]
         self.history.append({"date": str(date.today()), "symbol": sym,
-                             "action": "卖出", "price": price,
+                             "action": "卖出", "price": adj_price,
                              "pnl": round(pnl, 2), "reason": signal.reason})
         del self.positions[sym]
         return True

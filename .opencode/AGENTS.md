@@ -36,12 +36,12 @@
 
 ## 已知严重 Bug（修复前不能改相关逻辑）
 
-| Bug | 文件 | 行号 | 问题 |
-|-----|------|------|------|
-|| 财务abs() | factor_scanner.py | L60 | abs()抹消经营现金流正负号,负现金流公司评分虚高 |
-|| MA方向反向 | faceji.py | L62 | `ma60d <= ma20d → skip` 在上升趋势错误跳过 |
-|| 周频接线缺陷 | trading_engine.py | L476-496 | 模拟盘BUY检查TradeCalendar但SELL不检查,周频过滤仅限建议信号 |
-|| MACD判定恒真 | run_trading.py | L98 | `pmacd <= pe12-pe26` = `pmacd <= pmacd` 恒成立,金叉判定失效 |
+| Bug | 文件 | 行号 | 问题 | 状态 |
+|-----|------|------|------|------|
+|| 财务abs() | factor_scanner.py | L60 | abs()抹消经营现金流正负号,负现金流公司评分虚高 | ✅ 已修 |
+|| MA方向反向 | faceji.py | L62 | `ma60d <= ma20d → skip` 在上升趋势错误跳过 | ✅ 已修 |
+|| 周频接线缺陷 | trading_engine.py | L476-496 | 模拟盘BUY检查TradeCalendar但SELL不检查,周频过滤仅限建议信号 | ✅ 已修 |
+|| MACD判定恒真 | run_trading.py | L98 | `pmacd <= pe12-pe26` = `pmacd <= pmacd` 恒成立,金叉判定失效 | ✅ 已修 |
 
 > ⚠️ 2026-07-07 修正: 此前AGENTS.md的Bug行号有3处错误,已根据OpenCode架构评审更新:
 > - abs() bug: data_layer.py→factor_scanner.py L60 (评审确认: L60 abs()抹消现金流正负号)
@@ -53,16 +53,16 @@
 ## 禁止事项
 
 - ❌ 不要修改 `evaluator_fixed.py` 的 `FIXED_SCORE_MAP`（ADR-001 固定评估器）
-- ❌ 不要对 `config.py` 和 `domain/__init__.py` 分别改动同一个值（双重维护,统一前用一个）
+- ❌ 不要在 `domain/__init__.py` 中重复定义配置（已改为 re-export config.py, config.py 是唯一事实源）
 - ❌ 不要新增评分引擎或策略实现
 - ❌ 不要用 `as any` / `@ts-ignore` / `@ts-expect-error`
 
 ## 配置详情
 
-- WATCHLIST: ~92 只唯一标的（A股 47 + 港股 9 + 美股 18 + ETF 17 + 其他）
-- 产业链: 15 条（config.py 最新，domain/__init__.py 缺"物理AI链"）
+- WATCHLIST: ~100 只唯一标的（A股 + 港股 + 美股 + ETF + 其他）
+- 产业链: 15 条（config.py 为唯一事实源, domain/__init__.py 已改为 re-export）
 - WATCHLIST 重复条目: GLD/HG=F/CL=F（L352/404, L354/406, L355/407）
-- 飞书凭据: config.py L16-22 硬编码，应改用环境变量
+- 飞书凭据: 通过环境变量 + .env 文件加载（HERMES_ENV 环境变量指定 .env 路径）
 
 ## 版本约定
 
