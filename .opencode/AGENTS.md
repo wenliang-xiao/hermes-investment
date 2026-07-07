@@ -3,6 +3,8 @@
 > 通用工作流 + Skills 速查在全局 `~/.config/opencode/AGENTS.md`
 > 本文件仅包含 Hermes 项目特有知识
 
+运行项目 Python 脚本前请先 `source .opencode/env.sh`（设置 `HERMES_BASE`）。
+
 ---
 
 ## 项目架构（快速定位）
