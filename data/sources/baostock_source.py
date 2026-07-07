@@ -6,6 +6,7 @@ data/sources/baostock_source.py — A股日线数据源
 from __future__ import annotations
 from pathlib import Path
 import sys, os, json
+from datetime import datetime
 
 _CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,7 +65,7 @@ def get_history_a(symbol: str, days: int = 1200):
         bs.logout()
         try:
             import akshare as ak
-            df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20180101", end_date="20260625", adjust="qfq")
+            df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20180101", end_date=datetime.now().strftime("%Y%m%d"), adjust="qfq")
             if df is not None and not df.empty:
                 dates = df["日期"].tolist() if "日期" in df.columns else []
                 if dates:

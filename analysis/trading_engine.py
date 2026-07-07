@@ -488,7 +488,10 @@ class TradingEngine:
                     if ok:
                         self.calendar.record_trade(sig.strategy, sig.to_dict())
                 elif sig.action == "SELL":
+                    # SELL 不受 can_trade 阻止(止损优先于周频限制)，但需 record_trade 计入周频预算
                     ok = strategy.execute_sell(sig)
+                    if ok:
+                        self.calendar.record_trade(sig.strategy, sig.to_dict())
                 else:
                     continue
                 if ok:
