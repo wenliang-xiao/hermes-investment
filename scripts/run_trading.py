@@ -188,6 +188,11 @@ def run():
         price = r.get("price", 0)
         if score <= 0:
             continue
+        # 关键防护: price <= 0 的标的不进入策略决策
+        # （避免策略基于无效价格生成伪信号，如 price=0 触发 -100% 硬止损）
+        if not price or price <= 0:
+            print(f"  ⚠️ 跳过 {sym}: price={price} 无效, 不进入策略决策", flush=True)
+            continue
         score_map[sym] = score
         price_map[sym] = price
         tech_map[sym] = compute_technicals(sym, price, hist)

@@ -88,6 +88,8 @@ def decide(
     # ─── 清仓 ───
     for sym, pos in positions.items():
         price = price_map.get(sym, pos.current_price or pos.entry_price)
+        if not price or price <= 0:
+            continue
         ds = debate.get(sym, 5.0)
         entry = pos.entry_price
         pnl_pct = (price - entry) / entry * 100

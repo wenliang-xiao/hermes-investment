@@ -83,6 +83,8 @@ def decide(
     # ─── 清仓信号（4层风控）───
     for sym, pos in positions.items():
         price = price_map.get(sym, pos.current_price or pos.entry_price)
+        if not price or price <= 0:
+            continue
         score = score_map.get(sym, 0)
         entry = pos.entry_price
         peak = pos.peak or entry
