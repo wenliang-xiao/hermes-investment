@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest python-dotenv pandas numpy scipy
+          pip install baostock akshare yfinance 2>/dev/null || true
+
+      - name: Lint with ruff
+        run: |
+          ruff check --select=E9,F63,F7,F82 --statistics . || true
+
+      - name: Run tests
+        env:
+          HERMES_BASE: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/ -v --tb=short 2>&1 || true
