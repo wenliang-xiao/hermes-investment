@@ -38,10 +38,15 @@
 
 | Bug | 文件 | 行号 | 问题 |
 |-----|------|------|------|
-| 财务abs() | data_layer.py | L276,327-331,354,364 | abs()抹消正负号,ROE=-5%→500% |
-| MA方向反向 | faceji.py | L62 | `ma60d <= ma20d → skip` 在上升趋势错误跳过 |
-| 周频接线缺陷 | trading_engine.py | L631-644 | 模拟盘绕过TradeCalendar,周频过滤仅用于建议信号 |
-| MACD判定恒真 | 三处 | evaluator_fixed.py:L256,backtest_v2.py:L293,backtest_all:L539 | `pmacd <= pe12-pe26` = `pmacd <= pmacd` |
+|| 财务abs() | factor_scanner.py | L60 | abs()抹消经营现金流正负号,负现金流公司评分虚高 |
+|| MA方向反向 | faceji.py | L62 | `ma60d <= ma20d → skip` 在上升趋势错误跳过 |
+|| 周频接线缺陷 | trading_engine.py | L476-496 | 模拟盘BUY检查TradeCalendar但SELL不检查,周频过滤仅限建议信号 |
+|| MACD判定恒真 | run_trading.py | L98 | `pmacd <= pe12-pe26` = `pmacd <= pmacd` 恒成立,金叉判定失效 |
+
+> ⚠️ 2026-07-07 修正: 此前AGENTS.md的Bug行号有3处错误,已根据OpenCode架构评审更新:
+> - abs() bug: data_layer.py→factor_scanner.py L60 (评审确认: L60 abs()抹消现金流正负号)
+> - MACD恒真: evaluator_fixed.py/backtest_v2.py/backtest_all.py 三处 `pmacd <= psig` 是正确的MACD比较→实际bug在 run_trading.py L98 `pmacd <= pe12-pe26` (=pmacd<=pmacd)
+> - 周频接线缺陷行号: L631-644(600行文件不存在)→L476-496
 
 完整清单: `docs/review/final-deep-audit-2026-07-03.md`
 

@@ -57,7 +57,7 @@ class FactorScanner:
         """
         roe = min(float(fin.get("净资产收益率", 0) or 0), 60)  # 截断异常值
         rev = min(float(fin.get("营业收入同比增长率", 0) or 0), 100)
-        ocps = min(abs(fin.get("每股经营现金流", 0) or 0), 10)
+        ocps = min(float(fin.get("每股经营现金流", 0) or 0), 10)
 
         s_roe = self._bounded_linear_score(roe, (0, 30))
         s_rev = self._bounded_linear_score(rev, (0, 50))  # 营收增速作为质量佐证
