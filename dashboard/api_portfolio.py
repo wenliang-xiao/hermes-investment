@@ -154,6 +154,97 @@ def api_v2_portfolio_detail():
     with open(ts_path) as f:
         data = json.load(f)
 
+    raw_portfolios = data.get("portfolios", {})
+    raw_positions = data.get("positions", {})
+    raw_signals = data.get("signals", [])
+    trade_history = data.get("trade_history", {})
+
+    # ── 补充统计字段 (匹配 JS loadDashboardV2 的期望) ──
+    strategy_labels = {
+        "faceji": {"name": "面基", "color": "#58a6ff", "style": "面基(评分+趋势+Kelly+SQ风控)"},
+        "silverquant": {"name": "SilverQuant", "color": "#3fb950", "style": "组件化(评分建仓+4层风控)"},
+        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "辩论制(Kelly动态+技术融合)"},
+    }
+    CAPITAL = 1_000_000
+
+    enriched_portfolios = {}
+    for sname in ["faceji", "silverquant", "tradingagents"]:
+        pf = raw_portfolios.get(sname, {})
+        cash = pf.get("cash", CAPITAL)
+        invested = pf.get("total_invested", 0)
+        total_value = cash + invested
+        total_pnl = total_value - CAPITAL
+        total_return = total_pnl / CAPITAL * 100 if CAPITAL else 0
+
+        # 胜率
+        txns = trade_history.get(sname, [])
+        wins = sum(1 for t in txns if t.get("pnl", 0) > 0)
+        win_rate = round(wins / len(txns) * 100, 1) if txns else None
+
+        label = strategy_labels.get(sname, {})
+        enriched_portfolios[sname] = {
+            "label": label.get("name", sname),
+            "color": label.get("color", "#fff"),
+            "style": label.get("style", ""),
+            "cash": round(cash, 2),
+            "invested": round(invested, 2),
+            "total_value": round(total_value, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_return": round(total_return, 2),
+            "position_count": pf.get("position_count", 0),
+            "history_count": pf.get("history_count", 0),
+            "win_rate": win_rate,
+        }
+
+    # ── 补充持仓字段 ──
+    enriched_positions = {}
+    for sname in ["faceji", "silverquant", "tradingagents"]:
+        syms = raw_positions.get(sname, {})
+        pf = raw_portfolios.get(sname, {})
+        pf_cash = pf.get("cash", CAPITAL)
+        pos_list = {}
+        for sym, pos in syms.items():
+            entry = pos.get("entry_price", 0)
+            current = pos.get("current_price", entry)
+            qty = pos.get("quantity", 0)
+            cost = entry * qty
+            mkt_val = current * qty
+            pnl = mkt_val - cost
+            pnl_pct = round((current - entry) / entry * 100, 2) if entry else 0
+            hold_days = 0
+            if pos.get("entry_date"):
+                try:
+                    ed = datetime.strptime(pos["entry_date"], "%Y-%m-%d")
+                    hold_days = (datetime.now() - ed).days
+                except ValueError:
+                    pass
+
+            # 仓位占比
+            total_assets = pf_cash + sum(p.get("current_price", 0) * p.get("quantity", 0) for p in syms.values())
+            pct = round(mkt_val / total_assets * 100, 2) if total_assets else 0
+
+            pos_list[sym] = {
+                "symbol": sym,
+                "name": get_name(sym),
+                "entry_price": entry,
+                "current_price": current,
+                "quantity": qty,
+                "pnl": round(pnl, 2),
+                "pnl_pct": pnl_pct,
+                "hold_days": hold_days,
+                "entry_date": pos.get("entry_date", ""),
+                "reason": pos.get("reason", f"建仓评分{pos.get('entry_score', '?')}分"),
+                "stop_loss": round(entry * 0.92, 2),
+                "pct": pct,
+                "peak_price": pos.get("peak_price", entry),
+                "drawdown_from_peak": pos.get("drawdown_from_peak", 0),
+                "drawdown_from_entry": pos.get("drawdown_from_entry", 0),
+                "entry_score": pos.get("entry_score"),
+                "current_score": pos.get("current_score"),
+                "factor_scores": pos.get("factor_scores"),
+            }
+        enriched_positions[sname] = pos_list
+
     result = {
         "date": data.get("date", ""),
         "generated_at": data.get("generated_at", ""),
@@ -161,16 +252,12 @@ def api_v2_portfolio_detail():
         "after_conflict_resolution": data.get("after_conflict_resolution", 0),
         "after_weekly_filter": data.get("after_weekly_filter", 0),
         "simulated_trades": data.get("simulated_trades", 0),
-        "portfolios": data.get("portfolios", {}),
-        "positions": data.get("positions", {}),
-        "trade_history": data.get("trade_history", {}),
-        "final_signals": data.get("signals", []),
+        "portfolios": enriched_portfolios,
+        "positions": enriched_positions,
+        "trade_history": trade_history,
+        "final_signals": _clean_signals(raw_signals, "v2_detail")[0],
         "all_signals": data.get("all_signals", []),
     }
-
-    for strat_name, positions in result["positions"].items():
-        for sym, pos in positions.items():
-            pos["name"] = get_name(sym)
 
     return result
 

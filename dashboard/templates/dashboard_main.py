@@ -544,7 +544,7 @@ function renderPoolMarket(marketId) {
                 else if (val < 0.3) bColor = 'bg-red-500';
                 const subKeys = explainMap[fk] || [];
                 const subLines = subKeys.length > 0
-                    ? subKeys.map(sk => { const sv = fb[sk]; return sv !== undefined ? `${sk.split(':')[1]}=${sv.toFixed(2)}` : ''; }).filter(Boolean).join('\n')
+                    ? subKeys.map(sk => { const sv = fb[sk]; return sv !== undefined ? `${sk.split(':')[1]}=${sv.toFixed(2)}` : ''; }).filter(Boolean).join('\\n')
                     : '';
                 const tooltip = subLines ? `${factorLabels[idx]}: ${val.toFixed(2)}\n${subLines}` : `${factorLabels[idx]}: ${val.toFixed(2)}`;
                 barsHtml += `<div class="flex flex-col items-center justify-end w-4 group relative" title="${tooltip.replace(/"/g, '&quot;')}"><div class="w-full ${bColor} rounded-t-sm opacity-80 group-hover:opacity-100 transition-opacity" style="height: ${h}"></div><div class="text-[8px] text-gray-500 mt-0.5">${factorLabels[idx]}</div></div>`;
@@ -1094,11 +1094,11 @@ async function loadNews() {
       // ── 分类标签: 全部 / 个股 / 快讯 / 电报 / 公告 ──
       if (categories.length > 0) {
         html += '<div class="flex gap-2 mb-3 flex-wrap" id="newsCategoryTabs">';
-        html += '<button onclick="filterNewsV3(\'\')" class="news-cat-btn bg-blue-600 text-white rounded px-3 py-1 text-xs font-medium">全部</button>';
+        html += '<button class="news-cat-btn bg-blue-600 text-white rounded px-3 py-1 text-xs font-medium" data-cat="" onclick="filterNewsV3()">全部</button>';
         categories.forEach(cat => {
-          const tabInfo = tabMap[cat] || { label: cat, icon: '' };
-          html += `<button onclick="filterNewsV3('${cat.replace(/'/g, "\\\'")}')" class="news-cat-btn bg-gray-700 text-gray-300 rounded px-3 py-1 text-xs hover:bg-gray-600">${tabInfo.label}</button>`;
-        });
+                const tabInfo = tabMap[cat] || { label: cat, icon: '' };
+                html += `<button class="news-cat-btn bg-gray-700 text-gray-300 rounded px-3 py-1 text-xs hover:bg-gray-600" data-cat="${cat}" onclick="filterNewsV3(this.dataset.cat)">${tabInfo.label}</button>`;
+              });
         html += '</div>';
       }
 

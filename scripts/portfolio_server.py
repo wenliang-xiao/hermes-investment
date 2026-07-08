@@ -6,10 +6,14 @@
   python3 scripts/portfolio_server.py 8686
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from dashboard.server import app
 
 if __name__ == "__main__":
     import uvicorn
-    import sys
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8686
+    import sys as _sys
+    port = int(_sys.argv[1]) if len(_sys.argv) > 1 else 8686
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
