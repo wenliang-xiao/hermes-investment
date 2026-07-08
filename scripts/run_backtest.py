@@ -24,7 +24,7 @@ from datetime import datetime, date
 
 def do_list():
     """列出已有回测结果"""
-    from analysis.backtest_storage import list_results
+    from engine.backtest_storage import list_results
     results = list_results()
     if not results:
         print("📭 暂无回测结果")
@@ -42,7 +42,7 @@ def do_list():
 
 def do_run(args):
     """运行回测并保存"""
-    from evaluator_fixed import evaluate_strategy
+    from engine.evaluator_fixed import evaluate_strategy
 
     strategy = args.strategy
     print(f"🚀 运行回测: {strategy}")
@@ -60,7 +60,7 @@ def do_run(args):
         return
 
     # 兼容 BacktestResult 和旧 dict 格式
-    from analysis.backtest_types import BacktestResult
+    from engine.backtest_types import BacktestResult
     if isinstance(result, BacktestResult):
         br = result
         avg_sortino = br.sortino_ratio if not args.walk_forward else br.extra.get("avg_sortino", 0)
@@ -86,7 +86,7 @@ def do_run(args):
     print(f"   收益率: {avg_return:.2f}%" if isinstance(avg_return, (int, float)) else f"   收益率: {avg_return}")
 
     # 转换为标准 schema 并保存
-    from analysis.backtest_storage import save_result
+    from engine.backtest_storage import save_result
     standard = {
         "meta": {
             "strategy": strategy,

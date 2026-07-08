@@ -21,7 +21,7 @@ os.chdir(_PROJECT_DIR)  # Always run from investment_system/
 # Local imports (investment_system/)
 from config import FACTOR_WEIGHTS
 from data.data_layer import get_stock_daily, get_financial_report
-from analysis.factor_scanner import FactorScanner
+from engine.factor_scanner import FactorScanner
 from domain import WATCHLIST
 import functools
 print = functools.partial(print, flush=True)

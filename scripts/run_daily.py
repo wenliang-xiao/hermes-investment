@@ -29,7 +29,7 @@ from output.fund_tracker import track_lds_portfolio_v2
 from analysis.news_engine import get_news_with_impact
 from data.yf_data_layer import get_global_market_snapshot
 from data.data_layer import get_northbound_flow
-from analysis.factor_engine import FactorScannerCompatV4 as FactorScanner
+from engine.factor_engine import FactorScannerCompatV4 as FactorScanner
 
 LF = '/tmp/report_daily_log.txt'
 with open(LF, 'w') as f: f.write('')
@@ -91,7 +91,7 @@ try:
     stock_context = []
     try:
         from domain import WATCHLIST
-        from analysis.anomaly_news import fetch_stock_news
+        from research.anomaly_news import fetch_stock_news
         core_codes = [k for k, v in WATCHLIST.items()
                       if str(k).isdigit() and v.get("tier") == "核心"][:15]
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
@@ -341,7 +341,7 @@ try:
         research_map = {}
         if flagged_codes:
             try:
-                from analysis.research_report import batch_research_summary, format_research_line
+                from research.research_report import batch_research_summary, format_research_line
                 research_map = batch_research_summary(flagged_codes, days=30)
             except Exception:
                 pass
@@ -593,7 +593,7 @@ try:
     # ═══ 2.3 因子有效性 ═══
     if scan_results and scan_status == "complete":
         try:
-            from analysis.factor_quality import save_snapshot, get_quality_report
+            from engine.factor_quality import save_snapshot, get_quality_report
             # 从扫描结果提取价格（scan_one自带的price字段）
             _price_map = {str(s.get('symbol', '')): s.get('price') 
                          for s in scan_results if s.get('price') is not None}
@@ -868,7 +868,7 @@ try:
     if anomaly_stocks_for_news:
         w.write(doc_id, [('quote', f"发现 {len(anomaly_stocks_for_news)} 只异动股（≥5%），正在搜索驱动因素...")])
         try:
-            from analysis.anomaly_news import (
+            from research.anomaly_news import (
                 analyze_anomaly_stocks, format_anomaly_analysis_for_report
             )
             anomaly_results = analyze_anomaly_stocks(anomaly_stocks_for_news)

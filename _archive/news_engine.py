@@ -25,12 +25,33 @@ import re
 import json
 import time
 import hashlib
+import signal
+import socket
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from typing import Dict, List, Optional, Tuple
+
+socket.setdefaulttimeout(8)  # 全局socket超时8秒，防止外部API挂死
+
+class _TimeLimitError(Exception):
+    pass
+
+def _timeout_call(seconds, func, *args, **kwargs):
+    """信号超时包装器——用于AKShare等不遵守socket超时的调用"""
+    def _handler(signum, frame):
+        raise _TimeLimitError(f"调用超时（{seconds}s限制）")
+    old = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        result = func(*args, **kwargs)
+        return result
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
 
 # ═══════════════════════════════════════════════════════════════
 # 基础配置
@@ -50,8 +71,41 @@ UA = (
 )
 
 # 每条源的抓取上限和全局上限
-MAX_PER_SOURCE = 10
-MAX_TOTAL = 20
+MAX_PER_SOURCE = 15       # 每源最多15条
+MAX_TOTAL = 60            # 全局原始上限（过滤前）
+MAX_FINAL = 60            # 过滤去重后最终返回数量（覆盖30天）
+
+# 新闻时间窗口（天）
+NEWS_WINDOW_DAYS = 30     # 周度视角+月度复盘，当天新闻不一定最重要
+
+# 投资相关性关键词白名单（必须命中至少1个才算有效新闻）
+_RELEVANCE_KEYWORDS = {
+    "zh": [
+        "股", "市值", "A股", "港股", "美股", "基金", "ETF", "债券", "汇率",
+        "利率", "通胀", "CPI", "PMI", "GDP", "央行", "美联储",
+        "芯片", "半导体", "AI", "人工智能", "算力", "机器人", "光模块",
+        "新能源", "储能", "电力", "光伏", "风电", "锂电",
+        "黄金", "原油", "铜", "贵金属", "大宗商品",
+        "制裁", "出口管制", "关税", "脱钩", "国产替代", "信创",
+        "减速器", "伺服", "HBM", "存储", "CoWoS",
+        "美元", "人民币", "日元", "欧元", "美债",
+        "上涨", "下跌", "涨停", "跌停", "突破", "创新高", "新低",
+        "财报", "业绩", "营收", "利润", "订单", "产能", "扩产",
+        "IPO", "增发", "回购", "分红",
+    ],
+    "en": [
+        "stock", "market", "shares", "equity", "fund", "etf", "bond", "yield",
+        "fed", "rate", "inflation", "gdp", "central bank",
+        "chip", "semiconductor", "ai", "nvidia", "tsmc", "gpu", "hbm",
+        "robot", "humanoid", "optical", "laser",
+        "energy", "solar", "battery", "lithium", "power",
+        "gold", "oil", "copper", "commodity",
+        "sanction", "tariff", "export control", "decoupling",
+        "earnings", "revenue", "profit", "ipo", "acquisition",
+        "dollar", "yuan", "yen", "euro",
+        "rally", "selloff", "surge", "plunge", "breakout",
+    ],
+}
 
 # ═══════════════════════════════════════════════════════════════
 # Google News RSS 搜索源配置
@@ -59,28 +113,64 @@ MAX_TOTAL = 20
 
 RSS_SOURCES = [
     {
-        "name": "全球财经",
-        "url": "https://news.google.com/rss/search?q=global+finance+stock+market&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "全球宏观",
+        "name": "A股政策监管",
+        "url": "https://news.google.com/rss/search?q=证监会+上交所+深交所+A股+新规+政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "政策监管", "weight": 1.5, "max": 12,
     },
     {
-        "name": "中美关系",
-        "url": "https://news.google.com/rss/search?q=US+China+tariff+decoupling+AI&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "地缘政治",
+        "name": "国产替代半导体",
+        "url": "https://news.google.com/rss/search?q=国产替代+半导体设备+自主可控+信创+芯片+光刻&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "国产替代", "weight": 1.4, "max": 12,
     },
     {
-        "name": "科技/AI",
-        "url": "https://news.google.com/rss/search?q=AI+chip+semiconductor+NVIDIA+TSMC&hl=en-US&gl=US&ceid=US:en",
-        "lang": "en",
-        "default_category": "科技产业",
+        "name": "中美脱钩制裁",
+        "url": "https://news.google.com/rss/search?q=US+China+tariff+sanction+semiconductor+export+controls+decoupling&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "地缘政治", "weight": 1.4, "max": 12,
     },
     {
-        "name": "中文财经",
-        "url": "https://news.google.com/rss/search?q=中国+A股+经济+政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-        "lang": "zh",
-        "default_category": "中国市场",
+        "name": "证券时报",
+        "url": "https://news.google.com/rss/search?q=site:stcn.com+股票+行业+业绩&hl=zh-CN&gl=CN",
+        "lang": "zh", "default_category": "政策监管", "weight": 1.3, "max": 10,
+    },
+    {
+        "name": "AI芯片光模块",
+        "url": "https://news.google.com/rss/search?q=NVIDIA+TSMC+AI+chip+optical+module+800G+CoWoS&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "科技产业", "weight": 1.3, "max": 12,
+    },
+    {
+        "name": "机器人新能源",
+        "url": "https://news.google.com/rss/search?q=humanoid+robot+Optimus+减速器+伺服电机+人形机器人&hl=zh-CN&gl=CN",
+        "lang": "zh", "default_category": "科技产业", "weight": 1.3, "max": 10,
+    },
+    {
+        "name": "东方财富A股",
+        "url": "https://feed.eastmoney.com/toutiaolm.xml",
+        "lang": "zh", "default_category": "A股市场", "weight": 1.2, "max": 15,
+    },
+    {
+        "name": "存储HBM电力",
+        "url": "https://news.google.com/rss/search?q=HBM+memory+storage+data+center+power+electricity+AI&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "科技产业", "weight": 1.2, "max": 10,
+    },
+    {
+        "name": "中文财经宏观",
+        "url": "https://news.google.com/rss/search?q=中国+经济+宏观+利率+CPI+PMI+货币政策&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "中国市场", "weight": 1.1, "max": 10,
+    },
+    {
+        "name": "全球宏观市场",
+        "url": "https://news.google.com/rss/search?q=fed+rate+inflation+stock+market+earnings+GDP&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "全球宏观", "weight": 1.0, "max": 10,
+    },
+    {
+        "name": "港股大宗商品",
+        "url": "https://news.google.com/rss/search?q=港股+恒生+黄金+原油+铜+大宗商品+汇率&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        "lang": "zh", "default_category": "全球宏观", "weight": 1.0, "max": 10,
+    },
+    {
+        "name": "美股科技财报",
+        "url": "https://news.google.com/rss/search?q=earnings+revenue+guidance+NVDA+MSFT+GOOGL+META+AAPL&hl=en-US&gl=US&ceid=US:en",
+        "lang": "en", "default_category": "美股", "weight": 1.1, "max": 10,
     },
 ]
 
@@ -283,12 +373,11 @@ def _fetch_rss(url: str, timeout: int = 15) -> Optional[str]:
         return None
 
 
-def _parse_rss_items(xml_text: str, source_name: str = "") -> List[Dict]:
-    """解析RSS XML，提取新闻条目"""
+def _parse_rss_items(xml_text: str, source_name: str = "", max_items: int = MAX_PER_SOURCE) -> List[Dict]:
     items = []
     try:
         root = ET.fromstring(xml_text)
-        for item in root.findall(".//item")[:MAX_PER_SOURCE]:
+        for item in root.findall(".//item")[:max_items]:
             title = _xml_text(item, "title")
             link = _xml_text(item, "link")
             pub_date = _xml_text(item, "pubDate")
@@ -339,21 +428,22 @@ def _clean_title(title: str) -> str:
 
 
 def _fetch_google_news_rss() -> List[Dict]:
-    """抓取所有Google News RSS源"""
     all_items = []
     for src in RSS_SOURCES:
         print(f"  [RSS] 抓取: {src['name']}...")
         xml_text = _fetch_rss(src["url"])
         if xml_text:
-            items = _parse_rss_items(xml_text, src["name"])
+            src_max = src.get("max", MAX_PER_SOURCE)
+            items = _parse_rss_items(xml_text, src["name"], max_items=src_max)
             for item in items:
                 item["category"] = src["default_category"]
                 item["lang"] = src["lang"]
+                item["source_weight"] = src.get("weight", 1.0)
             all_items.extend(items)
             print(f"    → {len(items)} 条")
         else:
             print(f"    → 0 条（获取失败）")
-        time.sleep(0.3)  # 礼貌间隔
+        time.sleep(0.3)
     return all_items
 
 
@@ -437,7 +527,7 @@ def _ts_to_str(ts: int) -> str:
 # 财新RSS（备选）
 # ═══════════════════════════════════════════════════════════════
 
-CAIXIN_RSS_URL = "https://rsshub.app/caixin/latest"
+CAIXIN_RSS_URL = "https://www.caixin.com/rss/caixin.xml"
 
 
 def _fetch_caixin_rss() -> List[Dict]:
@@ -455,6 +545,67 @@ def _fetch_caixin_rss() -> List[Dict]:
     except Exception as e:
         print(f"  [财新] 获取失败: {e}")
     return items
+
+
+def _fetch_cls_flash() -> List[Dict]:
+    try:
+        import akshare as ak
+        df = _timeout_call(15, ak.stock_info_global_cls, symbol="重点")
+        if df is None or df.empty:
+            return []
+        items = []
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        for _, row in df.iterrows():
+            title = str(row.get("标题", "") or row.get("内容", ""))
+            content = str(row.get("内容", ""))
+            if not title or len(title) < 5:
+                continue
+            pub = str(row.get("发布时间", "") or row.get("发布日期", "") or now_str)
+            items.append({
+                "title": _clean_title(title),
+                "description": content[:300],
+                "url": "",
+                "pub_date": pub,
+                "source_name": "财联社",
+                "category": "中国市场",
+                "lang": "zh",
+                "hotness": 2,
+            })
+        print(f"  [财联社] → {len(items)} 条")
+        return items
+    except Exception as e:
+        print(f"  [财联社] 获取失败: {e}")
+        return []
+
+
+def _fetch_sina_flash() -> List[Dict]:
+    try:
+        import akshare as ak
+        df = _timeout_call(15, ak.stock_info_global_sina)
+        if df is None or df.empty:
+            return []
+        items = []
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        for _, row in df.iterrows():
+            content = str(row.get("内容", "") or row.get("标题", ""))
+            if not content or len(content) < 10:
+                continue
+            pub = str(row.get("时间", now_str))
+            items.append({
+                "title": _clean_title(content[:150]),
+                "description": content[:300],
+                "url": "",
+                "pub_date": pub,
+                "source_name": "新浪财经",
+                "category": "全球宏观",
+                "lang": "zh",
+                "hotness": 1,
+            })
+        print(f"  [新浪财经] → {len(items)} 条")
+        return items
+    except Exception as e:
+        print(f"  [新浪财经] 获取失败: {e}")
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -566,6 +717,36 @@ def _sort_by_time_and_hotness(items: List[Dict]) -> List[Dict]:
 # 第3部分：链影响标注
 # ═══════════════════════════════════════════════════════════════
 
+# ── 通用中文情绪词（回退检测，当链专用方向词未命中时使用）──
+_BULLISH_WORDS = [
+    "利好", "突破", "大涨", "飙升", "创新高", "超预期", "增长", "加速",
+    "扩产", "缺货", "供不应求", "政策支持", "补贴", "放水", "降息",
+    "核准", "通过认证", "获批", "中标", "订单大增", "需求暴增",
+    "业绩预增", "业绩超预期", "盈利上调", "上调评级", "增持",
+    "涨停", "拉升", "回暖", "复苏", "拐点", "底部",
+]
+_BEARISH_WORDS = [
+    "利空", "暴跌", "大跌", "崩盘", "新低", "低于预期", "下滑", "放缓",
+    "过剩", "降价", "抛售", "制裁", "管制", "调查", "处罚", "罚款",
+    "贸易战", "脱钩", "封锁", "断供", "加税", "加息", "收紧",
+    "暴雷", "违约", "亏损", "预亏", "下调评级", "减持",
+    "跌停", "退潮", "衰退", "滞胀", "风险",
+]
+
+
+def _detect_general_sentiment(text: str) -> int:
+    """通用中文情绪检测：1=偏多, -1=偏空, 0=中性。
+    当链专用关键词未命中时作为回退信号。"""
+    text_lower = text.lower()
+    bullish_hits = sum(1 for w in _BULLISH_WORDS if w in text_lower)
+    bearish_hits = sum(1 for w in _BEARISH_WORDS if w in text_lower)
+    if bullish_hits > bearish_hits:
+        return 1
+    elif bearish_hits > bullish_hits:
+        return -1
+    return 0
+
+
 def classify_impact(news_list: List[Dict]) -> List[Dict]:
     """
     为每条新闻标注影响的产业链及方向。
@@ -597,6 +778,14 @@ def classify_impact(news_list: List[Dict]) -> List[Dict]:
                     direction = "↓利空"
                     break
             
+            # 通用回退：若链关键词匹配但方向未定，用通用中文情绪词推断
+            if direction == "→中性":
+                _signal = _detect_general_sentiment(text)
+                if _signal == 1:
+                    direction = "↑利好"
+                elif _signal == -1:
+                    direction = "↓利空"
+            
             impacts.append({
                 "chain": chain_name,
                 "direction": direction,
@@ -604,6 +793,14 @@ def classify_impact(news_list: List[Dict]) -> List[Dict]:
             })
         
         item["impacts"] = impacts
+        if not impacts:
+            _signal = _detect_general_sentiment(text)
+            if _signal == 1:
+                item["general_sentiment"] = "↑利好"
+            elif _signal == -1:
+                item["general_sentiment"] = "↓利空"
+            else:
+                item["general_sentiment"] = "→中性"
     
     return news_list
 
@@ -622,296 +819,398 @@ def _format_impact_brief(impacts: List[Dict]) -> str:
 # 第4部分：LLM总结
 # ═══════════════════════════════════════════════════════════════
 
+def _get_hermes_llm_config() -> tuple:
+    """从 Hermes config.yaml 读取 LLM 配置（当前使用的 API）"""
+    try:
+        import yaml
+        config_path = os.path.expanduser("~/.hermes/config.yaml")
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f)
+            model_cfg = cfg.get("model", {})
+            base_url = model_cfg.get("base_url", "")
+            api_key = model_cfg.get("api_key", "")
+            model = model_cfg.get("default", "")
+            if base_url and api_key and model:
+                return base_url, api_key, model
+    except Exception:
+        pass
+    return "", "", ""
+
+
 def _get_llm_api_key() -> Optional[str]:
-    """获取LLM API密钥（优先ARK，其次OPENAI）"""
+    """获取LLM API密钥（优先ARK，其次OPENAI，最后Hermes自身配置）"""
     for key_name in ["ARK_API_KEY", "OPENAI_API_KEY"]:
         key = os.environ.get(key_name, "")
         if key:
             return key
-    return None
+    _, hermes_key, _ = _get_hermes_llm_config()
+    return hermes_key or None
 
 
 def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
-    """
-    调用LLM API生成总结。
-    支持两种API端点：
-      - ARK_API_KEY → 火山方舟（豆包等）
-      - OPENAI_API_KEY → OpenAI兼容接口
-    """
-    api_key = _get_llm_api_key()
-    if not api_key:
-        return None
-    
-    # 判断API类型
-    if os.environ.get("ARK_API_KEY"):
-        # 火山方舟 Ark API
+    ark_key = os.environ.get("ARK_API_KEY", "")
+    ark_model = os.environ.get("ARK_MODEL", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+
+    if ark_key and ark_model:
         api_url = os.environ.get("ARK_API_BASE", "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
-        model = os.environ.get("ARK_MODEL", "ep-20250523123456-xxxxx")  # 需替换为实际endpoint
-        auth_header = {"Authorization": f"Bearer {api_key}"}
-    else:
-        # OpenAI 兼容接口
+        model = ark_model
+        api_key = ark_key
+    elif openai_key:
         api_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1/chat/completions")
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-        auth_header = {"Authorization": f"Bearer {api_key}"}
-    
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-    
+        api_key = openai_key
+    else:
+        hermes_url, hermes_key, hermes_model = _get_hermes_llm_config()
+        if not hermes_key:
+            print("  [LLM] 无可用API密钥（ARK_API_KEY/OPENAI_API_KEY/Hermes均未配置）")
+            return None
+        api_url = hermes_url + "/chat/completions"
+        model = hermes_model
+        api_key = hermes_key
+
+    default_system = (
+        "你是一名专业投资研究助理，专注于A股/港股/美股市场分析。"
+        "你的输出将用于辅助投资决策，请提供客观、具体、可操作的分析。"
+        "严格按照用户要求的格式输出，不要添加免责声明。"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt or default_system},
+        {"role": "user", "content": prompt},
+    ]
+
     payload = json.dumps({
         "model": model,
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 1500,
+        "max_tokens": 2000,
     }).encode("utf-8")
-    
+
     try:
-        headers = {"Content-Type": "application/json", **auth_header}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         req = urllib.request.Request(api_url, data=payload, headers=headers)
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
-            return result["choices"][0]["message"]["content"]
+            content = result["choices"][0]["message"]["content"]
+            if not content or not content.strip():
+                print(f"  [LLM] 模型返回空内容 (model={model})")
+                return None
+            print(f"  [LLM] 成功 (model={model}, chars={len(content)})")
+            return content
     except Exception as e:
-        print(f"  [LLM] API调用失败: {e}")
+        print(f"  [LLM] 调用失败 (model={model}): {e}")
         return None
 
 
-def _build_llm_prompt(news_titles: List[str]) -> str:
-    """
-    构建LLM总结提示词。
-    输入标题列表，要求输出结构化总结。
-    """
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles))
-    
-    prompt = f"""你是一位资深投资分析师。请基于以下 {len(news_titles)} 条今日新闻标题，生成一份结构化总结。
+def _build_llm_prompt(news_items: List[Dict],
+                      stock_context: Optional[List[Dict]] = None) -> str:
+    items_text = "\n".join(
+        f"{i+1}. [{item.get('source_name','?')}][{item.get('pub_date','')[:10]}] {item.get('title','')}"
+        + (f" — {item.get('description','')[:150]}" if item.get('description') else "")
+        for i, item in enumerate(news_items)
+    )
+    chains = "算力芯片、半导体制造、半导体国产替代、存储/HBM、AI应用/Agent、AI网络+数据中心、机器人/自动化、军工、医药创新、AI电力、新能源、消费电子、苹果产业链、新能源汽车、全球宏观、中国政策、地缘政治"
 
-新闻标题：
-{titles_text}
+    stock_section = ""
+    if stock_context:
+        lines = ["【当日观察池关键信号（优先分析这些票）】"]
+        for s in stock_context:
+            code = s.get("code", "")
+            name = s.get("name", "")
+            chg = s.get("chg")
+            signal = s.get("signal", "")
+            news_titles = s.get("recent_news", [])
+            line = f"- {name}({code})"
+            if chg is not None:
+                line += f" 今日{chg:+.1f}%"
+            if signal:
+                line += f" 信号:{signal}"
+            if news_titles:
+                line += f" | 个股新闻: {'; '.join(news_titles[:2])}"
+            lines.append(line)
+        stock_section = "\n".join(lines) + "\n\n"
 
-请按以下格式输出 3-5 段总结，每段格式严格为：
-[N] [摘要标题] → 影响链: [产业链名称] → 方向: [↑利好/↓利空/→中性]
+    return f"""你是一名投资研究助理，不是新闻编辑。你的唯一目标是：识别哪些事件会改变资产定价，而不是总结发生了什么。
 
-可选的产业链名称（匹配最接近的）：
-- GPU/AI芯片
-- 先进制程+封装
-- 存储/HBM
-- AI电力
-- AI网络+云计算
-- AI应用/Agent
-- 网络安全/国产替代
-- 机器人
-- 新能源
-- 消费电子
-- 全球宏观
-- 地缘政治
-- 中国市场
+{stock_section}
 
-最后一段综合判断格式：
-综合判断: [一句话概述今日全球市场情绪和主要矛盾]，整体偏[多/空/中性]
+过去30天新闻（共{len(news_items)}条，已去重排序）：
+{items_text}
 
-请用中文输出。只输出总结，不要额外解释。"""
-    return prompt
+你需要完成以下任务，严格按格式输出：
+
+【A. 本期最重要的3个变化】（每条≤60字，格式：变化点 | 影响变量 | 受影响资产）
+① 
+② 
+③ 
+
+【B. 关键事件影响分析】（只保留真正改变定价/预期的事件，每条格式如下）
+[事件] [自拟简洁标题]
+- 新增事实：一句话，只写事实，不写评论
+- 影响变量：利率/信用/需求/成本/监管/风险偏好（选一个最主要的）
+- 影响链路：[产业链名] → 方向[↑利好/↓利空/→中性] → 时间维度[短期1-5日/中期1-8周]
+- 受影响标的：列出具体A股/港股/美股代码或名称
+- 需要动作：无 / 关注价格变化 / 重新评估逻辑 / 等待数据确认
+- 置信度：高/中/低
+
+（重复事件只写一次，同类事件合并，最多写5个）
+
+【C. 产业链情绪变化】（只写有实质变化的链，无变化不写）
+[链名]：[↑升温/↓降温/→平稳] | 原因：[引用具体事件，一句话]
+
+【D. 宏观信号变化】
+- 利率方向：[↑/↓/→] 理由：
+- 风险偏好：[↑/↓/→] 理由：
+- 中国政策取向：[宽松/收紧/中性] 证据：
+
+【E. 可以忽略的内容】
+以下新闻属于噪音，无需关注（简要说明为什么）：
+- 
+
+产业链范围：{chains}
+
+严格中文输出，分析要犀利具体，不要泛泛而谈。没有新增事实的事件一律归入E类噪音。"""
 
 
-def _build_fallback_prompt(news_titles: List[str]) -> str:
-    """简化的fallback prompt，适用于token限制较低的场景"""
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles[:15]))
-    
-    prompt = f"""分析以下今日财经新闻标题，生成3-5段结构化总结：
+def _calc_sentiment_score(news_list: List[Dict]) -> dict:
+    bullish, bearish, neutral = 0, 0, 0
+    chain_sentiment: Dict[str, Dict] = {}
 
-{titles_text}
+    for item in news_list:
+        item_bullish = item_bearish = False
+        for imp in item.get("impacts", []):
+            chain = imp["chain"]
+            d = imp["direction"]
+            if chain not in chain_sentiment:
+                chain_sentiment[chain] = {"up": 0, "down": 0, "neutral": 0}
+            if "利好" in d or "↑" in d:
+                chain_sentiment[chain]["up"] += 1
+                item_bullish = True
+            elif "利空" in d or "↓" in d:
+                chain_sentiment[chain]["down"] += 1
+                item_bearish = True
+            else:
+                chain_sentiment[chain]["neutral"] += 1
+        if item_bullish and not item_bearish:
+            bullish += 1
+        elif item_bearish and not item_bullish:
+            bearish += 1
+        else:
+            gs = item.get("general_sentiment", "→中性")
+            if "↑" in gs:
+                bullish += 1
+            elif "↓" in gs:
+                bearish += 1
+            else:
+                neutral += 1
 
-每段格式：[摘要标题] → 影响链: [链名] → 方向: [↑利好/↓利空/→中性]
-最后一段：综合判断
+    total = bullish + bearish + neutral or 1
+    if bullish > bearish * 1.5:
+        overall = "🟢 偏多"
+    elif bearish > bullish * 1.5:
+        overall = "🔴 偏空"
+    else:
+        overall = "🟡 中性"
 
-链名从以下选：GPU/AI芯片、先进制程+封装、存储/HBM、AI电力、AI网络+云计算、AI应用/Agent、网络安全/国产替代、机器人、新能源、消费电子、全球宏观、地缘政治、中国市场
-
-只输出总结，不解释。"""
-    return prompt
-
-
-def summarize_news(
-    news_list: List[Dict],
-    use_llm: bool = True,
-) -> str:
-    """
-    生成新闻总结。
-    
-    优先使用LLM生成结构化总结（如果API可用）。
-    降级方案：基于关键词匹配生成标题列表+链影响标注。
-    
-    Args:
-        news_list: 新闻列表
-        use_llm: 是否尝试LLM总结
-    
-    Returns:
-        格式化的总结文本
-    """
-    if not news_list:
-        return "📰 今日无重大新闻信号"
-    
-    # 先做链分类
-    news_list = classify_impact(news_list)
-    
-    if use_llm:
-        titles = [item.get("title", "") for item in news_list[:20]]
-        system_prompt = "你是一位专业投资分析师，擅长从新闻中提取产业链影响。请用中文回复。"
-        prompt = _build_llm_prompt(titles)
-        
-        summary = _call_llm(prompt, system_prompt)
-        if summary:
-            return f"## 📰 LLM结构化总结\n\n{summary.strip()}\n\n> 🤖 由AI自动生成，仅供参考"
-        
-        # 尝试fallback prompt
-        fallback_prompt = _build_fallback_prompt(titles)
-        summary = _call_llm(fallback_prompt)
-        if summary:
-            return f"## 📰 LLM结构化总结\n\n{summary.strip()}\n\n> 🤖 由AI自动生成，仅供参考"
-    
-    # ── 降级方案：关键词匹配 + 影响标注 ──
-    return _build_keyword_summary(news_list)
+    return {
+        "overall": overall,
+        "bullish": bullish,
+        "bearish": bearish,
+        "neutral": neutral,
+        "score": round((bullish - bearish) / total * 100, 0),
+        "chain_sentiment": chain_sentiment,
+    }
 
 
 def _build_keyword_summary(news_list: List[Dict]) -> str:
-    """
-    降级方案：基于关键词匹配的总结。
-    按链聚合新闻，标注方向。
-    """
-    # 按链聚合
+    sentiment = _calc_sentiment_score(news_list)
     chain_groups: Dict[str, List[Dict]] = {}
-    no_impact = []
-    
-    for item in news_list[:20]:
+    uncategorized = []
+
+    for item in news_list:
         impacts = item.get("impacts", [])
         if impacts:
             for imp in impacts:
-                chain = imp["chain"]
-                if chain not in chain_groups:
-                    chain_groups[chain] = []
-                chain_groups[chain].append(item)
+                chain_groups.setdefault(imp["chain"], []).append((item, imp))
         else:
-            no_impact.append(item)
-    
-    lines = ["## 📰 今日新闻要点（关键词标注）\n"]
-    
-    # 有链影响的新闻
+            uncategorized.append(item)
+
+    lines = ["## 📰 本周市场要闻与情绪\n"]
+
+    lines.append(
+        f"**市场情绪**: {sentiment['overall']} "
+        f"| 利好{sentiment['bullish']}条 / 利空{sentiment['bearish']}条 / 中性{sentiment['neutral']}条 "
+        f"| 情绪得分{sentiment['score']:+.0f}\n"
+    )
+
     if chain_groups:
         lines.append("### 🔗 产业链影响新闻\n")
-        for chain_name, items in chain_groups.items():
-            lines.append(f"**{chain_name}**（{len(items)}条）")
-            for item in items[:3]:
-                title = item.get("title", "")
+        for chain, items_imps in sorted(chain_groups.items(),
+                                        key=lambda x: len(x[1]), reverse=True)[:8]:
+            cs = sentiment["chain_sentiment"].get(chain, {})
+            up, down = cs.get("up", 0), cs.get("down", 0)
+            trend = "↑升温" if up > down else ("↓降温" if down > up else "→平稳")
+            lines.append(f"\n**{chain}**（{len(items_imps)}条, {trend}）")
+            seen = set()
+            for item, imp in items_imps[:3]:
+                title = item.get("title", "")[:80]
+                if title in seen:
+                    continue
+                seen.add(title)
                 link = item.get("link", "")
-                direction = ""
-                for imp in item.get("impacts", []):
-                    if imp["chain"] == chain_name:
-                        direction = imp["direction"]
-                        break
-                if link:
-                    lines.append(f"  • {direction} [{title}]({link})")
-                else:
-                    lines.append(f"  • {direction} {title}")
-            lines.append("")
-    
-    # 无链影响的新闻
-    if no_impact:
-        lines.append("### 🌐 其他重要新闻\n")
-        for item in no_impact[:8]:
-            title = item.get("title", "")
-            link = item.get("link", "")
-            if link:
-                lines.append(f"  • [{title}]({link})")
-            else:
-                lines.append(f"  • {title}")
-        lines.append("")
-    
-    # 综合信号统计
-    up_count = sum(
-        1 for item in news_list[:20]
-        for imp in item.get("impacts", [])
-        if "利好" in imp.get("direction", "")
-    )
-    down_count = sum(
-        1 for item in news_list[:20]
-        for imp in item.get("impacts", [])
-        if "利空" in imp.get("direction", "")
-    )
-    
-    if up_count > down_count:
-        sentiment = f"🟢 今日偏多（利好 {up_count} vs 利空 {down_count}）"
-    elif down_count > up_count:
-        sentiment = f"🔴 今日偏空（利空 {down_count} vs 利好 {up_count}）"
-    else:
-        sentiment = "🟡 今日中性，信号混杂"
-    
-    lines.append(f"**综合判断**: {sentiment}")
-    
+                direction = imp["direction"]
+                src = item.get("source_name", "")
+                line = f"  • {direction} [{title}]({link})" if link else f"  • {direction} {title}"
+                if src:
+                    line += f" [{src}]"
+                lines.append(line)
+
+    lines.append("\n### **链影响分布**")
+    for chain, items_imps in sorted(chain_groups.items(), key=lambda x: len(x[1]), reverse=True):
+        cs = sentiment["chain_sentiment"].get(chain, {})
+        up, down = cs.get("up", 0), cs.get("down", 0)
+        dir_str = "↑利好" if up > down else ("↓利空" if down > up else "→中性")
+        lines.append(f"- {chain}: {len(items_imps)}条新闻 | 方向: {dir_str}")
+
+    lines.append("\n### **关键事件 Top 5**")
+    seen_kw = set()
+    shown = 0
+    for item in sorted(news_list, key=lambda x: len(x.get("impacts", [])), reverse=True):
+        if shown >= 5:
+            break
+        title = item.get("title", "")
+        if not title or title in seen_kw:
+            continue
+        seen_kw.add(title)
+        shown += 1
+        impacts = item.get("impacts", [])
+        imp_str = " → ".join(f"[{i['chain']}]{i['direction']}" for i in impacts[:2])
+        lines.append(f"- {title[:100]}  {imp_str}" if imp_str else f"- {title[:100]}")
+
     return "\n".join(lines)
+
+
+def summarize_news(news_list: List[Dict], use_llm: bool = True,
+                   stock_context: Optional[List[Dict]] = None) -> str:
+    if not news_list and not stock_context:
+        return "📰 今日无重大新闻信号"
+
+    news_list = classify_impact(news_list)
+
+    if use_llm:
+        system_prompt = "你是一位专业的A股/港股/美股投资分析师，熟悉面基播客的产业链分析框架和LDS实战体系。请用中文回复，格式严谨，观点犀利。"
+        prompt = _build_llm_prompt(news_list[:25], stock_context=stock_context)
+        summary = _call_llm(prompt, system_prompt)
+        if summary:
+            sentiment = _calc_sentiment_score(news_list)
+            header = (
+                f"## 📰 今日市场情报（AI分析）\n\n"
+                f"> 情绪得分 {sentiment['score']:+.0f} | "
+                f"利好{sentiment['bullish']} / 利空{sentiment['bearish']} / 中性{sentiment['neutral']}\n\n"
+            )
+            return header + summary.strip()
+
+    return _build_keyword_summary(news_list)
+
 
 
 # ═══════════════════════════════════════════════════════════════
 # 第5部分：主导出函数
 # ═══════════════════════════════════════════════════════════════
 
+def _is_relevant(item: Dict) -> bool:
+    """
+    ★ v5.3 宽松模式：RSS源本身已是金融类，过滤从"关键词白名单"降为"标题长度+简单有效性校验"
+    因为 RSS_SOURCES 里的搜索关键词已经是投资相关（如 "AI chip NVIDIA"、"证监会" 等），
+    返回的标题天然就是金融/产业类，无需再用严格白名单过滤。
+    只排除：空标题、纯噪音标题
+    """
+    title = (item.get("title", "") or "").strip()
+    if not title or len(title) < 5:
+        return False
+    # 排除明显的非新闻噪音条目
+    noise_patterns = ["subscribe", "sign up", "privacy policy", "terms of service",
+                      "cookie", "advertisement", "sponsored"]
+    title_lower = title.lower()
+    for p in noise_patterns:
+        if p in title_lower:
+            return False
+    return True
+
+
+def _is_within_window(item: Dict, days: int = NEWS_WINDOW_DAYS) -> bool:
+    pub = item.get("pub_date", "")
+    if not pub:
+        return True
+    cutoff = datetime.now().timestamp() - days * 86400
+    for fmt in [
+        "%a, %d %b %Y %H:%M:%S %Z",
+        "%a, %d %b %Y %H:%M:%S +0000",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ]:
+        try:
+            ts = datetime.strptime(pub.strip(), fmt).timestamp()
+            return ts >= cutoff
+        except ValueError:
+            continue
+    return True
+
+
 def fetch_news(
     sources: Optional[List[str]] = None,
-    max_total: int = MAX_TOTAL,
+    max_total: int = MAX_FINAL,
+    window_days: int = NEWS_WINDOW_DAYS,
 ) -> List[Dict]:
-    """
-    多源新闻抓取主函数。
-    
-    Args:
-        sources: 指定数据源列表，可选: 'google', 'xueqiu', 'caixin'
-                 默认全部启用
-        max_total: 最终返回的最大新闻数量
-    
-    Returns:
-        去重排序后的新闻列表，每条包含:
-        - title, link, pub_date, description
-        - source, source_name, category, lang
-        - impacts (链影响标注，需调用 classify_impact)
-    """
     if sources is None:
-        sources = ["google", "xueqiu", "caixin"]
-    
+        sources = ["google", "xueqiu", "caixin", "cls", "sina"]
+
+    source_funcs = {
+        "google":  _fetch_google_news_rss,
+        "xueqiu":  _fetch_xueqiu_hot,
+        "caixin":  _fetch_caixin_rss,
+        "cls":     _fetch_cls_flash,
+        "sina":    _fetch_sina_flash,
+    }
+    active = {k: v for k, v in source_funcs.items() if k in sources}
+
     all_items = []
-    
-    # 1. Google News RSS
-    if "google" in sources:
-        print("[新闻引擎] 抓取 Google News RSS...")
-        items = _fetch_google_news_rss()
-        all_items.extend(items)
-        print(f"  Google RSS 合计: {len(items)} 条")
-    
-    # 2. 雪球热帖
-    if "xueqiu" in sources:
-        print("[新闻引擎] 抓取雪球热帖...")
-        items = _fetch_xueqiu_hot()
-        all_items.extend(items)
-    
-    # 3. 财新RSS
-    if "caixin" in sources:
-        print("[新闻引擎] 抓取财新RSS...")
-        items = _fetch_caixin_rss()
-        all_items.extend(items)
-    
+    print(f"[新闻引擎] 并行抓取 {len(active)} 个源...")
+    with ThreadPoolExecutor(max_workers=len(active)) as pool:
+        futures = {pool.submit(fn): name for name, fn in active.items()}
+        for fut in as_completed(futures, timeout=60):
+            name = futures[fut]
+            try:
+                items = fut.result(timeout=30)
+                all_items.extend(items)
+                print(f"  {name}: {len(items)} 条")
+            except FuturesTimeout:
+                print(f"  {name}: 超时跳过")
+            except Exception as e:
+                print(f"  {name}: 失败({e})")
+
     print(f"[新闻引擎] 原始抓取: {len(all_items)} 条")
-    
-    # 去重
+
+    before_time = len(all_items)
+    all_items = [x for x in all_items if _is_within_window(x, window_days)]
+    print(f"[新闻引擎] 时间窗口({window_days}天)过滤: {before_time} → {len(all_items)} 条")
+
+    before_rel = len(all_items)
+    all_items = [x for x in all_items if _is_relevant(x)]
+    print(f"[新闻引擎] 投资相关性过滤: {before_rel} → {len(all_items)} 条")
+
     all_items = _deduplicate(all_items, threshold=0.5)
     print(f"[新闻引擎] 去重后: {len(all_items)} 条")
-    
-    # 排序
+
     all_items = _sort_by_time_and_hotness(all_items)
-    
-    # 截断
+
     result = all_items[:max_total]
     print(f"[新闻引擎] 最终返回: {len(result)} 条")
-    
-    # 保存缓存
+
     _save_cache(result)
-    
     return result
 
 
@@ -947,34 +1246,23 @@ def load_cached_news(max_age: int = CACHE_TTL) -> Optional[List[Dict]]:
 def get_news_with_impact(
     use_cache: bool = True,
     use_llm: bool = True,
+    window_days: int = 1,
+    stock_context: Optional[List[Dict]] = None,
 ) -> Tuple[List[Dict], str]:
-    """
-    一站式接口：获取新闻+链影响标注+LLM总结。
-    
-    Args:
-        use_cache: 是否使用缓存
-        use_llm: 是否尝试LLM总结
-    
-    Returns:
-        (news_list, summary_text)
-    """
-    # 尝试缓存
-    if use_cache:
+    if use_cache and window_days == NEWS_WINDOW_DAYS:
         cached = load_cached_news()
         if cached:
             print("[新闻引擎] 使用缓存（{} 条）".format(len(cached)))
             news_list = classify_impact(cached)
-            summary = summarize_news(cached, use_llm=use_llm)
+            summary = summarize_news(cached, use_llm=use_llm, stock_context=stock_context)
             return news_list, summary
-    
-    # 重新抓取
-    news_list = fetch_news()
-    if not news_list:
+
+    news_list = fetch_news(window_days=window_days)
+    if not news_list and not stock_context:
         return [], "📰 今日无重大新闻信号"
-    
+
     news_list = classify_impact(news_list)
-    summary = summarize_news(news_list, use_llm=use_llm)
-    
+    summary = summarize_news(news_list, use_llm=use_llm, stock_context=stock_context)
     return news_list, summary
 
 

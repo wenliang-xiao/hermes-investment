@@ -15,7 +15,7 @@ def api_v2_dragon_tiger(
     Query params:
         refresh: 是否强制从AKShare拉取最新数据("true"即刷新)
     """
-    from analysis.dragon_tiger import build_full_report, load_cached_report
+    from research.dragon_tiger import build_full_report, load_cached_report
 
     if refresh.lower() == "true":
         report = build_full_report()

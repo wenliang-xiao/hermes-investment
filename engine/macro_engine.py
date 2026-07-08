@@ -10,35 +10,70 @@
   5. 因子权重 → 动态配比
   6. 建议仓位 → 综合以上全部
 """
-import json, os
+import json, os, sys, logging
 from datetime import datetime, timedelta
 import numpy as np
-from . import config
-from .data_layer import get_macro_data, get_index_data
+
+# Path setup: allow both standalone and package imports
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_DIR not in sys.path:
+    sys.path.insert(0, _PROJECT_DIR)
+_PARENT_DIR = os.path.dirname(_PROJECT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+# Ensure config can be imported both ways
+try:
+    from investment_system import config
+except ImportError:
+    # Running standalone - config.py is in PROJECT_DIR
+    import config as config
+from investment_system.data.data_layer import get_macro_data, get_index_data
+
+logger = logging.getLogger(__name__)
 
 
 class MacroEngine:
     def __init__(self):
-        self.macro_data = get_macro_data()
-        self.quadrant = "宽货币·紧信用"
-        self.regime = "经济衰退"
+        self.macro_data = {}
+        self.macro_data_ok = False
+        self.macro_warnings = []
+        self.quadrant = "数据未加载"
+        self.regime = "default"
         self.trend_temp = "平"
-        self.strategy_switch = "on"
-        self.suggested_position = 0.5
+        self.strategy_switch = "hold"
+        self.suggested_position = 0.3
         self.factor_weights = config.FACTOR_WEIGHTS["default"]
         self.last_refreshed = None
 
     def refresh(self, force=False):
-        """刷新全部宏观数据"""
         cache_file = os.path.join(os.path.dirname(__file__), "data", "macro_engine_cache.json")
 
-        # 缓存策略：1小时内不刷新
         if not force and self.last_refreshed:
             age = (datetime.now() - self.last_refreshed).total_seconds()
             if age < 3600:
                 return self.summarize()
 
-        self.macro_data = get_macro_data()
+        self.macro_warnings = []
+
+        try:
+            raw = get_macro_data()
+            cpi = raw.get("cpi")
+            pmi = raw.get("pmi")
+            if cpi is None or pmi is None:
+                raise ValueError(f"宏观数据不完整: cpi={cpi}, pmi={pmi}")
+            self.macro_data = raw
+            self.macro_data_ok = True
+        except Exception as e:
+            self.macro_data_ok = False
+            self.macro_warnings.append(f"⚠️ 宏观数据获取失败({e})，策略开关暂停，维持现有仓位")
+            self.quadrant = "数据不可用"
+            self.regime = "default"
+            self.strategy_switch = "hold"
+            self.suggested_position = 0.3
+            self.last_refreshed = datetime.now()
+            return self.summarize()
+
         self._classify_quadrant()
         self._calc_trend_temp()
         self._calc_factor_weights()
@@ -61,11 +96,20 @@ class MacroEngine:
     def _classify_quadrant(self):
         md = self.macro_data
         shibor = md.get("shibor", 1.75) or 1.75
+
+        # 信用宽紧：优先用社融同比增速（面基/LDS核心：社融才是真正的信用指标）
+        # 社融增速 > 10% 且趋势向上 = 宽信用；< 8% 且趋势向下 = 紧信用
+        sf_growth = md.get("social_financing_growth")
         m2g = md.get("m2_growth", 7.2) or 7.2
+        if sf_growth is not None and abs(sf_growth) <= 100:
+            loose_credit = "宽信用" if sf_growth > 9.0 else "紧信用"
+            self._credit_signal_source = f"社融增速{sf_growth:.1f}%"
+        else:
+            loose_credit = "宽信用" if m2g > config.MACRO_THRESHOLDS["m2_loose"] else "紧信用"
+            self._credit_signal_source = f"M2增速{m2g:.1f}%（社融数据不可用）"
 
         t = config.MACRO_THRESHOLDS
         loose_money = "宽货币" if shibor < t["shibor_loose"] else "紧货币"
-        loose_credit = "宽信用" if m2g > t["m2_loose"] else "紧信用"
         self.quadrant = f"{loose_money}·{loose_credit}"
 
         # 四象限→经济状态映射
@@ -102,32 +146,38 @@ class MacroEngine:
             elif deviation > -0.05: self.trend_temp = "平"
             else: self.trend_temp = "凉"
             
-            # 国运线 — 240月 ≈ 20年
+            # 国运线 — 上证240月均线（约20年）
             try:
-                idx_long = get_index_data("sh000001", 5000)
-                if len(idx_long) >= 240:
+                idx_long = get_index_data("sh000001", 5500)
+                if idx_long is not None and len(idx_long) >= 240:
                     idx_long["ma240"] = idx_long["close"].rolling(240).mean()
                     p240 = idx_long.iloc[-1]["ma240"]
-                    if not np.isnan(p240):
+                    if p240 is not None and not np.isnan(float(p240)):
                         self.guoyun_price = round(float(p240), 0)
-                        self.price_deviation = round((float(price) - self.guoyun_price) / self.guoyun_price * 100, 1)
-                        note_parts = []
+                        self.price_deviation = round(
+                            (float(price) - self.guoyun_price) / self.guoyun_price * 100, 1
+                        )
                         if self.price_deviation > 20:
-                            note_parts.append("⚠️ 大幅高于国运线")
+                            zone = "⚠️ 大幅高于国运线"
                         elif self.price_deviation > 10:
-                            note_parts.append("偏高区域")
+                            zone = "偏高区域"
                         elif self.price_deviation > 0:
-                            note_parts.append("略高于国运线")
+                            zone = "略高于国运线"
                         elif self.price_deviation > -10:
-                            note_parts.append("接近国运线，底部区域")
+                            zone = "接近国运线，底部区域"
                         else:
-                            note_parts.append("🔴 大幅低于国运线")
-                        note_parts.append(f"偏离{self.price_deviation:+.1f}%")
-                        self.guoyun_note = "，".join(note_parts)
-            except:
-                pass
-                
-        except:
+                            zone = "🔴 大幅低于国运线"
+                        self.guoyun_note = f"{zone}，偏离{self.price_deviation:+.1f}%"
+                    else:
+                        logger.warning("[国运线] ma240计算结果为NaN，历史数据可能不足240条")
+                else:
+                    logger.warning("[国运线] 历史数据不足，获取到%d条，需要>=240条",
+                                   len(idx_long) if idx_long is not None else 0)
+            except Exception as e:
+                logger.warning("[国运线] 计算失败: %s", e)
+
+        except Exception as e:
+            logger.warning("[趋势温度] 计算失败: %s，设为默认值'平'", e)
             self.trend_temp = "平"
     
     # ═══ ②.5 板块温度统计（LDS趋势周期：凉→平→温→热） ═══
@@ -139,7 +189,7 @@ class MacroEngine:
         if not scan_results:
             return
             
-        from .config import MACRO_SECTOR_ROTATION
+        from investment_system.config import MACRO_SECTOR_ROTATION
         # 按板块聚合
         sector_by_regime = MACRO_SECTOR_ROTATION.get(self.regime, MACRO_SECTOR_ROTATION.get("default", {}))
         favored = sector_by_regime.get("favored", [])
@@ -167,21 +217,46 @@ class MacroEngine:
     
     # ═══ LDS双门状态（宏观 × 趋势） ═══
     def _calc_dual_gate(self):
-        """LDS双门判断：宏观+趋势同时决定开仓方向"""
         md = self.macro_data
-        cpi = md.get("cpi", 1.5)
-        pmi = md.get("pmi", 50)
+        cpi = md.get("cpi")
+        pmi = md.get("pmi")
+        if cpi is None or pmi is None:
+            self.dual_gate = {"macro_gate": "数据缺失", "trend_gate": "未知", "action": "hold", "detail": "宏观数据不完整"}
+            self.dual_action = "hold"
+            self.dual_detail = "宏观数据不完整，维持现有仓位"
+            return
         
-        # 宏观门：CPI<2 + PMI≥50 = 绿灯；CPI≥2.5 = 红灯
-        if cpi < 1.0:
-            macro_gate = "黄灯"  # 通缩风险，谨慎
-            macro_detail = f"CPI{cpi}%<1%，通缩风险，降息空间有限"
+        cpi_momentum = md.get("cpi_momentum_3m", md.get("cpi_delta", 0)) or 0
+        cpi_delta = md.get("cpi_delta", 0) or 0
+        
+        # 宏观门：CPI绝对值 × 动量修正
+        if cpi < 0.5:
+            if cpi_momentum > 0.3:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%严重通缩，但3月动量+{cpi_momentum:.2f}%快速改善→待确认"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%严重通缩，无改善信号，降息空间有限"
+        elif cpi < 1.0:
+            if cpi_momentum > 0.3:
+                macro_gate = "绿灯"
+                macro_detail = f"CPI{cpi}%轻度通缩，3月动量+{cpi_momentum:.2f}%显著改善→绿灯"
+            elif cpi_delta > 0.1:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%轻度通缩，月度改善+{cpi_delta:.2f}%→待确认"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%<1%，通缩风险，降息空间有限"
         elif cpi < 2.0:
             macro_gate = "绿灯"
             macro_detail = f"CPI{cpi}%，无通胀压力"
         elif cpi < 3.0:
-            macro_gate = "黄灯"
-            macro_detail = f"CPI{cpi}%≥2%，通胀抬头"
+            if cpi_momentum > 1.0 or cpi_delta > 0.5:
+                macro_gate = "红灯"
+                macro_detail = f"CPI{cpi}%通胀加速+{cpi_momentum:.2f}%，警惕杀估值"
+            else:
+                macro_gate = "黄灯"
+                macro_detail = f"CPI{cpi}%≥2%，通胀抬头"
         else:
             macro_gate = "红灯"
             macro_detail = f"CPI{cpi}%≥3%，高通胀杀估值"
@@ -228,18 +303,29 @@ class MacroEngine:
     def get_factor_weights(self):
         return self.factor_weights
 
-    # ═══ ④ CPI驱动策略开关（LDS核心） ═══
+    # ═══ ④ CPI驱动策略开关（LDS核心 + 动量修正） ═══
     def _calc_strategy_switch(self):
         md = self.macro_data
         cpi = md.get("cpi")
+        cpi_momentum = md.get("cpi_momentum_3m", md.get("cpi_delta", 0)) or 0
 
         if cpi is not None:
             if cpi < 1.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_falling_below1"]
+                if cpi_momentum > 0.3:
+                    mapping = config.CPI_STRATEGY_MAP.get(
+                        "cpi_below1_improving",
+                        {"switch": "on", "reason": f"CPI{cpi}%通缩但3月动量+{cpi_momentum:.2f}%显著改善→恢复操作",
+                         "caption": "60%"})
             elif cpi < 2.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_1_to_2"]
             elif cpi < 3.0:
                 mapping = config.CPI_STRATEGY_MAP["cpi_2_to_3"]
+                if cpi_momentum > 1.0:
+                    mapping = config.CPI_STRATEGY_MAP.get(
+                        "cpi_2_to_3_accelerating",
+                        {"switch": "limited", "reason": f"CPI{cpi}%通胀加速+{cpi_momentum:.2f}%→减仓防御",
+                         "caption": "40%"})
             else:
                 mapping = config.CPI_STRATEGY_MAP["cpi_above3"]
         else:
@@ -269,30 +355,35 @@ class MacroEngine:
 
     # ═══ 输出 ═══
     def summarize(self) -> dict:
-        t = self.trend_temp
+        t = getattr(self, "trend_temp", "unknown")
         trend_info = config.TREND_TEMP.get(t, {"max_deviation": 0.05, "action": "中性操作"})
 
         return {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "quadrant": self.quadrant,
-            "regime": self.regime,
+            "quadrant": getattr(self, "quadrant", "unknown"),
+            "regime": getattr(self, "regime", "unknown"),
             "trend_temp": t,
             "trend_action": trend_info["action"],
-            "strategy_switch": self.strategy_switch,
+            "strategy_switch": getattr(self, "strategy_switch", "off"),
             "strategy_reason": getattr(self, "strategy_reason", ""),
-            "factor_weights": self.factor_weights,
-            "suggested_position": round(self.suggested_position, 2),
-            "macro_data": {k: v for k, v in self.macro_data.items()
+            "factor_weights": getattr(self, "factor_weights", {}),
+            "suggested_position": round(getattr(self, "suggested_position", 0), 2),
+            "macro_data": {k: v for k, v in getattr(self, "macro_data", {}).items()
                           if k in ("cpi", "pmi", "m2_growth", "shibor", "cny_usd",
-                                   "cpi_trend", "pmi_trend", "cpi_date", "pmi_date")},
+                                   "cpi_trend", "cpi_prev", "cpi_delta", "cpi_momentum_3m",
+                                   "pmi_trend", "cpi_date", "pmi_date",
+                                   "social_financing_growth")},
+            "credit_signal_source": getattr(self, "_credit_signal_source", ""),
             "guoyun": {
-                "price": self.guoyun_price,
-                "deviation": self.price_deviation,
-                "note": self.guoyun_note,
+                "price": getattr(self, "guoyun_price", None),
+                "deviation": getattr(self, "price_deviation", None),
+                "note": getattr(self, "guoyun_note", ""),
             },
             "dual_gate": getattr(self, "dual_gate", {}),
             "sector_temp": getattr(self, "sector_temp_counts", {}),
             "market": getattr(self, "_market_overview", {}),
+            "macro_data_ok": self.macro_data_ok,
+            "warnings": self.macro_warnings,
         }
 
 

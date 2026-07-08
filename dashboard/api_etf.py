@@ -160,7 +160,7 @@ def api_v2_etf_portfolio():
         with open(path) as f:
             return json.load(f)
     try:
-        from analysis.etf_portfolio import EtfPortfolioBuilder
+        from etf.etf_portfolio import EtfPortfolioBuilder
         builder = EtfPortfolioBuilder()
         result = builder.build()
         if "error" not in result:

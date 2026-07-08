@@ -33,8 +33,8 @@ def _backtest_result_to_frontend(br, strategy_label: str = "") -> dict:
 def _run_single_backtest(strategy: str, start_date: str, end_date: str,
                           symbols: list[str], capital: float, days: int) -> dict:
     """运行单个策略回测，返回前端格式的 dict"""
-    from evaluator_fixed import evaluate_strategy
-    from analysis.backtest_types import BacktestResult
+    from engine.evaluator_fixed import evaluate_strategy
+    from engine.backtest_types import BacktestResult
 
     sym_list = symbols if symbols else None
     result = evaluate_strategy(strategy_name=strategy, custom_symbols=sym_list)
@@ -54,7 +54,7 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
 def get_comparison(days: int = 60):
     """三方策略对比数据 — 支持自定义天数"""
     try:
-        from analysis.strategy_comparison import run_comparison
+        from engine.strategy_comparison import run_comparison
         result = run_comparison(days=min(max(days, 7), 365))
         sig_path = ROOT / "data" / "trading_signals.json"
         if sig_path.exists():
@@ -70,7 +70,7 @@ def get_comparison(days: int = 60):
 @router.get("/api/v2/backtest")
 def api_v2_backtest():
     """回测历史列表"""
-    from analysis.backtest_storage import list_results
+    from engine.backtest_storage import list_results
     results = list_results()
     return {"count": len(results), "results": results}
 
@@ -152,7 +152,7 @@ def api_v2_backtest_custom(
             return result
 
         # ─── 默认参数：使用 scan_snapshot 对比引擎 ───
-        from analysis.strategy_comparison import run_comparison
+        from engine.strategy_comparison import run_comparison
         result = run_comparison(days=min(max(days, 7), 365))
         result["params"] = {
             "strategy": strategy,
@@ -171,7 +171,7 @@ def api_v2_backtest_custom(
 @router.get("/api/v2/backtest/{run_id}")
 def api_v2_backtest_detail(run_id: str):
     """回测详情"""
-    from analysis.backtest_storage import load_result
+    from engine.backtest_storage import load_result
     result = load_result(run_id)
     if result is None:
         return {"error": f"run_id '{run_id}' not found"}

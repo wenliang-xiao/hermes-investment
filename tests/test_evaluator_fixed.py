@@ -8,7 +8,7 @@ import pytest
 class TestEvaluatorFixedImport:
     def test_module_imports(self):
         """evaluator_fixed 模块可安全导入"""
-        import evaluator_fixed as ev
+        import engine.evaluator_fixed as ev
         assert hasattr(ev, "FIXED_UNIVERSE")
         assert len(ev.FIXED_UNIVERSE) >= 19
 
@@ -26,7 +26,7 @@ class TestEvaluatorFixedImport:
 
     def test_universe_has_valid_symbols(self):
         """FIXED_UNIVERSE 全部是6位数字（A股代码格式）"""
-        import evaluator_fixed as ev
+        import engine.evaluator_fixed as ev
         for entry in ev.FIXED_UNIVERSE:
             sym = entry["symbol"] if isinstance(entry, dict) else entry
             assert len(sym) == 6 and sym.isdigit(), f"{sym} 不是A股代码格式"

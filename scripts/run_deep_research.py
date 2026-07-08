@@ -51,7 +51,7 @@ def main():
     logger.info(f"force={force}, max={max_stocks}, symbol={single_symbol or 'all'}")
     logger.info("=" * 60)
 
-    from analysis.deep_research_v2 import DeepResearchGenerator
+    from research.deep_research_v2 import DeepResearchGenerator
 
     gen = DeepResearchGenerator()
 

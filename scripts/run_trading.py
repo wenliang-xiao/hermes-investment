@@ -20,8 +20,8 @@ except Exception:
     pass
 
 from data.data_layer import get_stock_daily
-from analysis.factor_engine import FactorEngine
-from analysis.factor_engine import score_to_signal, convert_v4_to_v3
+from engine.factor_engine import FactorEngine
+from engine.factor_engine import score_to_signal, convert_v4_to_v3
 from analysis.trading_engine import TradingEngine
 from config import FACTOR_WEIGHTS
 from domain import WATCHLIST

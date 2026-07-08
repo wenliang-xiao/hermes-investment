@@ -1,6 +1,6 @@
 """Tests for analysis/cost_model — A股/港美股交易成本模型."""
 import pytest
-from analysis.cost_model import (
+from engine.cost_model import (
     calc_trade_cost, COMMISSION_RATE, MIN_COMMISSION,
     STAMP_TAX_RATE, TRANSFER_FEE_RATE, FLOW_FEE,
 )

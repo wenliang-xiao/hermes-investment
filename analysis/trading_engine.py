@@ -18,7 +18,7 @@ from data.data_layer import get_stock_daily
 from domain import WATCHLIST
 from config import FACTOR_WEIGHTS
 from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
-from analysis.cost_model import calc_adjusted_price
+from engine.cost_model import calc_adjusted_price
 from strategies import faceji as _faceji_pure, silverquant as _sq_pure, tradingagents as _ta_pure
 from utils.atomic_io import atomic_write_json
 import functools
@@ -401,7 +401,7 @@ class TradingEngine:
     def _check_black_swan(self):
         """检查是否黑天鹅（简单实现：依赖宏观看跌信号）"""
         try:
-            from analysis.macro_engine import get_macro_status
+            from engine.macro_engine import get_macro_status
             macro = get_macro_status()
             if macro.get("market_crash", False):
                 return True

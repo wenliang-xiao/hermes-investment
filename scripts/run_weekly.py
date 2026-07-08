@@ -225,7 +225,7 @@ try:
     log(f"Total: {dt:.1f}s")
 
     try:
-        from analysis.score_history import save_scores, save_macro_gate
+        from engine.score_history import save_scores, save_macro_gate
         today_str = time.strftime('%Y-%m-%d')
         scored = scanner.scan_market(top_n=60)
         score_snapshot = {s["symbol"]: s["score"] for s in scored if not s.get("error")}
@@ -237,7 +237,7 @@ try:
         log(f"双门状态已保存: {dg.get('macro_gate','?')}+{dg.get('trend_gate','?')}")
 
         try:
-            from analysis.score_history import build_historical_scores_from_prices
+            from engine.score_history import build_historical_scores_from_prices
             from data.data_layer import get_stock_daily
             from config import WATCHLIST, INDUSTRY_CHAINS
             chain_syms = list({str(s) for c in INDUSTRY_CHAINS.values() for s in c.get("symbols", []) if str(s).isdigit()})
@@ -292,7 +292,7 @@ try:
         }
 
     try:
-        from analysis.chain_scanner import scan_chain_candidates, format_candidate_for_report
+        from research.chain_scanner import scan_chain_candidates, format_candidate_for_report
         log("开始链内候选扫描...")
         candidates = scan_chain_candidates(regime=regime, dual_open=dual_open, verbose=True)
         chain_summary["candidates"] = candidates
@@ -307,7 +307,7 @@ try:
             candidate_syms = [c['symbol'] for c in candidates if c.get('symbol')]
             research_map = {}
             try:
-                from analysis.research_report import batch_research_summary, format_research_line
+                from research.research_report import batch_research_summary, format_research_line
                 research_map = batch_research_summary(candidate_syms, days=30)
                 log(f"研报数据获取: {sum(1 for v in research_map.values() if v)} / {len(candidate_syms)} 只有数据")
             except Exception as e:

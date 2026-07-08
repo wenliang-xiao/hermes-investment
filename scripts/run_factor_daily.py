@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     import argparse
-    from analysis.factor_engine import FactorEngine, PoolManager
+    from engine.factor_engine import FactorEngine, PoolManager
 
     parser = argparse.ArgumentParser(description="面基因子日扫")
     parser.add_argument("--symbols", help="标的列表,逗号分隔", default="")

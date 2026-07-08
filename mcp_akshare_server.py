@@ -208,7 +208,7 @@ def ak_get_factor_scores(ticker: str) -> str:
     sentiment/risk/dividend), composite score [0,1], and sub-factor breakdown.
     """
     try:
-        from analysis.factor_engine import FactorEngine
+        from engine.factor_engine import FactorEngine
         engine = FactorEngine()
         result = engine.score_symbol(ticker)
         return _ok(result)
@@ -229,7 +229,7 @@ def ak_get_batch_scores(tickers: str) -> str:
         symbols = [s.strip() for s in tickers.split(",") if s.strip()]
         if not symbols:
             return _err("no tickers provided")
-        from analysis.factor_engine import FactorEngine
+        from engine.factor_engine import FactorEngine
         engine = FactorEngine()
         results = engine.score_batch(symbols)
         return _ok(results)

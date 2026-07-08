@@ -36,11 +36,11 @@ def main():
     if skip_seats:
         print("⚡ 快速模式: 跳过席位明细")
 
-    from analysis.dragon_tiger import build_full_report
+    from research.dragon_tiger import build_full_report
 
     if skip_seats:
-        from analysis.dragon_tiger import fetch_daily_dragon_tiger, analyze_top_stocks
-        from analysis.dragon_tiger import compute_institution_vs_retail, find_watchlist_overlap
+        from research.dragon_tiger import fetch_daily_dragon_tiger, analyze_top_stocks
+        from research.dragon_tiger import compute_institution_vs_retail, find_watchlist_overlap
         records = fetch_daily_dragon_tiger(date=date)
         top = analyze_top_stocks(records, limit=10)
         inst_vs_retail = compute_institution_vs_retail(records)

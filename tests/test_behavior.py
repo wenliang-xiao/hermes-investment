@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analysis.behavior import (
+from engine.behavior import (
     diagnose_strategy,
     diagnose_all,
     _calc_disposition_effect,
@@ -225,7 +225,7 @@ def test_real_data():
     path = Path(__file__).resolve().parent.parent / "data" / "strategy_states.json"
     if not path.exists():
         return  # skip if no real data
-    from analysis.behavior import load_strategy_states
+    from engine.behavior import load_strategy_states
     states = load_strategy_states(path)
     results = diagnose_all(states)
     assert len(results) >= 3  # faceji, silverquant, tradingagents + _combined

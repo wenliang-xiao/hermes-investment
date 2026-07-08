@@ -63,7 +63,7 @@ def audit_macro() -> dict:
 
     # 是否有宏观引擎
     try:
-        from analysis.macro_engine import MacroEngine
+        from engine.macro_engine import MacroEngine
         engine = MacroEngine()
         s = engine.summarize()
         findings.append({"item": "宏观引擎", "status": "✅", "detail": f"MacroEngine.summarize() 可用"})
@@ -95,8 +95,8 @@ def audit_allocation() -> dict:
 
     # ETF 策略是否存在
     try:
-        from analysis.etf_backtest import run_etf_backtest
-        from analysis.allocation_strategies import FixedMix, RiskParity
+        from etf.etf_backtest import run_etf_backtest
+        from etf.allocation_strategies import FixedMix, RiskParity
         findings.append({"item": "ETF配置模型", "status": "✅", "detail": "4种策略: Fixed/RiskParity/Grid/Trend"})
         score += 1
     except Exception as e:
@@ -159,7 +159,7 @@ def audit_factor_engine() -> dict:
 
     # 权重是否自适应
     try:
-        from analysis.factor_scanner import FactorScanner
+        from engine.factor_scanner import FactorScanner
         fs = FactorScanner()
         findings.append({"item": "因子权重", "status": "✅", "detail": f"FactorScanner 可用"})
         score += 1
@@ -319,7 +319,7 @@ def audit_discipline() -> dict:
 
     # 不为清单检查
     try:
-        from analysis.stop_list import StopListFilter
+        from engine.stop_list import StopListFilter
         findings.append({"item": "不为清单", "status": "✅", "detail": "StopListFilter 10条规则可用"})
         score += 1
     except Exception:

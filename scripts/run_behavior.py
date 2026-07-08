@@ -28,7 +28,7 @@ except Exception:
     pass
 
 from utils.atomic_io import atomic_write_json
-from analysis.behavior import diagnose_all, load_strategy_states
+from engine.behavior import diagnose_all, load_strategy_states
 
 
 def run_diagnosis() -> dict:

@@ -3,7 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from analysis.factor_engine import FactorEngine
+from engine.factor_engine import FactorEngine
 
 
 class TestFactorEngineInit:
@@ -36,7 +36,7 @@ class TestIndustryNeutralRanking:
         同一标的的行业排名≠全市场排名。
         当某标的在全市场排名居中，但在其产业链内是最优/最差时，行业分位应有显著差异。
         """
-        from analysis.factor_engine import standardize_cross_section, standardize_by_chain
+        from engine.factor_engine import standardize_cross_section, standardize_by_chain
 
         # Chain A (tech): values [100, 80, 60]  →  ranks [1.0, 0.5, 0.0]
         # Chain B (finance): values [10, 5]     →  ranks [1.0, 0.0]
@@ -73,7 +73,7 @@ class TestIndustryNeutralRanking:
 
     def test_chain_standardize_single_value(self):
         """单标的产业链内分位应为 0.5（唯一标的时）"""
-        from analysis.factor_engine import standardize_by_chain
+        from engine.factor_engine import standardize_by_chain
 
         raw = {"A1": 42}
         chain_map = {"A1": "tech"}
@@ -82,12 +82,12 @@ class TestIndustryNeutralRanking:
 
     def test_chain_standardize_empty(self):
         """空输入返回空"""
-        from analysis.factor_engine import standardize_by_chain
+        from engine.factor_engine import standardize_by_chain
         assert standardize_by_chain({}, {}) == {}
 
     def test_chain_standardize_no_chain_map(self):
         """无产业链映射时归入'其他'组"""
-        from analysis.factor_engine import standardize_by_chain
+        from engine.factor_engine import standardize_by_chain
         raw = {"A1": 100, "A2": 50}
         # Empty chain map → all go to "其他"
         result = standardize_by_chain(raw, {}, higher_is_better=True)
@@ -100,7 +100,7 @@ class TestICWeightSystem:
 
     def test_rolling_ic_returns_weights(self):
         """滚动IC权重返回合法分布（和为1，值在[0,1]）"""
-        from analysis.factor_engine import ICWeightSystem
+        from engine.factor_engine import ICWeightSystem
         icw = ICWeightSystem(cache_dir="/tmp/ic_test")
         # 没有历史数据 → 等权
         weights = icw.rolling_ic_weights(lookback=6)
@@ -118,13 +118,13 @@ class TestICWeightSystem:
 
         测试方法: 给 ICWeightSystem 注入样本数据，验证权重在合理范围内
         """
-        from analysis.factor_engine import ICWeightSystem
+        from engine.factor_engine import ICWeightSystem
         import json, os, tempfile
         from pathlib import Path
 
         tmpdir = tempfile.mkdtemp()
         # 写一份模拟 IC 历史数据（使用 STYLE_FACTORS 中的英文键名）
-        from analysis.factor_engine import STYLE_FACTORS, ICWeightSystem
+        from engine.factor_engine import STYLE_FACTORS, ICWeightSystem
         sf = list(STYLE_FACTORS.keys())
         ic_data = [
             {sf[0]: 0.05, sf[1]: 0.12, sf[2]: 0.08, sf[3]: 0.15, sf[4]: -0.03, sf[5]: 0.02, sf[6]: 0.01, sf[7]: 0.00},

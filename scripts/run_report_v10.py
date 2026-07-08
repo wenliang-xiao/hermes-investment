@@ -115,7 +115,7 @@ def run_phase_chain():
     """Phase 2: 产业链分析"""
     print("\n[Phase 2] 产业链扫描...")
     try:
-        from analysis.chain_scanner import scan_chains, format_chain_report
+        from research.chain_scanner import scan_chains, format_chain_report
         results = scan_chains()
         report = format_chain_report(results)
         return report
@@ -289,7 +289,7 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
     if chain_report and "暂不可用" not in chain_report:
         # 只看信号标的的链定位
         if signals:
-            from analysis.chain_scanner import get_chain_for_symbol, score_chain_position
+            from research.chain_scanner import get_chain_for_symbol, score_chain_position
             blocks.append(p(("今日信号标的链定位:", True)))
             for s in signals[:4]:
                 sym = s.get("symbol", "")
@@ -355,7 +355,7 @@ def build_report_blocks(signals_data, chain_report, news_summary, today_str):
     # --- 5.6 ETF配置建议 ---
     blocks.append(h(3, "5b. ETF配置建议"))
     try:
-        from analysis.etf_backtest import compare_all_etf_strategies
+        from etf.etf_backtest import compare_all_etf_strategies
         # 尝试加载ETF价格数据
         etf_symbols = ["SPY", "TLT", "QQQ", "GLD", "IEF"]
         etf_data = {}

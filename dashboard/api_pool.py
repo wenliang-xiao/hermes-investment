@@ -137,7 +137,7 @@ def api_v2_decoupling_discovery(
     返回完整比较优势地图 + 基于结构性优势发现的标的列表。
     评估逻辑: 每只标的按其所在产业链领域的中国竞争优势与置信度打分。
     """
-    from analysis.decoupling_discovery import (
+    from research.decoupling_discovery import (
         get_discovered_stocks,
         get_comparative_advantage_map,
         get_domain_summary,
@@ -174,7 +174,7 @@ def api_v2_decoupling_discovery(
 def api_v2_research_report(symbol: str):
     """获取指定标的的最新深度研报"""
     try:
-        from analysis.deep_research_v2 import get_latest_report
+        from research.deep_research_v2 import get_latest_report
         report = get_latest_report(symbol)
         if report is None:
             return JSONResponse(
@@ -193,7 +193,7 @@ def api_v2_research_report(symbol: str):
 def api_v2_research_reports():
     """列出所有已生成的深度研报索引"""
     try:
-        from analysis.deep_research_v2 import list_all_reports
+        from research.deep_research_v2 import list_all_reports
         reports = list_all_reports()
         return {
             "total": len(reports),

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from strategies.base import Signal, PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
 from strategies import faceji, silverquant, tradingagents
-from analysis.factor_engine import score_to_signal, convert_v3_to_v4, convert_v4_to_v3
+from engine.factor_engine import score_to_signal, convert_v3_to_v4, convert_v4_to_v3
 
 
 # ═══════════════════════════════════════════════
