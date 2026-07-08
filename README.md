@@ -41,7 +41,16 @@
 
 ```bash
 cd ~/.hermes/investment_system
+
+# 方式1: 通过桥接脚本（兼容旧版）
 python3 scripts/portfolio_server.py 8686
+
+# 方式2: 直接运行 dashboard 模块
+python3 dashboard/server.py 8686
+
+# 方式3: 通过 uvicorn
+uvicorn scripts.portfolio_server:app --host 0.0.0.0 --port 8686
+uvicorn dashboard.server:app --host 0.0.0.0 --port 8686
 # → http://localhost:8686/dashboard
 ```
 

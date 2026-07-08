@@ -1,4 +1,7 @@
-"""新闻管线 v2 - 多源分级聚合
+"""[DEPRECATED] 新闻管线 v2 - 多源分级聚合
+⚠️ 本脚本已于 2026-07-08 废弃，AKShare 个股新闻覆盖不完整（仅~30只）。
+   替代方案: news/pipeline.py — 多源实时新闻管线
+   替代脚本: scripts/run_news_pipeline.py
 Tier 1: AKShare 个股新闻(东方财富)
 Tier 2: GLM-4-Flash 宏观/板块级新闻分析
 

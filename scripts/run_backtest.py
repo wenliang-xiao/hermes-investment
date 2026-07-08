@@ -55,13 +55,35 @@ def do_run(args):
         cycles=args.cycles,
     )
 
-    if result is None:
-        print("❌ 回测失败")
+    if result is None or (isinstance(result, dict) and "error" in result):
+        print(f"❌ 回测失败: {result.get('error','未知错误') if isinstance(result, dict) else '无结果'}")
         return
 
+    # 兼容 BacktestResult 和旧 dict 格式
+    from analysis.backtest_types import BacktestResult
+    if isinstance(result, BacktestResult):
+        br = result
+        avg_sortino = br.sortino_ratio if not args.walk_forward else br.extra.get("avg_sortino", 0)
+        avg_return = br.total_return_pct if not args.walk_forward else br.extra.get("avg_return_pct", 0)
+        avg_mdd = br.max_drawdown_pct if not args.walk_forward else br.extra.get("avg_max_drawdown_pct", 0)
+        total_trades = br.trade_count if not args.walk_forward else br.extra.get("total_trades", 0)
+        stocks_data = br.extra.get("stocks_with_data", 0)
+        cycle_details = br.extra.get("cycle_details", [])
+        sortino_raw = br.sortino_ratio
+        score_raw = br.sortino_ratio
+    else:
+        avg_sortino = result.get("avg_sortino", result.get("score", 0))
+        avg_return = result.get("avg_return_pct", result.get("total_return_pct", 0))
+        avg_mdd = result.get("avg_max_drawdown_pct", result.get("max_drawdown_pct", 0))
+        total_trades = result.get("total_trades", result.get("trade_count", 0))
+        stocks_data = result.get("stocks_with_data", 0)
+        cycle_details = result.get("cycle_details", [])
+        sortino_raw = result.get("sortino_ratio") or result.get("score", 0)
+        score_raw = result.get("score", 0)
+
     print(f"\n✅ 回测完成!")
-    print(f"   Sortino: {result.get('avg_sortino', '?'):.4f}")
-    print(f"   收益率: {result.get('avg_return_pct', '?'):.2f}%")
+    print(f"   Sortino: {avg_sortino:.4f}" if isinstance(avg_sortino, (int, float)) else f"   Sortino: {avg_sortino}")
+    print(f"   收益率: {avg_return:.2f}%" if isinstance(avg_return, (int, float)) else f"   收益率: {avg_return}")
 
     # 转换为标准 schema 并保存
     from analysis.backtest_storage import save_result
@@ -75,13 +97,13 @@ def do_run(args):
             "run_id": f"bt_{strategy}_{date.today().strftime('%Y%m%d')}_{uuid.uuid4().hex[:4]}",
             "generated_at": datetime.now().isoformat(),
         },
-        "cycles": result.get("cycle_details", []) if args.walk_forward else [],
+        "cycles": cycle_details if args.walk_forward else [],
         "aggregate": {
-            "avg_sortino": round(result.get("avg_sortino", result.get("score", 0)), 4),
-            "avg_return_pct": result.get("avg_return_pct", result.get("total_return_pct", 0)),
-            "avg_max_dd_pct": result.get("avg_max_drawdown_pct", result.get("max_drawdown_pct", 0)),
-            "total_trades": result.get("total_trades", result.get("trade_count", 0)),
-            "total_symbols_traded": result.get("stocks_with_data", 0),
+            "avg_sortino": round(avg_sortino, 4) if isinstance(avg_sortino, (int, float)) else 0,
+            "avg_return_pct": avg_return,
+            "avg_max_dd_pct": avg_mdd,
+            "total_trades": total_trades,
+            "total_symbols_traded": stocks_data,
         },
         "cost_model": {"commission_rate": 0.00015, "stamp_tax_rate": 0.001},
     }

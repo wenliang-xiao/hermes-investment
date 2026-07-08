@@ -1,6 +1,6 @@
 # 面基投资系统 架构文档
 
-> 版本: v2026.07.02 | 本文件是系统的唯一架构描述
+> 版本: v2026.07.08 | 重构后架构，`dashboard/` 模块化拆分
 
 ## 一、系统定位
 
@@ -14,35 +14,44 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         用户交互层                            │
-│  Dashboard (FastAPI :8686)   飞书日报    GitHub              │
+│                        用户交互层                             │
+│  dashboard/     (FastAPI :8686, 模块化拆分)                  │
+│  ├── server.py          主入口 + 静态路由                     │
+│  ├── api_portfolio.py   模拟盘/信号 API                       │
+│  ├── api_pool.py        票池/因子 API                        │
+│  ├── api_etf.py         ETF 扫描/组合 API                    │
+│  ├── api_news.py        新闻/情感 API                        │
+│  ├── api_backtest.py    回测/对比 API                        │
+│  └── api_risk.py        风险/指标 API                        │
+│  飞书日报    GitHub                                          │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                        数据管线层                            │
-│  data_router.py ─── baostock (A股) ─── 76只×5年缓存         │
-│                 ─── yfinance   (港美股)                      │
-│                 ─── akshare    (新闻/ETF)                    │
+│                        数据管线层                             │
+│  data/data_router.py ─── baostock (A股) ─── 76只×5年缓存    │
+│                      ─── yfinance   (港美股)                  │
+│                      ─── akshare    (新闻/ETF)               │
+│  data/data_source_layer.py (带DataResult质量标注)            │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                        因子引擎层                            │
-│  factor_engine.py ─── 19子因子 → 7风格因子                  │
-│  run_factor_daily.py ─── 每日扫描 → scan_snapshot_*.json    │
-│  评分体系: 质量/价值/成长/动量/低波/情绪/风险               │
+│                        因子引擎层                             │
+│  analysis/factor_engine.py ─── 19子因子 → 7风格因子          │
+│  scripts/run_factor_daily.py ─── 每日扫描 → pool/*.json      │
+│  评分体系: 质量/价值/成长/动量/低波/情绪/股息/风险           │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                        策略执行层                            │
-│  面基 (基本面多因子)  SilverQuant (规则驱动)  TradingAgents  │
-│  4层风控: HardSeller → FallSeller → ScoreDrop → MASeller    │
-│  portfolio_builder.py → 模拟盘执行                           │
+│                        策略执行层                             │
+│  strategies/    面基 · SilverQuant · TradingAgents (纯函数)  │
+│  analysis/trading_engine.py ─── 三策略模拟盘调度              │
+│  analysis/strategy_comparison.py ─── 三方对比                │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                        评估回测层                            │
-│  evaluator_fixed.py ─── 固定标尺 Train/Test                 │
-│  strategy_comparison.py ─── 三方对比                        │
+│                        评估回测层                             │
+│  evaluator_fixed.py ─── 固定标尺 Train/Test/Walk-Forward     │
+│  analysis/backtest.py ─── 多策略回测引擎 v2.0                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -50,14 +59,21 @@
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| Dashboard | `scripts/portfolio_server.py` | 7面板数据面板 (FastAPI + 静态 HTML) |
-| 因子引擎 | `factor_engine.py` | 19子因子 → 7风格因子 → 综合评分 |
+| Dashboard 入口 | `dashboard/server.py` | FastAPI 主入口，路由注册 |
+| Dashboard 模拟盘 | `dashboard/api_portfolio.py` | 模拟盘/信号/行为 API |
+| Dashboard 票池 | `dashboard/api_pool.py` | 三层票池/因子说明 API |
+| Dashboard ETF | `dashboard/api_etf.py` | ETF 扫描/组合/详情 API |
+| Dashboard 新闻 | `dashboard/api_news.py` | 新闻/情感分析 API |
+| Dashboard 回测 | `dashboard/api_backtest.py` | 回测/对比 API |
+| Dashboard 风险 | `dashboard/api_risk.py` | 风险指标/实时行情 API |
+| 因子引擎 | `analysis/factor_engine.py` | 19子因子 → 7风格因子 → 综合评分 |
 | 数据管线 | `data/data_router.py` | 统一数据接入，多源缓存 |
 | 策略 faceji | `strategies/faceji.py` | 基本面多因子评分驱动 |
 | 策略 silverquant | `strategies/silverquant.py` | 规则驱动、组件化风控 |
 | 策略 tradingagents | `strategies/tradingagents.py` | 辩论制多信号加权 |
-| 模拟盘 | `scripts/portfolio_server.py` | `/api/simulated` 三策略数据 |
+| 模拟盘引擎 | `analysis/trading_engine.py` | 三策略模拟盘调度 |
 | 回测对比 | `analysis/strategy_comparison.py` | 三方对比 + 净值曲线 |
+| 固定评估器 | `evaluator_fixed.py` | 固定标尺 Train/Test/Walk-Forward |
 | 新闻管线 | `scripts/news_pipeline.py` | AKShare + GLM 多源分级聚合 |
 | 评分解读 | `docs/score_explanation.md` | 7因子体系说明 |
 
@@ -65,15 +81,14 @@
 
 ```
 数据源(Yahoo/baostock/AKShare)
-    → data_router.py (缓存 + 标准化)
-    → factor_engine.py (因子计算 + 评分)
-    → run_factor_daily.py (每日扫描)
-        → scan_snapshot_*.json (历史快照)
-        → pool_live.json (三层票池: Watch/Monitor/Deep)
-    → portfolio_builder.py (策略执行)
+    → data/data_router.py (缓存 + 标准化)
+    → analysis/factor_engine.py (因子计算 + 评分)
+    → scripts/run_factor_daily.py (每日扫描)
+        → data/pool/{watch,monitor,deep}.json (三层票池)
+    → analysis/trading_engine.py (策略执行)
         → trading_signals.json (交易信号)
-        → shadow_account.json (模拟盘持仓)
-    → portfolio_server.py (Dashboard 展示)
+        → strategy_states.json (策略持仓状态)
+    → dashboard/server.py (Dashboard 展示, 模块化API)
 ```
 
 ## 五、关键架构决策 (ADRs)

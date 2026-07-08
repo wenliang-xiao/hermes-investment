@@ -1,4 +1,7 @@
 """
+# DEPRECATED: Use evaluator_fixed.py with BacktestResult instead.
+# 本引擎不再活跃维护，新功能统一使用 evaluator_fixed.py → BacktestResult。
+
 回测引擎 v2.0 — 四策略对比 + 现实性修正
 
 策略一：多因子选股（factor_scanner评分，每周调仓，宏观权重自适应）

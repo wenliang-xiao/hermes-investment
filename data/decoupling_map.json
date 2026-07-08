@@ -1,0 +1,188 @@
+{
+  "description": "中美脱钩·比较优势发现 — 按技术/产业域评估两国竞争优势，识别有结构性优势的中国标的",
+  "version": "1.0",
+  "updated": "2026-07-08",
+  "methodology": {
+    "advantage_logic": "从产业链卡位、产能集中度、技术代差、政策驱动四个维度判断比较优势归属",
+    "confidence_rules": {
+      "high": "产能/技术已被验证全球领先，有出口数据或客户认证支撑",
+      "medium": "产业趋势明确但市场份额/技术验证尚在初期",
+      "low": "逻辑成立但缺乏实证支撑，属于前瞻判断"
+    }
+  },
+  "domains": [
+    {
+      "domain": "AI算力-光模块",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["300502", "300308"],
+      "us_leaders": ["COHR"],
+      "reason": "中国在光模块制造全球领先，800G→1.6T迭代由中际旭创(全球市占20%+)/新易盛主导，海外CSP大客户已认证量产",
+      "catalyst": "英伟达Rubin发布、CPO技术路线切换、北美CSP资本开支继续上修",
+      "confidence": "high",
+      "risk_factors": ["台积电CoWoS产能受地缘中断→上游GPU出货受限→间接影响光模块需求", "CPO技术路径若跳过可插拔光模块→现有方案价值重估"]
+    },
+    {
+      "domain": "AI算力-GPU",
+      "us_advantage": true,
+      "china_advantage": false,
+      "china_beneficiaries": [],
+      "china_potential": ["688256", "688041"],
+      "us_leaders": ["NVDA", "AMD", "AVGO"],
+      "reason": "CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代",
+      "catalyst": "国产GPU在推理场景规模化落地、华为昇腾生态扩展",
+      "confidence": "high",
+      "risk_factors": ["制程封锁无解→代差持续拉大", "中美AI产业链彻底脱钩→中国GPU仅限国内市场"]
+    },
+    {
+      "domain": "半导体-设备",
+      "us_advantage": true,
+      "china_advantage": false,
+      "china_beneficiaries": [],
+      "china_potential": ["002371", "688012", "688120"],
+      "us_leaders": ["AMAT", "LRCX", "TOELY"],
+      "reason": "AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快速提升",
+      "catalyst": "大基金三期注资、国内12寸晶圆厂密集投产、零部件国产化加速",
+      "confidence": "high",
+      "risk_factors": ["核心零部件(阀门/射频源/精密轴承)仍依赖日欧美进口", "国内晶圆厂扩产节奏因产能过剩放缓"]
+    },
+    {
+      "domain": "半导体-制造",
+      "us_advantage": false,
+      "china_advantage": false,
+      "china_beneficiaries": [],
+      "china_potential": ["688981", "0981.HK"],
+      "us_leaders": ["TSM", "INTC"],
+      "reason": "台积电主导全球先进制程(2nm/3nm)，中国中芯国际局限在成熟制程(14nm+)；地缘压力下国内成熟制程产能快速扩张，满足AIoT/汽车等场景",
+      "catalyst": "美国对华成熟制程限制升级→反而利好国内份额提升",
+      "confidence": "medium",
+      "risk_factors": ["台湾地缘风险使TSMC产能中断→全球半导体供应链断裂", "成熟制程产能过剩→价格战压缩利润"]
+    },
+    {
+      "domain": "半导体-存储",
+      "us_advantage": true,
+      "china_advantage": false,
+      "china_beneficiaries": [],
+      "china_potential": ["688525"],
+      "us_leaders": ["MU", "Samsung", "SK Hynix"],
+      "reason": "DRAM+HBM被三星/SK海力士/美光三部曲垄断；中国长鑫存储DRAM已量产，但HBM3e技术差距2代以上",
+      "catalyst": "HBM需求爆发(供给缺口>30%)、AI手机/PC驱动存储需求上修",
+      "confidence": "medium",
+      "risk_factors": ["HBM从SK海力士单一来源→若韩国加入对华出口管制→中国AI厂商受限", "长鑫存储制程落后+DDR5切换缓慢→盈利周期不确定"]
+    },
+    {
+      "domain": "新能源-光伏",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["601012", "688599", "300274"],
+      "us_leaders": ["FSLR", "ENPH"],
+      "reason": "中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高",
+      "catalyst": "全球装机继续增长、TOPCon→钙钛矿叠层技术突破、欧洲能源安全需求",
+      "confidence": "high",
+      "risk_factors": ["全球贸易摩擦(美双反/印关税)→出口受阻", "产能过剩→价格战→利润整体压缩"]
+    },
+    {
+      "domain": "新能源-动力电池",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["300750", "300014"],
+      "us_leaders": [],
+      "reason": "宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料",
+      "catalyst": "储能电池需求爆发(增速>50%)、固态电池量产时间表提前",
+      "confidence": "high",
+      "risk_factors": ["美国IRA法案排中→欧美设厂壁垒", "锂/钴/镍资源80%依赖进口→供应链中断风险"]
+    },
+    {
+      "domain": "新能源-整车",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["002594", "1211.HK", "1810.HK", "9868.HK"],
+      "us_leaders": ["TSLA"],
+      "reason": "中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势",
+      "catalyst": "欧盟关税谈判突破→出海欧洲加速、东南亚/南美市场扩张",
+      "confidence": "high",
+      "risk_factors": ["欧洲/美国加征关税→出海受限", "国内价格战→行业利润率承压"]
+    },
+    {
+      "domain": "消费电子-手机供应链",
+      "us_advantage": true,
+      "china_advantage": false,
+      "china_beneficiaries": ["002475", "300136", "601138"],
+      "china_potential": [],
+      "us_leaders": ["AAPL"],
+      "reason": "Apple主导高端手机(利润占比85%)，中国是核心制造基地；立讯精密/信维通信深度嵌入Apple供应链，但受地缘供应链转移风险",
+      "catalyst": "Apple AI iPhone换机周期、Vision Pro供应链扩容",
+      "confidence": "medium",
+      "risk_factors": ["Apple加速向印度/越南转移供应链→中国份额被侵蚀", "中美脱钩若禁止中国代工Apple→立讯等最受伤"]
+    },
+    {
+      "domain": "互联网-平台",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["0700.HK", "9988.HK", "3690.HK"],
+      "us_leaders": ["GOOGL", "META", "AMZN"],
+      "reason": "中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta",
+      "catalyst": "国内消费刺激政策+广告复苏、港股估值修复+南向资金持续流入",
+      "confidence": "high",
+      "risk_factors": ["监管不确定性(反垄断+数据安全法)", "互联网人口红利见顶→增长切换至利润释放"]
+    },
+    {
+      "domain": "互联网-AI大模型",
+      "us_advantage": true,
+      "china_advantage": false,
+      "china_beneficiaries": [],
+      "china_potential": ["0700.HK", "002230"],
+      "us_leaders": ["MSFT", "META", "GOOGL"],
+      "reason": "OpenAI/MSFT领先GPT-5，META开源Llama生态；中国腾讯混元/百度文心/讯飞星火在中文场景有优势，但基座模型算力不足",
+      "catalyst": "国产AI应用爆发(微信/钉钉Copilot化)、国产GPU算力集群陆续投产",
+      "confidence": "medium",
+      "risk_factors": ["美国进一步限制高端GPU出口→中国AI大模型训练受阻", "开源模型削弱闭源壁垒→用户迁移成本低→变现困难"]
+    },
+    {
+      "domain": "机器人-工业自动化",
+      "us_advantage": false,
+      "china_advantage": false,
+      "china_beneficiaries": ["300124", "002747", "002472", "688017"],
+      "china_potential": [],
+      "us_leaders": ["TSLA (Optimus)"],
+      "reason": "人形机器人整机设计美国领先(Optimus/Figure)，但减速器/伺服/传感器等核心零部件供应链集中在中国+日本；中国汇川/绿的谐波/双环传动在减速器和伺服领域全球竞争力强",
+      "catalyst": "Optimus量产→中国零部件供应商确定性受益",
+      "confidence": "high",
+      "risk_factors": ["Optimus若全面自研核心零部件→中国供应商被踢出", "人形机器人商业落地延迟→预期炒作后回调"]
+    },
+    {
+      "domain": "医药-CXO",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["603259", "300760"],
+      "us_leaders": [],
+      "reason": "中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包",
+      "catalyst": "美国生物安全法案影响逐步消化、全球创新药融资回暖→CXO订单复苏",
+      "confidence": "high",
+      "risk_factors": ["美国生物安全法案进一步限制→药明系脱美", "美国Biotech融资环境恶化→需求下降"]
+    },
+    {
+      "domain": "电力-AI基建",
+      "us_advantage": false,
+      "china_advantage": true,
+      "china_leaders": ["600900", "601985", "601877"],
+      "us_leaders": ["VST", "CEG", "GEV"],
+      "reason": "中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价",
+      "catalyst": "国内AI数据中心密集建设(东数西算)、核电审批加速",
+      "confidence": "high",
+      "risk_factors": ["电力市场化改革→电价下行风险", "水电受气候影响→来水不足→发电量波动"]
+    },
+    {
+      "domain": "军工-航空航天",
+      "us_advantage": false,
+      "china_advantage": false,
+      "china_beneficiaries": ["600760", "002179", "600893"],
+      "china_potential": [],
+      "us_leaders": ["LMT", "RTX", "BA"],
+      "reason": "中国军工产业已实现完全自主可控，歼-20/运-20/航母等核心装备国产化率近100%；中航沈飞(战斗机)/中航光电(连接器)/航发动力(发动机)形成军工三支柱",
+      "catalyst": "2027建军百年目标→军费持续7%+增长、地缘冲突催化",
+      "confidence": "high",
+      "risk_factors": ["军品定价机制改革→利润率承压", "和平时期军贸出口受国际政治限制"]
+    }
+  ]
+}

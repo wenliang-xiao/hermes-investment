@@ -22,11 +22,13 @@ import json
 import math
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 import functools
 from dataclasses import dataclass
+
+from analysis.backtest_types import BacktestResult
 
 print = functools.partial(print, flush=True)
 
@@ -190,14 +192,21 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
     return df["close"].tolist()
 
 
-def preload_all_data(days: int = FIXED_DAYS) -> dict[str, list[float]]:
+def preload_all_data(days: int = FIXED_DAYS, custom_symbols: list[str] | None = None) -> dict[str, list[float]]:
     """预加载所有标的日线数据
 
     Args:
         days: 需要的数据天数（Walk-Forward 需较大值如 500+）
+        custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
     """
     result: dict[str, list[float]] = {}
-    for s in FIXED_UNIVERSE:
+    if custom_symbols:
+        universe = [
+            {"symbol": s, "name": s} for s in custom_symbols
+        ]
+    else:
+        universe = FIXED_UNIVERSE
+    for s in universe:
         sym = s["symbol"]
         prices = load_price_history(sym, days)
         if prices:
@@ -292,7 +301,12 @@ def run_backtest(
     # 找出最短的时间序列
     min_days = min(len(p) for p in price_data.values()) if price_data else 0
     if min_days < 60:
-        return {"error": f"数据不足(最少60天, 实际{min_days}天)"}
+        return {"error": f"数据不足(最少60天, 实际{min_days}天)"}  # type: ignore[return-value]
+
+    # 生成日期序列（从最新数据开始倒推）
+    end_dt = date.today()
+    start_dt = end_dt - timedelta(days=min_days)
+    date_list = [(start_dt + timedelta(days=i)).isoformat() for i in range(min_days)]
 
     # 逐日推进
     score_map = dict(FIXED_SCORE_MAP)  # 固定评分
@@ -395,9 +409,59 @@ def run_backtest(
         total_value = total_cash + position_value
         equity_curve.append(total_value)
 
-    # ─── 计算指标 ───
-    return _compute_metrics(equity_curve, all_trades, trade_count, win_count,
-                            strategy_name, score_map, price_data, min_days)
+    # ─── 构建 BacktestResult ───
+    # 添加日期到 equity_curve
+    eq_curve = [
+        {"date": date_list[i], "value": round(equity_curve[i], 2)}
+        for i in range(min_days)
+    ]
+
+    # 添加日期到 trades
+    dated_trades = []
+    for t in all_trades:
+        d_idx = t.get("day", 0)
+        t_date = date_list[d_idx] if d_idx < len(date_list) else date_list[-1]
+        dated_trades.append({
+            "date": t_date,
+            "symbol": t.get("symbol", ""),
+            "action": t.get("action", ""),
+            "price": t.get("price", 0),
+            "qty": t.get("quantity", 0),
+            "pnl": t.get("pnl"),
+            "reason": t.get("reason", ""),
+        })
+
+    # 计算指标
+    metrics = _compute_metrics(equity_curve, all_trades, trade_count, win_count,
+                               strategy_name, score_map, price_data, min_days)
+
+    mdd = metrics.get("max_drawdown_pct", 0.0)
+    annualized = metrics.get("annualized_return_pct", 0.0)
+    calmar = annualized / mdd if mdd > 0 else 0.0
+
+    return BacktestResult(
+        strategy_name=strategy_name,
+        start_date=date_list[0],
+        end_date=date_list[-1],
+        initial_cash=INITIAL_CASH,
+        final_value=metrics.get("final_value", INITIAL_CASH),
+        total_return_pct=metrics.get("total_return_pct", 0.0),
+        annualized_return_pct=annualized,
+        sharpe_ratio=metrics.get("sharpe_ratio", 0.0),
+        sortino_ratio=metrics.get("sortino_ratio", metrics.get("score", 0.0)),
+        max_drawdown_pct=mdd,
+        calmar_ratio=round(calmar, 4),
+        win_rate_pct=metrics.get("win_rate_pct", 0.0),
+        trade_count=metrics.get("trade_count", 0),
+        equity_curve=eq_curve,
+        trades=dated_trades,
+        benchmark=None,
+        extra={
+            "total_days": metrics.get("total_days", min_days),
+            "universe_size": metrics.get("universe_size", len(score_map)),
+            "stocks_with_data": metrics.get("stocks_with_data", len(price_data)),
+        },
+    )
 
 
 def _compute_metrics(
@@ -691,7 +755,30 @@ def run_walk_forward(
     print(f"  收益范围     : [{master_result['min_return_pct']:+.2f}% ~ {master_result['max_return_pct']:+.2f}%]")
     print(f"  总交易       : {master_result['total_trades']}笔, 胜率{master_result['win_rate_pct']}%")
 
-    return master_result
+    # 包装为 BacktestResult
+    wf_annualized = master_result["avg_return_pct"]
+    wf_mdd = master_result["avg_max_drawdown_pct"]
+    calmar = wf_annualized / wf_mdd if wf_mdd > 0 else 0.0
+
+    return BacktestResult(
+        strategy_name=strategy_name,
+        start_date=date.today().isoformat(),
+        end_date=date.today().isoformat(),
+        initial_cash=INITIAL_CASH,
+        final_value=INITIAL_CASH * (1 + master_result["avg_return_pct"] / 100),
+        total_return_pct=master_result["avg_return_pct"],
+        annualized_return_pct=wf_annualized,
+        sharpe_ratio=master_result["avg_sharpe"],
+        sortino_ratio=master_result["avg_sortino"],
+        max_drawdown_pct=wf_mdd,
+        calmar_ratio=round(calmar, 4),
+        win_rate_pct=master_result["win_rate_pct"],
+        trade_count=master_result["total_trades"],
+        equity_curve=[],
+        trades=[],
+        benchmark=None,
+        extra={"mode": "walk_forward", "cycle_details": cycle_results, **master_result},
+    )
 
 
 # ──────────────────────────────────────────────
@@ -718,20 +805,24 @@ def analyze_market_regime(closes: list[float]) -> str:
         return "consolidation"
     return "mixed"
 # ──────────────────────────────────────────────
-def save_to_run_log(strategy: str, result: dict):
-    """记录到实验账本"""
+def save_to_run_log(strategy: str, result):
+    """记录到实验账本（支持 BacktestResult 和 dict）"""
     run_id = f"{strategy}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     run_dir = HL_RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # 保存结果
+    if isinstance(result, BacktestResult):
+        data = result.to_json()
+    else:
+        data = result
     with open(run_dir / "result.json", "w") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
     # 追加到汇总
     summary_file = HL_RUNS_DIR / "runs.jsonl"
     entry = {"run_id": run_id, "strategy": strategy,
-             "timestamp": datetime.now().isoformat(), **result}
+             "timestamp": datetime.now().isoformat(), **data}
     with open(summary_file, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -740,7 +831,8 @@ def save_to_run_log(strategy: str, result: dict):
 # CLI
 # ──────────────────────────────────────────────
 def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
-                       cycles: int = 3, train_days: int = 252, test_days: int = 63) -> dict:
+                       cycles: int = 3, train_days: int = 252, test_days: int = 63,
+                       custom_symbols: list[str] | None = None) -> BacktestResult | dict:
     """评估单个策略
 
     Args:
@@ -749,12 +841,13 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         cycles: WF 滚动次数
         train_days: WF 训练窗口天数
         test_days: WF 测试窗口天数
+        custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
     """
     data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100) if walk_forward else FIXED_DAYS
 
     # 加载数据
     print(f"\n📦 加载数据{' (WF模式)' if walk_forward else ''}...")
-    price_data = preload_all_data(days=data_days)
+    price_data = preload_all_data(days=data_days, custom_symbols=custom_symbols)
     if not price_data:
         return {"error": "无有效数据"}
 
@@ -820,17 +913,33 @@ def main():
         )
         results[strat_name] = result
 
+        # 处理便捷访问（兼容 BacktestResult 和 error dict）
+        is_br = isinstance(result, BacktestResult)
+        is_error = isinstance(result, dict) and "error" in result
+
         print(f"\n{'='*50}")
         print(f"📊 {strat_name}")
         print(f"{'='*50}")
-        if "error" in result:
+        if is_error:
             print(f"  ❌ {result['error']}")
         elif args.walk_forward:
-            print(f"  WF平均收益     : {result['avg_return_pct']:+.2f}%")
-            print(f"  WF平均Sortino  : {result['avg_sortino']:.4f}")
-            print(f"  WF排序范围     : [{result['min_sortino']:.4f} ~ {result['max_sortino']:.4f}]")
-            print(f"  WF平均回撤     : {result['avg_max_drawdown_pct']:.2f}%")
-            print(f"  总交易         : {result['total_trades']}笔, 胜率{result['win_rate_pct']}%")
+            extra = result.extra if is_br else result
+            print(f"  WF平均收益     : {extra['avg_return_pct']:+.2f}%")
+            print(f"  WF平均Sortino  : {extra['avg_sortino']:.4f}")
+            print(f"  WF排序范围     : [{extra['min_sortino']:.4f} ~ {extra['max_sortino']:.4f}]")
+            print(f"  WF平均回撤     : {extra['avg_max_drawdown_pct']:.2f}%")
+            print(f"  总交易         : {extra['total_trades']}笔, 胜率{extra['win_rate_pct']}%")
+        elif is_br:
+            print(f"  SCORE (Sortino) : {result.sortino_ratio}")
+            print(f"  总收益         : {result.total_return_pct:+.2f}%")
+            print(f"  年化           : {result.annualized_return_pct:+.2f}%")
+            print(f"  Sharpe         : {result.sharpe_ratio}")
+            print(f"  Sortino        : {result.sortino_ratio}")
+            print(f"  Calmar         : {result.calmar_ratio}")
+            print(f"  最大回撤       : {result.max_drawdown_pct:.2f}%")
+            print(f"  胜率           : {result.win_rate_pct:.1f}% ({result.trade_count}笔)")
+            print(f"  组合终值       : ¥{result.final_value:,.0f}")
+            print(f"  标的数         : {result.extra.get('stocks_with_data', 0)}")
         else:
             print(f"  SCORE (Sortino) : {result['score']}")
             print(f"  总收益         : {result['total_return_pct']:+.2f}%")
@@ -841,18 +950,22 @@ def main():
             print(f"  组合终值       : ¥{result['final_value']:,.0f}")
             print(f"  标的数         : {result['stocks_with_data']}")
 
-        if not args.no_log and "error" not in result:
+        if not args.no_log and not is_error:
             save_to_run_log(strat_name, result)
 
         # DSR 统计检验
-        if args.with_dsr and "error" not in result and not args.walk_forward:
+        if args.with_dsr and not is_error and not args.walk_forward:
             try:
                 from analysis.dsr_test import compute_dsr, dsr_verdict, compare_strategies_with_dsr
-                n_trials = 50  # 可调整
-                sortino_val = result.get("sortino_ratio") or result.get("score", 0)
-                n_days = result.get("total_days", 120)
+                n_trials = 50
+                if is_br:
+                    sortino_val = result.sortino_ratio
+                    n_days = result.extra.get("total_days", 120)
+                else:
+                    sortino_val = result.get("sortino_ratio") or result.get("score", 0)
+                    n_days = result.get("total_days", 120)
                 dsr, comp = compute_dsr(
-                    sharpe_observed=sortino_val * 0.7,  # Sortino→Sharpe
+                    sharpe_observed=sortino_val * 0.7,
                     n_observations=n_days,
                     n_trials=n_trials,
                 )

@@ -1,4 +1,6 @@
 """
+# ARCHIVE ONLY — 已归档。使用 evaluator_fixed.py + BacktestResult 代替。
+
 三方策略对比回测 v2 — 跳过因子扫描，用已有评分+历史价格
 """
 import sys, os, json, math

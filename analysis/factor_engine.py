@@ -965,14 +965,42 @@ class PoolManager:
         """
         today = date.today().isoformat()
 
-        # 发现层: TOP30 按评分
         watch = [{
             "symbol": r["symbol"],
             "score": r["composite"],
             "scores": r["scores"],
+            "factor_breakdown": r.get("factor_breakdown", {}),
             "date_added": today,
-            "reason": f"综合分{r['composite']:.3f}",
+            "reason": self._build_reason(r["symbol"], r["scores"]),
+            "discovery_source": "factor_scan",
         } for r in scan_results[:30]]
+
+        try:
+            from analysis.decoupling_discovery import get_discovered_stocks
+            watch_symbols = {w["symbol"] for w in watch}
+            decoupled = get_discovered_stocks(min_confidence="medium")
+            for d in decoupled:
+                sym = d["symbol"]
+                if sym in watch_symbols:
+                    continue
+                if d.get("advantage_score", 0) < 0.70:
+                    continue
+                watch.append({
+                    "symbol": sym,
+                    "score": d.get("advantage_score", 0.70),
+                    "scores": {
+                        "decoupling_domain": d.get("domain", ""),
+                        "decoupling_role": d.get("role", ""),
+                        "decoupling_confidence": d.get("confidence", ""),
+                    },
+                    "factor_breakdown": {},
+                    "date_added": today,
+                    "reason": (f"脱钩比较优势: {d.get('domain','')}领域, "
+                               f"{d.get('reason','')[:80]}"),
+                    "discovery_source": "decoupling",
+                })
+        except ImportError:
+            pass
 
         # 盯住层: 从发现层晋级
         monitor = existing_monitor or self.load_pool("monitor")
@@ -988,12 +1016,15 @@ class PoolManager:
                 if existing:
                     existing["score"] = w["score"]
                     existing["scores"] = w["scores"]
+                    existing["factor_breakdown"] = w.get("factor_breakdown", existing.get("factor_breakdown", {}))
                 elif w["symbol"] not in [m["symbol"] for m in monitor]:
                     monitor.append({
                         "symbol": w["symbol"],
                         "score": w["score"],
                         "scores": w["scores"],
+                        "factor_breakdown": w.get("factor_breakdown", {}),
                         "date_added": today,
+                        "reason": w.get("reason", ""),
                     })
 
         # 深度层: 从盯住层晋级
@@ -1012,8 +1043,10 @@ class PoolManager:
                         "symbol": m["symbol"],
                         "score": m["score"],
                         "scores": m["scores"],
+                        "factor_breakdown": m.get("factor_breakdown", {}),
                         "date_added": today,
                         "stoplist_passed": passed,
+                        "reason": m.get("reason", ""),
                     })
                 except Exception:
                     pass
@@ -1028,6 +1061,59 @@ class PoolManager:
         self.save_pool("deep", deep)
 
         return {"watch": watch, "monitor": monitor, "deep": deep}
+
+    @staticmethod
+    def _build_reason(symbol: str, scores: dict) -> str:
+        """从 factor scores + config focus 自动生成入池理由"""
+        try:
+            from investment_system import config
+        except ImportError:
+            try:
+                import config as _cfg
+                config = _cfg
+            except ImportError:
+                return f"综合分{scores.get('quality', 0):.3f}"
+
+        wl = getattr(config, "WATCHLIST", {})
+        entry = wl.get(symbol, wl.get(str(symbol), {}))
+        focus = entry.get("focus", "")
+
+        # 风格因子描述
+        descriptions = {
+            "quality": ("盈利质量优异", 0.70),
+            "momentum": ("近期动量强劲", 0.70),
+            "growth": ("成长性突出", 0.70),
+            "value": ("估值合理", 0.65),
+            "sentiment": ("市场情绪积极", 0.65),
+            "low_vol": ("低波动防御属性", 0.65),
+            "dividend": ("高股息回报", 0.65),
+        }
+        factor_descs = []
+        for fk, (desc, threshold) in descriptions.items():
+            val = scores.get(fk, 0)
+            if val > threshold:
+                factor_descs.append(desc)
+
+        # 取top3
+        top3 = sorted(scores.items(), key=lambda x: -x[1])[:3]
+        top_descs = []
+        for fk, val in top3:
+            if fk in descriptions and val > descriptions[fk][1]:
+                top_descs.append(descriptions[fk][0])
+
+        if not top_descs:
+            top_descs = factor_descs[:3]
+
+        parts = []
+        if focus:
+            parts.append(focus)
+        if top_descs:
+            parts.append("；".join(top_descs))
+        if not parts:
+            composite = sum(scores.get(f, 0) * 0.14 for f in scores)
+            parts.append(f"综合分{composite:.3f}")
+
+        return "。".join(parts) if focus else "；".join(parts)
 
 
 # ═══════════════════════════════════════════════
