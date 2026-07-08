@@ -1056,6 +1056,158 @@ def api_v2_etf():
     return {}
 
 
+@app.get("/api/v2/etf/universe")
+def api_v2_etf_universe(category: str = "", region: str = ""):
+    """ETF标的池 — 按类别/地区筛选"""
+    from data.etf_universe import ALL_ETF, ETF_BY_SYMBOL
+    result = []
+    for e in ALL_ETF:
+        if category and e.category != category:
+            continue
+        if region and e.region != region:
+            continue
+        result.append({
+            "symbol": e.symbol, "name": e.name, "category": e.category,
+            "region": e.region, "benchmark": e.benchmark, "fee_pct": e.fee_pct,
+        })
+    return {"total": len(result), "etfs": result}
+
+
+@app.get("/api/v2/etf/scan")
+def api_v2_etf_scan(category: str = "", region: str = ""):
+    """ETF扫描 — 趋势+动量+波动率"""
+    from data.etf_universe import ALL_ETF
+    from data.data_router import get_history
+    import numpy as _np
+
+    etfs = ALL_ETF
+    if category:
+        etfs = [e for e in etfs if e.category == category]
+    if region:
+        etfs = [e for e in etfs if e.region == region]
+
+    results = []
+    for e in etfs:
+        try:
+            raw = get_history(e.symbol, days=130)
+            if not raw or "close" not in raw or len(raw["close"]) < 20:
+                continue
+            closes = raw["close"]
+            current = closes[-1]
+            ma20 = sum(closes[-20:]) / 20
+            ma60 = sum(closes[-60:]) / min(60, len(closes)) if len(closes) >= 60 else sum(closes) / len(closes)
+            ret_20d = (closes[-1] - closes[-20]) / closes[-20] * 100 if len(closes) >= 20 and closes[-20] > 0 else 0
+            ret_60d = (closes[-1] - closes[-60]) / closes[-60] * 100 if len(closes) >= 60 and closes[-60] > 0 else 0
+            vol_20d = _np.std(closes[-20:] / _np.array(closes[-21:-1]) - 1) * (252**0.5) * 100 if len(closes) >= 21 else 0
+            trend = "↑" if ma20 > ma60 else "↓"
+            trend_strength = abs(ma20 - ma60) / ma60 * 100 if ma60 > 0 else 0
+            results.append({
+                "symbol": e.symbol, "name": e.name, "category": e.category,
+                "region": e.region, "benchmark": e.benchmark,
+                "price": round(current, 4), "ma20": round(ma20, 4), "ma60": round(ma60, 4),
+                "trend": trend, "trend_strength": round(trend_strength, 2),
+                "ret_20d": round(ret_20d, 2), "ret_60d": round(ret_60d, 2),
+                "vol_20d": round(vol_20d, 2),
+                "is_timing": e.symbol in ("510300", "511010", "512480", "518880", "513100"),
+                "is_rp": e.symbol in ("510300", "511010", "518880", "159985"),
+            })
+        except Exception:
+            continue
+    results.sort(key=lambda x: x.get("ret_20d", 0), reverse=True)
+    return {"total": len(results), "scan_date": datetime.now().strftime("%Y-%m-%d"), "etfs": results}
+
+
+@app.get("/api/v2/etf/detail/{symbol}")
+def api_v2_etf_detail(symbol: str):
+    """ETF深度分析 — 价格+趋势+历史回报+组合归属"""
+    from data.etf_universe import ETF_BY_SYMBOL
+    from data.data_router import get_history
+    import numpy as _np
+
+    etf = ETF_BY_SYMBOL.get(symbol)
+    if not etf:
+        return {"error": f"未知ETF: {symbol}"}
+
+    raw = get_history(symbol, days=400)
+    if not raw or "close" not in raw or len(raw["close"]) < 20:
+        return {"error": f"数据不足: {symbol}", "etf": {"symbol": etf.symbol, "name": etf.name}}
+
+    closes = raw["close"]
+    dates = raw.get("dates", [])
+    current = closes[-1]
+    ma5 = sum(closes[-5:]) / 5 if len(closes) >= 5 else current
+    ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
+    ma60 = sum(closes[-60:]) / min(60, len(closes)) if len(closes) >= 60 else current
+    ma120 = sum(closes[-120:]) / min(120, len(closes)) if len(closes) >= 120 else current
+
+    returns = {}
+    for label, days in [("1d", 1), ("1w", 5), ("1m", 20), ("3m", 60), ("6m", 120), ("1y", 250)]:
+        if len(closes) > days and closes[-days - 1] > 0:
+            returns[label] = round((closes[-1] - closes[-days - 1]) / closes[-days - 1] * 100, 2)
+
+    vol_20d = 0
+    if len(closes) >= 21:
+        rets = _np.array(closes[-20:]) / _np.array(closes[-21:-1]) - 1
+        vol_20d = round(_np.std(rets) * (252**0.5) * 100, 2)
+
+    max_dd = 0
+    if len(closes) >= 60:
+        peak = closes[-60]
+        for c in closes[-60:]:
+            peak = max(peak, c)
+            dd = (c - peak) / peak * 100 if peak > 0 else 0
+            max_dd = min(max_dd, dd)
+
+    trend_signals = []
+    if ma5 > ma20:
+        trend_signals.append("MA5>MA20 短期强势")
+    if ma20 > ma60:
+        trend_signals.append("MA20>MA60 中期上升趋势")
+    if ma60 > ma120:
+        trend_signals.append("MA60>MA120 长期上升通道")
+    if ma20 < ma60:
+        trend_signals.append("MA20<MA60 中期下降趋势")
+    if not trend_signals:
+        trend_signals.append("均线纠缠 方向不明")
+
+    portfolio_role = []
+    if symbol in ("510300", "511010", "512480", "518880", "513100"):
+        portfolio_role.append("择时组合")
+    if symbol in ("510300", "511010", "518880", "159985"):
+        portfolio_role.append("非择时组合")
+
+    return {
+        "etf": {"symbol": etf.symbol, "name": etf.name, "category": etf.category,
+                "region": etf.region, "benchmark": etf.benchmark, "fee_pct": etf.fee_pct},
+        "price": {"current": round(current, 4), "ma5": round(ma5, 4), "ma20": round(ma20, 4),
+                  "ma60": round(ma60, 4), "ma120": round(ma120, 4)},
+        "returns": returns,
+        "volatility": {"annualized_20d": vol_20d},
+        "max_drawdown_60d": round(max_dd, 2),
+        "trend_signals": trend_signals,
+        "portfolio_role": portfolio_role,
+        "latest_date": dates[-1] if dates else "",
+    }
+
+
+@app.get("/api/v2/etf/portfolio")
+def api_v2_etf_portfolio():
+    """ETF组合配置 — 择时+非择时"""
+    path = ROOT / "data" / "etf_portfolio.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    try:
+        from analysis.etf_portfolio import EtfPortfolioBuilder
+        builder = EtfPortfolioBuilder()
+        result = builder.build()
+        if "error" not in result:
+            builder.save_json()
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/v2/news")
 def api_v2_news():
     """板块新闻 — 优先 news_cache.json，回退 news_score_offset.json"""
@@ -1648,8 +1800,8 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== ETF面板 ======== -->
   <div class="card" id="tab-etf" style="display:none">
-    <div class="card-header"><h3>📦 ETF组合建议</h3></div>
-    <div id="etfBody" style="font-size:13px;"></div>
+    <div class="card-header"><h3>📦 ETF 找票 · 分析 · 趋势 · 组合配置</h3></div>
+    <div id="etfBody" class="space-y-6 p-4"></div>
   </div>
 
   <!-- ======== 新闻面板 ======== -->
@@ -2010,55 +2162,158 @@ setInterval(loadDashboardV2, 120000);
 
 async function loadEtf() {
   const el = document.getElementById('etfBody');
-  el.innerHTML = '<div class="empty">加载中...</div>';
+  el.innerHTML = '<div class="text-gray-400 p-4">⏳ 加载中...</div>';
   try {
-    const r = await fetch('/api/v2/etf');
-    const data = await r.json();
-    if (!data || Object.keys(data).length === 0) {
-      el.innerHTML = '<div class="empty">暂无ETF组合数据</div>';
-      return;
-    }
+    const [scanRes, portfolioRes] = await Promise.all([
+      fetch('/api/v2/etf/scan').then(r => r.json()).catch(() => ({})),
+      fetch('/api/v2/etf/portfolio').then(r => r.json()).catch(() => ({}))
+    ]);
+
     let html = '';
-    // timing_portfolio
-    if (data.timing_portfolio) {
-      const tp = data.timing_portfolio;
-      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ 趋势跟随组合 (MA20/MA60)</strong></div>`;
-      html += buildEtfTable(tp.symbols || []);
+
+    // ── 组合配置 ──
+    if (portfolioRes && !portfolioRes.error && portfolioRes.combined) {
+      html += '<div class="bg-gray-800 rounded-xl p-4 mb-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-300 mb-3">📊 组合配置建议</h4>';
+      const tp = portfolioRes.timing_portfolio;
+      const nt = portfolioRes.non_timing_portfolio;
+      if (tp) {
+        html += `<div class="mb-3"><span class="text-blue-400 font-medium text-sm">▸ 择时组合 (${tp.strategy || 'TrendFollowing'})</span>`;
+        html += buildEtfTableV2(tp.symbols || []);
+        html += '</div>';
+      }
+      if (nt) {
+        html += `<div class="mb-3"><span class="text-green-400 font-medium text-sm">▸ 非择时组合 (${nt.strategy || 'RiskParity'})</span>`;
+        html += buildEtfTableV2(nt.symbols || []);
+        html += '</div>';
+      }
+      if (portfolioRes.combined && portfolioRes.combined.length > 0) {
+        html += '<div class="mb-1"><span class="text-purple-400 font-medium text-sm">▸ 合并建议</span>';
+        html += buildEtfTableV2(portfolioRes.combined);
+        html += '</div>';
+      }
+      html += `<div class="text-xs text-gray-500 mt-2">更新: ${portfolioRes.timestamp || ''} | 价格日期: ${portfolioRes.price_date || ''}</div>`;
+      html += '</div>';
     }
-    // non_timing_portfolio
-    if (data.non_timing_portfolio) {
-      const nt = data.non_timing_portfolio;
-      html += `<div style="margin-bottom:16px;"><strong style="color:var(--blue);font-size:15px;">▸ 风险平价组合 (季度再平衡)</strong></div>`;
-      html += buildEtfTable(nt.symbols || []);
+
+    // ── ETF 扫描结果 ──
+    if (scanRes && !scanRes.error && scanRes.etfs) {
+      const etfs = scanRes.etfs;
+      const categories = {};
+      etfs.forEach(e => {
+        const cat = e.category || 'other';
+        if (!categories[cat]) categories[cat] = [];
+        categories[cat].push(e);
+      });
+
+      const catLabels = {broad:'宽基', sector:'行业', commodity:'商品', bond:'债券', cross_border:'跨境', strategy:'策略'};
+      html += '<div class="bg-gray-800 rounded-xl p-4">';
+      html += `<h4 class="text-sm font-semibold text-gray-300 mb-3">🔍 ETF 扫描 (${etfs.length}只) <span class="text-xs text-gray-500 ml-2">${scanRes.scan_date || ''}</span></h4>`;
+
+      for (const [cat, list] of Object.entries(categories)) {
+        html += `<div class="mb-4"><div class="text-xs font-medium text-gray-400 mb-2">${catLabels[cat] || cat} (${list.length})</div>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-xs"><thead class="text-gray-400 border-b border-gray-700"><tr>';
+        html += '<th class="py-2 text-left">代码</th><th class="text-left">名称</th><th class="text-right">现价</th><th class="text-center">趋势</th><th class="text-right">20D</th><th class="text-right">60D</th><th class="text-right">波动率</th><th class="text-center">组合</th>';
+        html += '</tr></thead><tbody>';
+        list.forEach(e => {
+          const trendColor = e.trend === '↑' ? 'text-green-500' : 'text-red-500';
+          const ret20Color = e.ret_20d >= 0 ? 'text-green-500' : 'text-red-500';
+          const ret60Color = e.ret_60d >= 0 ? 'text-green-500' : 'text-red-500';
+          const role = [e.is_timing ? '择时' : '', e.is_rp ? '平价' : ''].filter(Boolean).join('/');
+          html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" onclick="loadEtfDetail('${e.symbol}')">
+            <td class="py-1.5 font-mono text-blue-400">${e.symbol}</td>
+            <td class="text-gray-200">${e.name}</td>
+            <td class="text-right font-mono text-gray-200">${e.price || '—'}</td>
+            <td class="text-center ${trendColor} font-bold">${e.trend || '—'}</td>
+            <td class="text-right font-mono ${ret20Color}">${e.ret_20d >= 0 ? '+' : ''}${e.ret_20d || 0}%</td>
+            <td class="text-right font-mono ${ret60Color}">${e.ret_60d >= 0 ? '+' : ''}${e.ret_60d || 0}%</td>
+            <td class="text-right font-mono text-gray-400">${e.vol_20d || 0}%</td>
+            <td class="text-center text-[10px] text-gray-500">${role || '—'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div></div>';
+      }
+      html += '</div>';
     }
-    // combined
-    if (data.combined && data.combined.length > 0) {
-      html += `<div style="margin-bottom:16px;"><strong style="color:var(--green);font-size:15px;">▸ 合并建议</strong></div>`;
-      html += buildEtfTable(data.combined);
+
+    if (!html) {
+      html = '<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg">⚠️ 暂无ETF数据，需先运行 python3 analysis/etf_portfolio.py</div>';
     }
-    if (data.timestamp) {
-      html += `<div style="font-size:11px;color:var(--text2);text-align:right;">更新时间: ${data.timestamp}</div>`;
-    }
-    el.innerHTML = html || '<div class="empty">暂无ETF组合数据</div>';
+
+    el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
   }
 }
 
-function buildEtfTable(symbols) {
-  if (!symbols || symbols.length === 0) return '<div class="empty">暂无数据</div>';
-  const actionLabel = {BUY:'买入','SELL':'卖出',HOLD:'持有'};
-  return '<table><tr><th>代码</th><th>名称</th><th>操作</th><th>权重</th><th>类型</th><th>理由</th></tr>' +
+async function loadEtfDetail(symbol) {
+  try {
+    const r = await fetch(`/api/v2/etf/detail/${symbol}`);
+    const data = await r.json();
+    if (data.error) { alert(data.error); return; }
+
+    const etf = data.etf || {};
+    const price = data.price || {};
+    const returns = data.returns || {};
+    const signals = data.trend_signals || [];
+    const role = data.portfolio_role || [];
+
+    let html = `<div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="this.remove()">`;
+    html += `<div class="bg-gray-800 border border-gray-600 rounded-xl p-6 max-w-lg w-full" onclick="event.stopPropagation()">`;
+    html += `<div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-100">${etf.name || symbol} (${etf.symbol || symbol})</h3>`;
+    html += `<button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-200">✕</button></div>`;
+
+    if (etf.benchmark) html += `<div class="text-xs text-gray-400 mb-3">跟踪: ${etf.benchmark} | 费率: ${(etf.fee_pct*100).toFixed(3)}% | ${etf.category} | ${etf.region}</div>`;
+
+    html += '<div class="grid grid-cols-2 gap-3 mb-4">';
+    html += `<div class="bg-gray-700/50 rounded p-2"><div class="text-xs text-gray-400">现价</div><div class="font-mono text-lg text-gray-100">${price.current || '—'}</div></div>`;
+    html += `<div class="bg-gray-700/50 rounded p-2"><div class="text-xs text-gray-400">MA20/MA60</div><div class="font-mono text-sm ${price.ma20 >= price.ma60 ? 'text-green-500' : 'text-red-500'}">${price.ma20 || '—'} / ${price.ma60 || '—'}</div></div>`;
+    html += '</div>';
+
+    html += '<div class="mb-4"><div class="text-xs text-gray-400 mb-1">历史回报</div><div class="flex gap-2 flex-wrap">';
+    for (const [label, val] of Object.entries(returns)) {
+      const cls = val >= 0 ? 'text-green-500' : 'text-red-500';
+      html += `<span class="bg-gray-700 rounded px-2 py-1 text-xs"><span class="text-gray-400">${label}:</span> <span class="font-mono ${cls}">${val >= 0 ? '+' : ''}${val}%</span></span>`;
+    }
+    html += '</div></div>';
+
+    if (signals.length) {
+      html += '<div class="mb-4"><div class="text-xs text-gray-400 mb-1">趋势信号</div>';
+      signals.forEach(s => { html += `<div class="text-xs text-gray-300">• ${s}</div>`; });
+      html += '</div>';
+    }
+
+    if (data.volatility) {
+      html += `<div class="text-xs text-gray-400">20日年化波动率: <span class="font-mono text-gray-200">${data.volatility.annualized_20d || 0}%</span>`;
+      html += ` | 60日最大回撤: <span class="font-mono text-red-400">${data.max_drawdown_60d || 0}%</span></div>`;
+    }
+
+    if (role.length) {
+      html += `<div class="mt-3 text-xs"><span class="text-gray-400">组合归属:</span> ${role.map(r => `<span class="bg-blue-900/40 text-blue-400 rounded px-2 py-0.5 ml-1">${r}</span>`).join('')}</div>`;
+    }
+
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) {
+    alert('加载失败: ' + e.message);
+  }
+}
+
+function buildEtfTableV2(symbols) {
+  if (!symbols || symbols.length === 0) return '<div class="text-gray-500 text-xs py-2">暂无数据</div>';
+  const actionLabel = {BUY:'买入', SELL:'卖出', HOLD:'持有'};
+  const actionColor = {BUY:'bg-green-900/40 text-green-400', SELL:'bg-red-900/40 text-red-400', HOLD:'bg-gray-700 text-gray-400'};
+  return '<table class="w-full text-xs mt-2"><thead class="text-gray-400 border-b border-gray-700"><tr><th class="py-1.5 text-left">代码</th><th class="text-left">名称</th><th class="text-center">操作</th><th class="text-right">权重</th><th class="text-left">理由</th></tr></thead><tbody>' +
     symbols.map(s => {
       const act = s.action || 'HOLD';
-      const cls = act==='BUY'?'badge-buy':(act==='SELL'?'badge-sell':'');
-      return `<tr class="tr-hover"><td><strong>${s.etf_symbol}</strong></td>
-        <td>${s.name||''}</td>
-        <td><span class="badge ${cls}">${actionLabel[act]||act}</span></td>
-        <td>${((s.weight||0)*100).toFixed(1)}%</td>
-        <td style="font-size:11px;color:var(--text2)">${s.signal_type||''}</td>
-        <td style="font-size:11px;color:var(--text2)">${s.reason||''}</td></tr>`;
-    }).join('') + '</table>';
+      return `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+        <td class="py-1.5 font-mono text-blue-400">${s.etf_symbol || s.symbol || ''}</td>
+        <td class="text-gray-200">${s.name || ''}</td>
+        <td class="text-center"><span class="px-1.5 py-0.5 rounded text-[10px] ${actionColor[act] || ''}">${actionLabel[act] || act}</span></td>
+        <td class="text-right font-mono text-gray-200">${((s.weight||0)*100).toFixed(1)}%</td>
+        <td class="text-gray-400 text-[11px]">${(s.reason || '').substring(0,40)}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
 }
 
 let comparisonChartInstance = null;
