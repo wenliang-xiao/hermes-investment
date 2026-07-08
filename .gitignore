@@ -21,3 +21,4 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+.idea/
