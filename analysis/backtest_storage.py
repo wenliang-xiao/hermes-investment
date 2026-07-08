@@ -34,7 +34,7 @@ def save_result(strategy: str, result: dict) -> str:
     return path
 
 
-def list_results(strategy: str | None = None) -> list[dict]:
+def list_results(strategy=None):
     """列出所有回测结果摘要"""
     _ensure_dir()
     pattern = os.path.join(BACKTEST_DIR, "bt_*.json")
@@ -64,7 +64,7 @@ def list_results(strategy: str | None = None) -> list[dict]:
     return summaries
 
 
-def load_result(run_id: str) -> dict | None:
+def load_result(run_id):
     """按 run_id 加载回测结果"""
     _ensure_dir()
     path = os.path.join(BACKTEST_DIR, f"bt_{run_id}.json")

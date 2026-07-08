@@ -778,12 +778,11 @@ setInterval(load, 60000);
 
 
 @app.get("/api/comparison")
-def get_comparison():
-    """三方策略对比数据"""
+def get_comparison(days: int = 60):
+    """三方策略对比数据 — 支持自定义天数"""
     try:
-        from investment_system.analysis.strategy_comparison import run_comparison
-        result = run_comparison(days=60)
-        # 附加实时信号（第三层防护：过滤 price≤0）
+        from analysis.strategy_comparison import run_comparison
+        result = run_comparison(days=min(max(days, 7), 365))
         sig_path = ROOT / "data" / "trading_signals.json"
         if sig_path.exists():
             with open(sig_path) as f:
@@ -1116,6 +1115,96 @@ def api_v2_backtest():
     from analysis.backtest_storage import list_results
     results = list_results()
     return {"count": len(results), "results": results}
+
+
+@app.get("/api/v2/backtest/strategies")
+def api_v2_backtest_strategies():
+    """可用的回测策略列表"""
+    return {
+        "strategies": [
+            {"key": "faceji", "label": "面基策略", "desc": "评分驱动+MA趋势+Kelly仓位+4层风控"},
+            {"key": "silverquant", "label": "SilverQuant", "desc": "固定¥30K槽位+不为清单+4层风控"},
+            {"key": "tradingagents", "label": "TradingAgents", "desc": "辩论制评分+Kelly仓位+3层风控"},
+            {"key": "all", "label": "三策略对比", "desc": "同时运行三个策略对比"},
+        ],
+        "defaults": {
+            "capital": 1000000,
+            "days_range": [7, 30, 60, 90, 180, 365],
+        }
+    }
+
+
+@app.get("/api/v2/backtest/custom")
+def api_v2_backtest_custom(
+    strategy: str = "faceji",
+    start_date: str = "",
+    end_date: str = "",
+    symbols: str = "",
+    capital: float = 1000000,
+):
+    """自定义回测 — 指定策略/时间范围/股票池
+
+    参数:
+        strategy: faceji / silverquant / tradingagents / all
+        start_date: YYYY-MM-DD
+        end_date: YYYY-MM-DD
+        symbols: 逗号分隔的标的代码（空=WATCHLIST A股）
+        capital: 初始资金
+    """
+    try:
+        from analysis.strategy_comparison import run_comparison
+
+        days = 60
+        if start_date and end_date:
+            try:
+                from datetime import datetime as _dt
+                d1 = _dt.strptime(start_date, "%Y-%m-%d")
+                d2 = _dt.strptime(end_date, "%Y-%m-%d")
+                days = max(7, (d2 - d1).days)
+            except Exception:
+                pass
+
+        result = run_comparison(days=min(days, 365))
+
+        if symbols:
+            sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+            if sym_list:
+                result["custom_symbols"] = sym_list
+
+        if strategy != "all":
+            single = {}
+            key = strategy if strategy in result else f"{strategy} (面基)"
+            if key in result:
+                single = result[key]
+            elif strategy == "faceji":
+                for k in result:
+                    if "faceji" in k.lower():
+                        single = result[k]
+                        break
+            elif strategy == "silverquant":
+                for k in result:
+                    if "silver" in k.lower():
+                        single = result[k]
+                        break
+            elif strategy == "tradingagents":
+                for k in result:
+                    if "trading" in k.lower() or "agent" in k.lower():
+                        single = result[k]
+                        break
+            if single:
+                result["focused_strategy"] = single
+
+        result["params"] = {
+            "strategy": strategy,
+            "start_date": start_date,
+            "end_date": end_date,
+            "symbols": symbols,
+            "capital": capital,
+            "days": days,
+        }
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/v2/backtest/{run_id}")
@@ -1519,6 +1608,42 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
   <div class="card" id="tab-comparison" style="display:none">
     <div class="card-header"><h3>📈 三方策略回测对比</h3></div>
     <div id="comparisonBody" style="font-size:13px;"><div class="empty">加载中...</div></div>
+    <div id="comparisonControls" style="margin-bottom:16px;">
+      <div class="bg-gray-800/50 rounded-xl p-4 mb-4 flex flex-wrap gap-4 items-end">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">策略</label>
+          <select id="btStrategy" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600">
+            <option value="all">三策略对比</option>
+            <option value="faceji">面基策略</option>
+            <option value="silverquant">SilverQuant</option>
+            <option value="tradingagents">TradingAgents</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">开始日期</label>
+          <input type="date" id="btStartDate" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">结束日期</label>
+          <input type="date" id="btEndDate" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">快速选择</label>
+          <select id="btQuickDays" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600" onchange="applyQuickDays(this.value)">
+            <option value="30">最近30天</option>
+            <option value="60" selected>最近60天</option>
+            <option value="90">最近90天</option>
+            <option value="180">最近180天</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">股票池(逗号分隔,空=默认)</label>
+          <input type="text" id="btSymbols" placeholder="如: 000001,600519,0700.HK" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600 w-64" />
+        </div>
+        <button onclick="runCustomBacktest()" class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">▶ 运行回测</button>
+      </div>
+      <div id="comparisonContent"></div>
+    </div>
   </div>
 
   <!-- ======== ETF面板 ======== -->
@@ -1936,66 +2061,160 @@ function buildEtfTable(symbols) {
     }).join('') + '</table>';
 }
 
+let comparisonChartInstance = null;
+
+function applyQuickDays(days) {
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 86400000);
+  document.getElementById('btStartDate').value = start.toISOString().split('T')[0];
+  document.getElementById('btEndDate').value = end.toISOString().split('T')[0];
+}
+
 async function loadComparison() {
-  const el = document.getElementById('comparisonBody');
-  el.innerHTML = '<div class="empty">加载中...</div>';
+  const el = document.getElementById('comparisonContent');
+  el.innerHTML = '<div class="text-gray-400 p-4">⏳ 加载中...</div>';
+  await runCustomBacktest();
+}
+
+async function runCustomBacktest() {
+  const el = document.getElementById('comparisonContent');
+  const strategy = document.getElementById('btStrategy')?.value || 'all';
+  const startDate = document.getElementById('btStartDate')?.value || '';
+  const endDate = document.getElementById('btEndDate')?.value || '';
+  const symbols = document.getElementById('btSymbols')?.value || '';
+
+  let days = 60;
+  if (startDate && endDate) {
+    try {
+      const d1 = new Date(startDate);
+      const d2 = new Date(endDate);
+      days = Math.max(7, Math.round((d2 - d1) / 86400000));
+    } catch(e) {}
+  }
+
+  el.innerHTML = '<div class="text-gray-400 p-4">⏳ 运行回测中...</div>';
+
   try {
-    const r = await fetch('/api/comparison');
+    let url = `/api/v2/backtest/custom?strategy=${strategy}&days=${days}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    if (symbols) url += `&symbols=${encodeURIComponent(symbols)}`;
+
+    const r = await fetch(url);
     const data = await r.json();
+
     if (data.error) {
-      el.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${data.error}</div>`;
+      el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ ${data.error}</div>`;
       return;
     }
-    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:16px;">最后更新: ${data.run_date||''} | 分析周期: <strong>${data.days_analyzed||0}天</strong>`;
-    if (data.note) {
-      html += ` | <span style="color:var(--yellow)">${data.note}</span>`;
-    }
-    html += '</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">';
+
     const strategies = [data.faceji, data.silverquant, data.tradingagents].filter(Boolean);
-    const colors = {'faceji (面基)':'#58a6ff','silverquant (组件化)':'#3fb950','tradingagents (辩论制)':'#bc8cff'};
+    const colors = {'faceji (面基)': '#58a6ff', 'silverquant (组件化)': '#3fb950', 'tradingagents (辩论制)': '#bc8cff'};
+    const params = data.params || {};
+
+    let html = `
+      <div class="bg-gray-800/50 rounded-lg p-3 mb-4 flex flex-wrap gap-4 text-xs text-gray-400">
+        <span>📊 策略: <strong class="text-gray-200">${params.strategy || strategy}</strong></span>
+        <span>📅 周期: <strong class="text-gray-200">${data.days_analyzed || days}天</strong></span>
+        ${params.start_date ? `<span>从 <strong class="text-gray-200">${params.start_date}</strong></span>` : ''}
+        ${params.end_date ? `<span>到 <strong class="text-gray-200">${params.end_date}</strong></span>` : ''}
+        ${params.symbols ? `<span>标的: <strong class="text-gray-200">${params.symbols}</strong></span>` : ''}
+        <span>更新: <strong class="text-gray-200">${data.run_date || ''}</strong></span>
+      </div>`;
+
+    if (strategies.length === 0 || (strategies[0] && strategies[0].note)) {
+      html += `<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg">
+        ⚠️ ${strategies[0]?.note || '暂无回测数据，需先运行日报管线积累扫描快照（约60个交易日后有真实对比曲线）'}
+      </div>`;
+      el.innerHTML = html;
+      return;
+    }
+
+    html += '<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">';
     strategies.forEach(s => {
-      const retCls = s.total_return_pct >= 0 ? 'green' : 'red';
-      html += `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;">
-        <div style="font-size:15px;font-weight:600;margin-bottom:8px;"><span style="color:${colors[s.name]||'#fff'}">●</span> ${s.name}</div>
-        <div style="font-size:28px;font-weight:700;margin:8px 0;color:${retCls==='green'?'var(--green)':'var(--red)'}">${s.total_return_pct>=0?'+':''}${s.total_return_pct}%</div>
-        <div class="metric"><span class="metric-l">总资产</span><span class="metric-v">¥${fmt(s.value||0)}</span></div>
-        <div class="metric"><span class="metric-l">已实现盈亏</span><span class="metric-v" style="color:${s.realized_pnl>=0?'var(--green)':'var(--red)'}">${s.realized_pnl>=0?'+':''}¥${fmt(s.realized_pnl||0)}</span></div>
-        <div class="metric"><span class="metric-l">浮盈</span><span class="metric-v" style="color:${(s.unrealized_pnl||0)>=0?'var(--green)':'var(--red)'}">${(s.unrealized_pnl||0)>=0?'+':''}¥${fmt(s.unrealized_pnl||0)}</span></div>
-        <div class="metric"><span class="metric-l">持仓</span><span class="metric-v">${s.positions||0} 只</span></div>
-        <div class="metric"><span class="metric-l">交易次数</span><span class="metric-v">${s.total_trades||0} 笔</span></div>
-        <div class="metric"><span class="metric-l">胜率</span><span class="metric-v">${s.win_rate||0}%</span></div>
-        <div class="metric"><span class="metric-l">最大回撤</span><span class="metric-v" style="color:var(--red)">-${s.max_drawdown_pct||0}%</span></div>
+      const retCls = s.total_return_pct >= 0 ? 'text-green-500' : 'text-red-500';
+      const borderColor = colors[s.name] || '#6b7280';
+      html += `
+      <div class="bg-gray-800 border border-gray-700 border-t-4 rounded-xl p-4" style="border-top-color:${borderColor}">
+        <div class="font-semibold text-gray-200 mb-2">${s.name}</div>
+        <div class="text-3xl font-bold ${retCls} mb-3">${s.total_return_pct >= 0 ? '+' : ''}${s.total_return_pct}%</div>
+        <div class="space-y-1 text-xs text-gray-400">
+          <div class="flex justify-between"><span>总资产</span><span class="font-mono text-gray-200">¥${fmt(s.value||0)}</span></div>
+          <div class="flex justify-between"><span>已实现盈亏</span><span class="font-mono ${s.realized_pnl>=0?'text-green-500':'text-red-500'}">${s.realized_pnl>=0?'+':''}¥${fmt(s.realized_pnl||0)}</span></div>
+          <div class="flex justify-between"><span>浮盈</span><span class="font-mono ${(s.unrealized_pnl||0)>=0?'text-green-500':'text-red-500'}">${(s.unrealized_pnl||0)>=0?'+':''}¥${fmt(s.unrealized_pnl||0)}</span></div>
+          <div class="flex justify-between"><span>持仓</span><span class="font-mono text-gray-200">${s.positions||0} 只</span></div>
+          <div class="flex justify-between"><span>交易次数</span><span class="font-mono text-gray-200">${s.total_trades||0} 笔</span></div>
+          <div class="flex justify-between"><span>胜率</span><span class="font-mono text-gray-200">${s.win_rate||0}%</span></div>
+          <div class="flex justify-between"><span>最大回撤</span><span class="font-mono text-red-400">-${s.max_drawdown_pct||0}%</span></div>
+        </div>
       </div>`;
     });
     html += '</div>';
 
-    // Trade history
-    html += '<div style="margin-top:16px;"><h3 style="font-size:14px;margin-bottom:8px;">📋 最近交易</h3></div>';
+    if (strategies.some(s => s.daily_values && s.daily_values.length > 0)) {
+      html += '<div class="bg-gray-800 rounded-xl p-4 mb-6"><h4 class="text-sm font-semibold text-gray-300 mb-3">📉 净值曲线</h4><canvas id="comparisonChart" height="300"></canvas></div>';
+    }
+
+    html += '<div class="bg-gray-800 rounded-xl p-4"><h4 class="text-sm font-semibold text-gray-300 mb-3">📋 交易明细</h4>';
     strategies.forEach(s => {
-      const trades = (s.trades || []).slice(-10).reverse();
-      html += `<div style="margin-bottom:12px;">
-        <div style="font-size:13px;font-weight:500;margin-bottom:4px;color:${colors[s.name]||'#fff'}">${s.name}</div>
-        <table><tr><th>日期</th><th>代码</th><th>操作</th><th>价格</th><th>盈亏</th></tr>`;
-      if (trades.length === 0) {
-        html += '<tr><td colspan="5" class="empty">暂无交易</td></tr>';
-      } else {
-        trades.forEach(tx => {
-          const isBuy = tx.action === '买入' || tx.action === 'BUY';
-          html += `<tr class="tr-hover">
-            <td style="font-size:11px;color:var(--text2)">${tx.date||tx.time||''}</td>
-            <td>${tx.symbol||''}</td>
-            <td><span class="badge ${isBuy?'badge-buy':'badge-sell'}">${tx.action}</span></td>
-            <td>¥${(tx.price||0).toFixed(2)}</td>
-            <td class="${tx.pnl>0?'green':'red'}">${tx.pnl!=null ? (tx.pnl>0?'+':'')+'¥'+fmt(tx.pnl) : '—'}</td>
-          </tr>`;
+      const trades = (s.trades || []).slice(-20).reverse();
+      if (trades.length === 0) return;
+      html += `<div class="mb-4">
+        <div class="text-xs font-medium mb-2" style="color:${colors[s.name]||'#fff'}">● ${s.name} (${trades.length}笔)</div>
+        <table class="w-full text-xs">
+          <thead class="text-gray-400 border-b border-gray-700"><tr>
+            <th class="py-2 text-left">日期</th><th class="text-left">代码</th><th class="text-left">操作</th>
+            <th class="text-right">价格</th><th class="text-right">盈亏</th><th class="text-left">原因</th>
+          </tr></thead><tbody>`;
+      trades.forEach(tx => {
+        const isBuy = tx.action === '买入' || tx.action === 'BUY';
+        const pnlCls = tx.pnl > 0 ? 'text-green-500 font-semibold' : (tx.pnl < 0 ? 'text-red-500' : 'text-gray-400');
+        html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+          <td class="py-1.5 text-gray-400">${tx.date||tx.time||''}</td>
+          <td class="font-mono">${tx.symbol||''}</td>
+          <td><span class="px-1.5 py-0.5 rounded text-[10px] ${isBuy?'bg-green-900/40 text-green-400':'bg-red-900/40 text-red-400'}">${tx.action}</span></td>
+          <td class="text-right font-mono">¥${(tx.price||0).toFixed(2)}</td>
+          <td class="text-right font-mono ${pnlCls}">${tx.pnl!=null ? (tx.pnl>0?'+':'')+'¥'+fmt(tx.pnl) : '—'}</td>
+          <td class="text-gray-400 text-[11px]">${(tx.reason||'').substring(0,30)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    });
+    html += '</div>';
+
+    el.innerHTML = html;
+
+    if (strategies.some(s => s.daily_values && s.daily_values.length > 0)) {
+      const ctx = document.getElementById('comparisonChart');
+      if (ctx) {
+        if (comparisonChartInstance) comparisonChartInstance.destroy();
+        const datasets = strategies.filter(s => s.daily_values && s.daily_values.length > 0).map(s => ({
+          label: `${s.name} (${s.total_return_pct>=0?'+':''}${s.total_return_pct}%)`,
+          data: s.daily_values.map(d => ({x: d.date, y: d.value})),
+          borderColor: colors[s.name] || '#7ee787',
+          backgroundColor: (colors[s.name] || '#7ee787') + '15',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false,
+        }));
+        comparisonChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: { datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#c9d1d9', font: { size: 11 } } } },
+            scales: {
+              x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } },
+              y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => '¥'+(v/10000).toFixed(0)+'w' }, grid: { color: '#21262d' } },
+            }
+          }
         });
       }
-      html += '</table></div>';
-    });
-    el.innerHTML = html;
+    }
   } catch(e) {
-    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
   }
 }
 
