@@ -1209,8 +1209,8 @@ def api_v2_etf_portfolio():
 
 
 @app.get("/api/v2/news")
-def api_v2_news():
-    """板块新闻 — 优先 news_cache.json，回退 news_score_offset.json"""
+def api_v2_news(category: str = "", limit: int = 50):
+    """板块新闻 — 多源聚合（RSS + AKShare个股新闻 + GLM摘要）"""
     cache_path = ROOT / "data" / "news_cache.json"
     if cache_path.exists():
         with open(cache_path) as f:
@@ -1219,7 +1219,6 @@ def api_v2_news():
                 categories = cache_data.get("categories", {})
                 summary = cache_data.get("summary", "")
                 ts = cache_data.get("timestamp", "")
-                # 计算数据新鲜度
                 days_stale = 999
                 try:
                     from datetime import datetime as _dt
@@ -1230,22 +1229,114 @@ def api_v2_news():
                 freshness = "fresh" if days_stale < 1 else ("stale" if days_stale < 3 else "expired")
                 items = []
                 for cat_name, cat_entries in categories.items():
+                    if category and cat_name != category:
+                        continue
                     if isinstance(cat_entries, list):
                         for entry in cat_entries:
-                            items.append({"category": cat_name, "content": str(entry)[:200]})
+                            if isinstance(entry, dict):
+                                items.append({
+                                    "category": cat_name,
+                                    "title": entry.get("title", ""),
+                                    "content": entry.get("content", entry.get("summary", ""))[:300],
+                                    "link": entry.get("link", ""),
+                                    "source": entry.get("source", ""),
+                                    "published": entry.get("published", entry.get("date", "")),
+                                })
+                            else:
+                                items.append({"category": cat_name, "content": str(entry)[:300]})
                 return {
-                    "total": cache_data.get("total", 0),
+                    "total": len(items),
                     "timestamp": ts,
                     "days_stale": days_stale,
                     "freshness": freshness,
                     "summary": summary,
-                    "items": items[:50],
+                    "categories": list(categories.keys()),
+                    "items": items[:limit],
                 }
+
+    events_path = ROOT / "data" / "news_events.json"
+    if events_path.exists():
+        with open(events_path) as f:
+            events = json.load(f)
+        return {"total": len(events) if isinstance(events, list) else 0, "items": events[:limit] if isinstance(events, list) else [], "source": "news_events"}
+
     fallback_path = ROOT / "data" / "news_score_offset.json"
     if fallback_path.exists():
         with open(fallback_path) as f:
             return json.load(f)
-    return {}
+    return {"total": 0, "items": [], "error": "暂无新闻数据"}
+
+
+@app.get("/api/v2/news/refresh")
+def api_v2_news_refresh():
+    """触发新闻刷新 — 调用 domain/news_fetcher.fetch_news()"""
+    try:
+        from domain.news_fetcher import fetch_news
+        result = fetch_news()
+        return {"status": "ok", "total": result.get("total", 0), "timestamp": result.get("timestamp", "")}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/v2/news/sources")
+def api_v2_news_sources():
+    """新闻源列表"""
+    from config import NEWS_SOURCES
+    sources = []
+    for name, config in NEWS_SOURCES.items():
+        sources.append({
+            "name": name,
+            "url": config.get("url", "") if isinstance(config, dict) else str(config),
+            "category": config.get("category", "") if isinstance(config, dict) else "",
+            "enabled": True,
+        })
+    return {"total": len(sources), "sources": sources}
+
+
+@app.get("/api/v2/news/sentiment")
+def api_v2_news_sentiment():
+    """新闻情绪分析 — 从 news_events.json 读取 GLM 分析结果"""
+    events_path = ROOT / "data" / "news_events.json"
+    if not events_path.exists():
+        return {"error": "暂无情绪分析数据", "sentiments": []}
+
+    with open(events_path) as f:
+        events = json.load(f)
+
+    if not isinstance(events, list):
+        return {"error": "数据格式错误", "sentiments": []}
+
+    sentiments = []
+    sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+    for ev in events:
+        sentiment = ev.get("sentiment", ev.get("情绪", "neutral"))
+        if isinstance(sentiment, str):
+            sentiment_lower = sentiment.lower()
+            if "正" in sentiment or "positive" in sentiment_lower or "利好" in sentiment:
+                sentiment = "positive"
+                sentiment_counts["positive"] += 1
+            elif "负" in sentiment or "negative" in sentiment_lower or "利空" in sentiment:
+                sentiment = "negative"
+                sentiment_counts["negative"] += 1
+            else:
+                sentiment = "neutral"
+                sentiment_counts["neutral"] += 1
+
+        sentiments.append({
+            "symbol": ev.get("symbol", ""),
+            "title": ev.get("title", ev.get("标题", ""))[:100],
+            "sentiment": sentiment,
+            "impact": ev.get("impact", ev.get("影响", "")),
+            "confidence": ev.get("confidence", ev.get("置信度", 0)),
+            "source": ev.get("source", ""),
+            "date": ev.get("date", ev.get("日期", "")),
+        })
+
+    return {
+        "total": len(sentiments),
+        "summary": sentiment_counts,
+        "sentiments": sentiments,
+    }
 
 
 @app.get("/api/v2/reports")
@@ -1806,8 +1897,8 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== 新闻面板 ======== -->
   <div class="card" id="tab-news" style="display:none">
-    <div class="card-header"><h3>📰 板块新闻</h3></div>
-    <div id="newsBody" style="font-size:13px;"></div>
+    <div class="card-header"><h3>📰 多源新闻 · 情绪分析</h3></div>
+    <div id="newsBody" class="space-y-4 p-4"></div>
   </div>
 
   <!-- ======== 日报面板 ======== -->
@@ -2475,38 +2566,136 @@ async function runCustomBacktest() {
 
 async function loadNews() {
   const el = document.getElementById('newsBody');
-  el.innerHTML = '<div class="empty">加载中...</div>';
+  el.innerHTML = '<div class="text-gray-400 p-4">⏳ 加载中...</div>';
   try {
-    const r = await fetch('/api/v2/news');
-    const data = await r.json();
-    if (!data || Object.keys(data).length === 0 || (data.total === 0 && !data.summary)) {
-      el.innerHTML = '<div class="empty">暂无板块新闻数据 — 今日无显著新闻</div>';
-      return;
+    const [newsRes, sentimentRes] = await Promise.all([
+      fetch('/api/v2/news?limit=80').then(r => r.json()).catch(() => ({})),
+      fetch('/api/v2/news/sentiment').then(r => r.json()).catch(() => ({}))
+    ]);
+
+    let html = '';
+
+    // ── 情绪分析概览 ──
+    if (sentimentRes && !sentimentRes.error && sentimentRes.total > 0) {
+      const s = sentimentRes.summary || {};
+      const total = sentimentRes.total || 0;
+      const pos = s.positive || 0;
+      const neg = s.negative || 0;
+      const neu = s.neutral || 0;
+      html += '<div class="bg-gray-800 rounded-xl p-4 mb-4">';
+      html += '<h4 class="text-sm font-semibold text-gray-300 mb-3">🧠 情绪分析概览</h4>';
+      html += `<div class="grid grid-cols-4 gap-3 mb-3">`;
+      html += `<div class="bg-gray-700/50 rounded-lg p-2 text-center"><div class="text-xs text-gray-400">总数</div><div class="text-xl font-bold text-gray-100">${total}</div></div>`;
+      html += `<div class="bg-green-900/30 rounded-lg p-2 text-center"><div class="text-xs text-green-400">利好</div><div class="text-xl font-bold text-green-500">${pos}</div></div>`;
+      html += `<div class="bg-red-900/30 rounded-lg p-2 text-center"><div class="text-xs text-red-400">利空</div><div class="text-xl font-bold text-red-500">${neg}</div></div>`;
+      html += `<div class="bg-gray-700/50 rounded-lg p-2 text-center"><div class="text-xs text-gray-400">中性</div><div class="text-xl font-bold text-gray-300">${neu}</div></div>`;
+      html += '</div>';
+      const sentiments = sentimentRes.sentiments || [];
+      if (sentiments.length > 0) {
+        html += '<div class="overflow-x-auto"><table class="w-full text-xs"><thead class="text-gray-400 border-b border-gray-700"><tr>';
+        html += '<th class="py-2 text-left">标的</th><th class="text-left">标题</th><th class="text-center">情绪</th><th class="text-left">影响</th><th class="text-left">来源</th>';
+        html += '</tr></thead><tbody>';
+        sentiments.slice(0, 20).forEach(s => {
+          const sentColor = s.sentiment === 'positive' ? 'text-green-500' : (s.sentiment === 'negative' ? 'text-red-500' : 'text-gray-400');
+          const sentLabel = s.sentiment === 'positive' ? '利好' : (s.sentiment === 'negative' ? '利空' : '中性');
+          html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+            <td class="py-1.5 font-mono text-blue-400">${s.symbol || '—'}</td>
+            <td class="text-gray-200">${s.title || '—'}</td>
+            <td class="text-center ${sentColor} font-medium">${sentLabel}</td>
+            <td class="text-gray-400 text-[11px]">${(s.impact || '').substring(0,30)}</td>
+            <td class="text-gray-500 text-[11px]">${s.source || ''}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+      }
+      html += '</div>';
     }
-    let html = `<div style="font-size:11px;color:var(--text2);margin-bottom:8px;">📡 ${data.summary || ''} · 更新: ${data.timestamp || ''}`;
-    // 数据新鲜度标记
-    if (data.freshness) {
-      const freshnessColors = {fresh:'var(--green)',stale:'var(--yellow)',expired:'var(--red)'};
-      const freshnessLabels = {fresh:'新鲜',stale:'超过3天',expired:'超过7天'};
-      const fc = freshnessColors[data.freshness] || 'var(--text2)';
-      html += ` <span class="badge" style="background:${fc}22;color:${fc};font-size:10px;margin-left:4px;">${data.days_stale}d ${freshnessLabels[data.freshness] || ''}</span>`;
-    }
-    html += `</div>`;
-    if (data.items && data.items.length > 0) {
-      const catColors = {'宏观政策':'var(--blue)','市场动态':'var(--green)','大宗商品':'var(--yellow)','产业趋势':'var(--purple)','综合':'var(--text2)','产业消息':'var(--orange)'};
-      html += data.items.map(item => {
-        const catColor = catColors[item.category] || 'var(--text2)';
-        return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-          <span class="badge" style="background:${catColor}22;color:${catColor};font-size:10px;">${item.category}</span>
-          <span style="margin-left:6px;">${item.content}</span>
+
+    // ── 板块新闻 ──
+    if (newsRes && !newsRes.error && newsRes.total > 0) {
+      const items = newsRes.items || [];
+      const categories = newsRes.categories || [];
+      const ts = newsRes.timestamp || '';
+      const daysStale = newsRes.days_stale || 0;
+      const freshness = newsRes.freshness || 'unknown';
+
+      html += '<div class="bg-gray-800 rounded-xl p-4">';
+      html += `<div class="flex items-center justify-between mb-3">`;
+      html += `<h4 class="text-sm font-semibold text-gray-300">📰 板块新闻 (${items.length}条)</h4>`;
+      html += `<div class="flex items-center gap-2">`;
+      const freshColors = {fresh: 'text-green-400', stale: 'text-yellow-400', expired: 'text-red-400'};
+      const freshLabels = {fresh: '新鲜', stale: '超过3天', expired: '超过7天'};
+      html += `<span class="text-xs ${freshColors[freshness] || 'text-gray-400'}">${daysStale}d ${freshLabels[freshness] || ''}</span>`;
+      html += `<button onclick="refreshNews()" class="bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-1 text-xs">🔄 刷新</button>`;
+      html += `</div></div>`;
+      html += `<div class="text-xs text-gray-500 mb-3">更新: ${ts}</div>`;
+
+      const catColors = {'宏观政策': 'bg-blue-900/40 text-blue-400', '市场动态': 'bg-green-900/40 text-green-400', '大宗商品': 'bg-yellow-900/40 text-yellow-400', '产业趋势': 'bg-purple-900/40 text-purple-400', '综合': 'bg-gray-700 text-gray-400', '产业消息': 'bg-orange-900/40 text-orange-400'};
+
+      if (categories.length > 1) {
+        html += '<div class="flex gap-2 mb-3 flex-wrap">';
+        html += `<button onclick="filterNews('')" class="bg-blue-600 text-white rounded px-2 py-1 text-xs">全部</button>`;
+        categories.forEach(cat => {
+          html += `<button onclick="filterNews('${cat}')" class="bg-gray-700 text-gray-300 rounded px-2 py-1 text-xs hover:bg-gray-600">${cat}</button>`;
+        });
+        html += '</div>';
+      }
+
+      html += '<div class="space-y-2" id="newsItems">';
+      items.forEach(item => {
+        const cat = item.category || '';
+        const catCls = catColors[cat] || 'bg-gray-700 text-gray-400';
+        const title = item.title || item.content || '';
+        const link = item.link || '';
+        const source = item.source || '';
+        const published = item.published || '';
+        html += `<div class="border-b border-gray-700/50 pb-2 news-item" data-category="${cat}">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="px-1.5 py-0.5 rounded text-[10px] ${catCls}">${cat}</span>
+            ${source ? `<span class="text-[10px] text-gray-500">${source}</span>` : ''}
+            ${published ? `<span class="text-[10px] text-gray-500">${published}</span>` : ''}
+          </div>
+          <div class="text-xs text-gray-200">${title.substring(0, 200)}${title.length > 200 ? '...' : ''}</div>
+          ${link ? `<a href="${link}" target="_blank" class="text-[10px] text-blue-400 hover:underline">查看原文 →</a>` : ''}
         </div>`;
-      }).join('');
-    } else {
-      html += '<div class="empty">暂无分类新闻条目</div>';
+      });
+      html += '</div>';
+      html += '</div>';
     }
+
+    if (!html) {
+      html = '<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg">⚠️ 暂无新闻数据。点击刷新获取最新新闻。<button onclick="refreshNews()" class="ml-3 bg-blue-600 text-white rounded px-2 py-1 text-xs">🔄 立即刷新</button></div>';
+    }
+
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+function filterNews(category) {
+  document.querySelectorAll('.news-item').forEach(item => {
+    if (!category || item.dataset.category === category) {
+      item.style.display = '';
+    } else {
+      item.style.display = 'none';
+    }
+  });
+}
+
+async function refreshNews() {
+  const el = document.getElementById('newsBody');
+  el.innerHTML = '<div class="text-blue-400 p-4">🔄 正在刷新新闻...</div>';
+  try {
+    const r = await fetch('/api/v2/news/refresh');
+    const data = await r.json();
+    if (data.status === 'ok') {
+      await loadNews();
+    } else {
+      el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 刷新失败: ${data.message || '未知错误'}</div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 刷新失败: ${e.message}</div>`;
   }
 }
 

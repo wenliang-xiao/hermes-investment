@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from investment_system.config import NEWS_SOURCES, DATA_DIR, INDUSTRY_CHAINS
+from config import NEWS_SOURCES, DATA_DIR, INDUSTRY_CHAINS
 
 CACHE_FILE = DATA_DIR / "news_cache.json"
 CACHE_TTL = 1800  # 30分钟
