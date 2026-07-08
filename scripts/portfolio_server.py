@@ -213,7 +213,7 @@ def api_portfolio():
     }
 
 
-def _aggregate_strategy_portfolios() -> dict | None:
+def _aggregate_strategy_portfolios():
     """从策略状态文件聚合真实持仓和交易历史"""
     st_path = ROOT / "data" / "strategy_states.json"
     if not st_path.exists():
@@ -1388,6 +1388,7 @@ UNIFIED_DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>面基·三源融合模拟盘</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -1404,34 +1405,29 @@ h1 { font-size:22px; margin-bottom:4px; }
          border:1px solid var(--border); border-radius:6px; }
 .nav a:hover { background:var(--card2); }
 .nav a.active { background:var(--blue); color:#fff; border-color:var(--blue); }
-.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-@media(max-width:900px){ .grid-3 { grid-template-columns:1fr; } }
-.card { background:var(--card); border:1px solid var(--border);
-        border-radius:10px; padding:16px; margin-bottom:16px; }
-.card-header { display:flex; justify-content:space-between; align-items:center;
-               margin-bottom:12px; }
+
+/* Keep old styles for old tabs */
+.card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
+.card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
 .card-header h3 { font-size:15px; }
-.strategy-panel { border-top:3px solid transparent; }
 .metric { margin:4px 0; display:flex; justify-content:space-between; }
 .metric-l { color:var(--text2); font-size:12px; }
 .metric-v { font-size:14px; font-weight:600; }
-.metric-big { font-size:26px; font-weight:700; margin:8px 0; }
 .green { color:var(--green); } .red { color:var(--red); }
-.chart-container { height:200px; margin:12px 0; }
 table { width:100%; border-collapse:collapse; font-size:12px; }
-th { text-align:left; padding:6px 4px; color:var(--text2);
-     border-bottom:1px solid var(--border); font-weight:500; }
+th { text-align:left; padding:6px 4px; color:var(--text2); border-bottom:1px solid var(--border); font-weight:500; }
 td { padding:5px 4px; border-bottom:1px solid var(--border); }
 .tr-hover:hover { background:var(--card2); }
 .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; }
 .badge-buy { background:#1a3a2a; color:var(--green); }
 .badge-sell { background:#3a1a1a; color:var(--red); }
-.badge-win { background:#1a3a2a; color:var(--green); }
-.badge-loss { background:#3a1a1a; color:var(--red); }
 .empty { color:var(--text2); padding:20px; text-align:center; }
-.scroll { max-height:300px; overflow-y:auto; }
-.tag { display:inline-block; padding:2px 8px; border-radius:4px;
-        font-size:10px; font-weight:500; margin-left:6px; }
+
+/* Custom Scrollbar for new panels */
+.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
 </style>
 </head>
 <body>
@@ -1448,30 +1444,81 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
   <h1>面基 · 三源融合模拟盘</h1>
   <div class="subtitle" id="runInfo">加载中...</div>
 
-  <div class="grid-3" id="strategyPanels"></div>
+  <!-- ======== 模拟盘 V2 ======== -->
+  <div id="tab-dashboard" class="space-y-6">
+    <div id="v2-portfolio-overview" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+    
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <!-- Net value curve -->
+        <div class="xl:col-span-2 bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h3 class="text-gray-100 font-semibold mb-4">📈 组合净值曲线</h3>
+            <div class="h-64"><canvas id="netValueChart"></canvas></div>
+        </div>
+        
+        <!-- Signal Log -->
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col h-[330px]">
+            <h3 class="text-gray-100 font-semibold mb-4">⚡ 策略信号日志</h3>
+            <div id="v2-signal-stats" class="text-xs text-gray-400 mb-2"></div>
+            <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <table class="w-full text-xs text-left" style="border:none">
+                    <thead class="text-gray-400 sticky top-0 bg-gray-800" style="border:none">
+                        <tr><th class="pb-2 font-medium border-0">方向</th><th class="pb-2 font-medium border-0">标的</th><th class="pb-2 font-medium border-0">策略</th><th class="pb-2 font-medium border-0">备注</th></tr>
+                    </thead>
+                    <tbody id="v2-signals-table" class="divide-y divide-gray-700">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
-  <div class="card" id="metricsPanel" style="margin-bottom:16px">
-    <div class="card-header"><h3>📊 绩效指标 (OSkhQuant)</h3></div>
-    <div id="metricsBody" class="grid-3" style="display:grid;gap:12px;padding:8px 0"></div>
+    <div>
+        <h3 class="text-gray-100 font-semibold mb-4">💼 当前持仓</h3>
+        <div id="v2-positions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </div>
+
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-gray-100 font-semibold mb-4">📋 交易历史</h3>
+        <div class="overflow-x-auto overflow-y-auto max-h-[300px] custom-scrollbar">
+            <table class="w-full text-xs text-left whitespace-nowrap" style="border:none">
+                <thead class="text-gray-400 sticky top-0 bg-gray-800 z-10" style="border:none">
+                    <tr>
+                        <th class="px-3 py-2 font-medium border-0">日期</th>
+                        <th class="px-3 py-2 font-medium border-0">标的</th>
+                        <th class="px-3 py-2 font-medium border-0">方向</th>
+                        <th class="px-3 py-2 font-medium border-0">价格</th>
+                        <th class="px-3 py-2 font-medium border-0">数量</th>
+                        <th class="px-3 py-2 font-medium border-0">盈亏</th>
+                        <th class="px-3 py-2 font-medium border-0">持有天数</th>
+                        <th class="px-3 py-2 font-medium border-0">理由</th>
+                    </tr>
+                </thead>
+                <tbody id="v2-trade-history" class="divide-y divide-gray-700">
+                </tbody>
+            </table>
+        </div>
+    </div>
   </div>
 
-  <div class="card" id="userSignals" style="display:none">
-    <div class="card-header"><h3>执行建议（今日优先级）</h3></div>
-    <div id="userSignalsBody"></div>
+  <!-- ======== 票池面板 V2 ======== -->
+  <div id="tab-pool" style="display:none" class="space-y-6">
+    <div class="flex flex-col md:flex-row gap-6">
+       <div class="flex-1 space-y-4">
+           <div class="flex gap-2 border-b border-gray-700 pb-2" id="v2-pool-market-tabs"></div>
+           <div id="v2-pool-content" class="space-y-4"></div>
+       </div>
+       <div class="w-full md:w-80 bg-gray-800 border border-gray-700 rounded-xl p-4 h-fit sticky top-4">
+          <h3 class="text-gray-100 font-semibold mb-4">📖 因子评分说明</h3>
+          <div id="v2-factor-explain" class="space-y-3 text-xs text-gray-300">
+             <div class="empty">加载中...</div>
+          </div>
+       </div>
+    </div>
   </div>
 
   <!-- ======== 回测对比面板 ======== -->
   <div class="card" id="tab-comparison" style="display:none">
     <div class="card-header"><h3>📈 三方策略回测对比</h3></div>
-    <div id="comparisonBody" style="font-size:13px;">
-      <div class="empty">加载中...</div>
-    </div>
-  </div>
-
-  <!-- ======== 票池面板 ======== -->
-  <div class="card" id="tab-pool" style="display:none">
-    <div class="card-header"><h3>🎯 三层票池</h3></div>
-    <div id="poolBody" style="font-size:13px;"></div>
+    <div id="comparisonBody" style="font-size:13px;"><div class="empty">加载中...</div></div>
   </div>
 
   <!-- ======== ETF面板 ======== -->
@@ -1494,155 +1541,338 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 </div>
 
 <script>
-async function load() {
+let netValueChartInstance = null;
+function fmt(v) { return Math.round(v).toLocaleString(); }
+
+async function loadDashboardV2() {
   try {
-    const r = await fetch('/api/simulated');
-    const data = await r.json();
-    if (data.error) {
-      document.getElementById('strategyPanels').innerHTML = '<div class="card">❌ ' + data.error + '</div>';
+    const [detailRes, nvRes] = await Promise.all([
+      fetch('/api/v2/portfolio/detail').then(r => r.json()),
+      fetch('/api/v2/portfolio/netvalue').then(r => r.json())
+    ]);
+
+    if (detailRes.error) {
+      document.getElementById('tab-dashboard').innerHTML = `<div class="bg-gray-800 p-4 rounded text-red-400">❌ ${detailRes.error}</div>`;
       return;
     }
 
-    // 加载绩效指标
-    loadMetrics();
+    document.getElementById('runInfo').textContent = 
+      `${detailRes.date} | ${detailRes.generated_at} | 模拟交易 ${detailRes.simulated_trades} 笔`;
 
-    document.getElementById('runInfo').textContent =
-      data.date + ' | ' + data.generated_at + ' | 模拟交易 ' + data.simulated_trades + ' 笔';
+    // Overview
+    const stratColors = { 'faceji': 'border-blue-500', 'silverquant': 'border-green-500', 'tradingagents': 'border-purple-500' };
+    const stratBg = { 'faceji': 'bg-blue-500/10', 'silverquant': 'bg-green-500/10', 'tradingagents': 'bg-purple-500/10' };
+    
+    let overviewHtml = '';
+    for (const [sname, p] of Object.entries(detailRes.portfolios || {})) {
+      const isPos = p.total_return >= 0;
+      overviewHtml += `
+      <div class="bg-gray-800 border border-gray-700 border-t-4 ${stratColors[sname] || 'border-gray-500'} rounded-xl p-4">
+          <div class="flex justify-between items-center mb-2">
+              <h4 class="font-semibold text-gray-200">${p.label || sname}</h4>
+              <span class="px-2 py-0.5 rounded text-[10px] ${stratBg[sname] || 'bg-gray-700'} text-gray-300">${p.style || sname}</span>
+          </div>
+          <div class="text-2xl font-bold ${isPos ? 'text-green-500' : 'text-red-500'} mb-3">
+              ${isPos ? '+' : ''}${p.total_return.toFixed(2)}%
+          </div>
+          <div class="space-y-1 text-xs">
+              <div class="flex justify-between"><span class="text-gray-400">总资产</span><span class="font-mono">¥${Math.round(p.total_value).toLocaleString()}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">现金</span><span class="font-mono">¥${Math.round(p.cash).toLocaleString()}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">已投</span><span class="font-mono">¥${Math.round(p.invested).toLocaleString()}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">仓位</span><span class="font-mono">${p.position_count} 只</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">胜率</span><span class="font-mono">${p.win_rate != null ? p.win_rate.toFixed(1) + '%' : '—'}</span></div>
+          </div>
+      </div>`;
+    }
+    document.getElementById('v2-portfolio-overview').innerHTML = overviewHtml || '<div class="text-gray-400">暂无策略数据</div>';
 
-    // 三大策略面板
-    document.getElementById('strategyPanels').innerHTML =
-      ['faceji','silverquant','tradingagents'].map(sname => {
-        const p = data.portfolios && data.portfolios[sname];
-        if (!p) return '<div class="card">' + sname + ' 暂无数据</div>';
-      const retCls = p.total_return >= 0 ? 'green' : 'red';
-      const posRows = p.positions.map(pos => {
-        const pnlCls = pos.pnl_pct >= 0 ? 'green' : 'red';
+    // Positions Grid
+    let posHtml = '';
+    let canvasIndex = 0;
+    const radarDataList = [];
+    
+    for (const [sname, positions] of Object.entries(detailRes.positions || {})) {
+      for (const [sym, pos] of Object.entries(positions)) {
+        const isPos = pos.pnl_pct >= 0;
+        const color = isPos ? 'text-green-500' : 'text-red-500';
         const stopLoss = pos.stop_loss || pos.entry_price * 0.92;
         const nearStop = pos.current_price <= stopLoss * 1.05;
-        return `<tr class="tr-hover">
-          <td><strong>${pos.symbol}</strong></td>
-          <td style="color:var(--text2)">${pos.name||pos.symbol}</td>
-          <td>${fmtNum(pos.quantity)}</td>
-          <td>${pos.entry_price.toFixed(2)}</td>
-          <td class="${pnlCls}">${pos.current_price.toFixed(2)}</td>
-          <td class="${pnlCls}">${fmtPct(pos.pnl_pct)}</td>
-          <td>${pos.entry_date||'—'}</td>
-          <td style="font-size:11px;color:var(--text2)" title="${pos.reason||''}">${(pos.reason||'').slice(0,20)}</td>
-          <td style="font-size:11px;${nearStop?'color:var(--red);font-weight:600':''}">${stopLoss.toFixed(2)}${nearStop?' 🚨':''}</td>
+        
+        let scoreArrow = '';
+        if (pos.current_score && pos.entry_score) {
+           if (pos.current_score > pos.entry_score) scoreArrow = '<span class="text-green-500">↑</span>';
+           else if (pos.current_score < pos.entry_score) scoreArrow = '<span class="text-red-500">↓</span>';
+        }
+
+        const cid = `radar-${canvasIndex++}`;
+        if (pos.factor_scores) radarDataList.push({ id: cid, scores: pos.factor_scores });
+
+        posHtml += `
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col hover:border-gray-500 transition-colors">
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-gray-100 text-lg">${sym}</span>
+                        <span class="text-sm text-gray-400">${pos.name || sym}</span>
+                    </div>
+                    <div class="text-xs px-2 py-0.5 rounded mt-1 inline-block ${stratBg[sname] || 'bg-gray-700'} text-gray-300">
+                        ${sname}
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-lg font-bold font-mono ${color}">${isPos?'+':''}${pos.pnl_pct.toFixed(2)}%</div>
+                    <div class="text-xs ${color} font-mono">${isPos?'+':''}¥${Math.round(pos.pnl).toLocaleString()}</div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mb-3">
+                <div class="flex justify-between"><span class="text-gray-400">买入/现价</span><span class="font-mono">${pos.entry_price.toFixed(2)} / ${pos.current_price.toFixed(2)}</span></div>
+                <div class="flex justify-between"><span class="text-gray-400">持有天数</span><span class="font-mono">${pos.hold_days} 天</span></div>
+                <div class="flex justify-between"><span class="text-gray-400">回撤(峰值/买入)</span><span class="font-mono text-red-400">${pos.drawdown_from_peak?.toFixed(2)||0}% / ${pos.drawdown_from_entry?.toFixed(2)||0}%</span></div>
+                <div class="flex justify-between"><span class="text-gray-400">仓位占比</span><span class="font-mono">${pos.pct?.toFixed(1)||0}%</span></div>
+                <div class="flex justify-between"><span class="text-gray-400">止损线</span><span class="font-mono ${nearStop?'text-red-500 font-bold':''}">${stopLoss.toFixed(2)}</span></div>
+                <div class="flex justify-between"><span class="text-gray-400">评分变化</span><span class="font-mono">${pos.entry_score?.toFixed(2)||'-'} ${scoreArrow} ${pos.current_score?.toFixed(2)||'-'}</span></div>
+            </div>
+            
+            <div class="text-xs text-gray-400 bg-gray-900 rounded p-2 mb-3 line-clamp-2" title="${pos.reason||''}">${pos.reason||'无理由'}</div>
+            
+            <div class="h-32 w-full mt-auto relative pt-2">
+                ${pos.factor_scores ? `<canvas id="${cid}"></canvas>` : '<div class="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">无因子数据</div>'}
+            </div>
+        </div>`;
+      }
+    }
+    document.getElementById('v2-positions-grid').innerHTML = posHtml || '<div class="text-gray-400 col-span-full py-4 text-center">空仓</div>';
+
+    // Radars
+    radarDataList.forEach(item => renderRadarChart(item.id, item.scores));
+
+    // Trade History
+    let allTrades = [];
+    for (const [sname, trades] of Object.entries(detailRes.trade_history || {})) {
+        trades.forEach(t => allTrades.push({...t, sname}));
+    }
+    allTrades.sort((a,b) => ((b.date||b.time||'') > (a.date||a.time||'') ? 1 : -1));
+    allTrades = allTrades.slice(0, 50);
+
+    let tradeHtml = '';
+    allTrades.forEach(tx => {
+        const isBuy = tx.action === '买入' || tx.action === 'BUY';
+        const pnlStr = tx.pnl != null ? (tx.pnl>0?'+':'') + '¥'+Math.round(tx.pnl).toLocaleString() : '—';
+        const pnlCls = tx.pnl > 0 ? 'text-green-500 font-medium' : (tx.pnl < 0 ? 'text-red-500' : 'text-gray-400');
+        const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
+        const rowBg = isBuy ? 'bg-green-900/10 hover:bg-green-900/20' : 'bg-red-900/10 hover:bg-red-900/20';
+        const rowFont = tx.pnl > 0 ? 'font-bold text-white' : 'text-gray-300';
+        tradeHtml += `
+        <tr class="${rowBg} ${rowFont} transition-colors border-b border-gray-800">
+            <td class="px-3 py-2 text-gray-400 border-0">${(tx.date||tx.time||'').substring(0,10)}</td>
+            <td class="px-3 py-2 border-0"><span class="font-bold text-gray-200">${tx.symbol}</span> <span class="text-[10px] ${stratBg[tx.sname]||'bg-gray-700'} px-1 rounded text-gray-300 ml-1">${tx.sname}</span></td>
+            <td class="px-3 py-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${tx.action}</span></td>
+            <td class="px-3 py-2 font-mono border-0">¥${(tx.price||0).toFixed(2)}</td>
+            <td class="px-3 py-2 font-mono border-0">${(tx.quantity||0).toLocaleString()}</td>
+            <td class="px-3 py-2 font-mono border-0 ${pnlCls}">${pnlStr}</td>
+            <td class="px-3 py-2 font-mono text-gray-400 border-0">${tx.hold_days!=null?tx.hold_days+'天':'—'}</td>
+            <td class="px-3 py-2 text-gray-400 truncate max-w-[200px] border-0" title="${tx.reason||''}">${tx.reason||''}</td>
         </tr>`;
-      }).join('');
+    });
+    document.getElementById('v2-trade-history').innerHTML = tradeHtml || '<tr><td colspan="8" class="text-center py-4 text-gray-500 border-0">暂无交易历史</td></tr>';
 
-      const sigRows = p.signals.map(s =>
-        `<tr class="tr-hover"><td><span class="badge ${s.action==='BUY'?'badge-buy':'badge-sell'}">${s.action}</span></td>
-         <td>${s.symbol}</td><td>${s.price.toFixed(2)}</td><td style="font-size:11px;color:var(--text2)">${s.reason}</td></tr>`
-      ).join('');
+    // Signals
+    document.getElementById('v2-signal-stats').innerHTML = 
+        `原始信号: <span class="text-gray-200">${detailRes.total_raw_signals}</span> → 冲突解决: <span class="text-gray-200">${detailRes.after_conflict_resolution}</span> → 周频过滤: <span class="text-gray-200">${detailRes.after_weekly_filter}</span> → 执行: <span class="text-gray-200">${detailRes.simulated_trades}</span>`;
 
-      return `<div class="card strategy-panel" style="border-top-color:${p.color}">
-        <div class="card-header">
-          <h3><span style="color:${p.color}">●</span> ${p.label}</h3>
-          <span style="font-size:11px;color:var(--text2)">${p.style}</span>
-        </div>
-        <div class="metric-big ${retCls}">${p.total_return >= 0 ? '+':''}${p.total_return.toFixed(2)}%</div>
-        <div class="metric"><span class="metric-l">总资产</span><span class="metric-v">¥${fmt(p.total_value)}</span></div>
-        <div class="metric"><span class="metric-l">现金</span><span class="metric-v">¥${fmt(p.cash)}</span></div>
-        <div class="metric"><span class="metric-l">已投</span><span class="metric-v">¥${fmt(p.invested)}</span></div>
-        <div class="metric"><span class="metric-l">仓位</span><span class="metric-v">${p.position_count} 只</span></div>
-        <div style="margin-top:12px;font-size:12px;color:var(--text2)">📋 持仓明细</div>
-        <div class="scroll" style="max-height:220px">
-          <table>
-            <tr><th>代码</th><th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>收益</th><th>持仓</th><th>理由</th><th>止损</th></tr>
-            ${posRows || '<tr><td colspan="9" class="empty">空仓</td></tr>'}
-          </table>
-        </div>
-        <div style="margin-top:12px;font-size:12px;color:var(--text2)">🔔 今日信号</div>
-        <div class="scroll" style="max-height:120px">
-          <table>
-            <tr><th>操作</th><th>代码</th><th>价格</th><th>理由</th></tr>
-            ${sigRows || '<tr><td colspan="4" class="empty">无信号</td></tr>'}
-          </table>
-        </div>
-      </div>`;
-    }).join('');
+    let sigHtml = '';
+    (detailRes.all_signals || []).forEach(s => {
+        const isBuy = s.action === 'BUY' || s.action === '买入';
+        const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
+        let statusTag = '';
+        if (s.filtered_by_weekly) statusTag = '<span class="text-[10px] bg-yellow-900/40 text-yellow-500 px-1 rounded ml-1">周频过滤</span>';
+        else if (s.executed) statusTag = '<span class="text-[10px] bg-blue-900/40 text-blue-400 px-1 rounded ml-1">已执行</span>';
+        
+        sigHtml += `
+        <tr class="hover:bg-gray-700/50 transition-colors border-b border-gray-700/50">
+            <td class="py-2 pr-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${s.action}</span></td>
+            <td class="py-2 pr-2 font-mono text-gray-200 border-0">${s.symbol}</td>
+            <td class="py-2 pr-2 text-gray-400 border-0">${s.strategy||'—'}</td>
+            <td class="py-2 text-gray-400 text-[10px] truncate max-w-[150px] border-0" title="${s.reason||''}">${s.reason||''} ${statusTag}</td>
+        </tr>`;
+    });
+    document.getElementById('v2-signals-table').innerHTML = sigHtml || '<tr><td colspan="4" class="text-center py-4 text-gray-500 border-0">今日无信号</td></tr>';
 
-  // 用户建议信号
-  if (data.user_signals && data.user_signals.length > 0) {
-    document.getElementById('userSignals').style.display = 'block';
-    const rows = data.user_signals.map(s => {
-      const pct = s.priority === 'HIGH' ? '🔴' : (s.priority === 'MED' ? '🟡' : '⚪');
-      return `<tr class="tr-hover">
-        <td>${pct} ${s.priority}</td>
-        <td><span class="badge ${s.action==='BUY'?'badge-buy':'badge-sell'}">${s.action}</span></td>
-        <td>${s.symbol}</td>
-        <td>${s.name}</td>
-        <td>¥${s.price.toFixed(2)}</td>
-        <td style="font-size:11px;color:var(--text2)">${s.reason}</td>
-      </tr>`;
-    }).join('');
-    document.getElementById('userSignalsBody').innerHTML =
-      `<table><tr><th>优先级</th><th>操作</th><th>代码</th><th>名称</th><th>价格</th><th>理由</th></tr>${rows}</table>`;
-  }
-  } catch(e) {
-    document.getElementById('strategyPanels').innerHTML = '<div class="card" style="color:var(--red)">⚠️ ' + e.message + '</div>';
-  }
+    // Chart
+    if (!nvRes.error && nvRes.series && nvRes.series.length > 0) {
+        renderNetValueChart(nvRes.labels, nvRes.series);
+    }
+  } catch(e) { console.error(e); }
 }
 
-function fmt(v) { return Math.round(v).toLocaleString(); }
-function fmtNum(v) { return (v || 0).toLocaleString(); }
-function fmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
-load();
-async function loadMetrics() {
-  try {
-    const r = await fetch('/api/metrics');
-    const m = await r.json();
-    if (m.error) return;
-    const metrics = [
-      {label:'Sharpe',val:m.sharpe_ratio.toFixed(2),color:m.sharpe_ratio>=1?'var(--green)':m.sharpe_ratio>=0?'var(--yellow)':'var(--red)'},
-      {label:'Sortino',val:m.sortino_ratio.toFixed(2),color:m.sortino_ratio>=1?'var(--green)':m.sortino_ratio>=0?'var(--yellow)':'var(--red)'},
-      {label:'最大回撤',val:'-'+m.max_drawdown_pct.toFixed(2)+'%',color:'var(--red)'},
-      {label:'总收益',val:(m.total_return_pct>=0?'+':'')+m.total_return_pct.toFixed(2)+'%',color:m.total_return_pct>=0?'var(--green)':'var(--red)'},
-      {label:'胜率',val:m.win_rate_pct+'% ('+m.total_trades+'笔)',color:'var(--text)'},
-      {label:'连胜/连败',val:m.max_win_streak+'/'+m.max_loss_streak,color:'var(--text)'},
-      {label:'持仓数',val:m.position_count+'只',color:'var(--text)'},
-      {label:'总资产',val:'¥'+Math.round(m.total_value).toLocaleString(),color:'var(--text)'},
+function renderRadarChart(canvasId, factorScores) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const factorLabels = { 'quality': '质量', 'value': '价值', 'growth': '成长', 'momentum': '动量', 'low_vol': '低波', 'sentiment': '情绪', 'dividend': '分红' };
+    const labels = [], data = [];
+    for (const [k, v] of Object.entries(factorScores)) {
+        if (k === 'risk') continue;
+        labels.push(factorLabels[k] || k); data.push(v);
+    }
+    new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                borderColor: 'rgba(59, 130, 246, 0.8)',
+                pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                pointRadius: 1, borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { r: { min: 0, max: 1, ticks: { display: false }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, angleLines: { color: 'rgba(255, 255, 255, 0.1)' }, pointLabels: { color: 'rgba(156, 163, 175, 1)', font: { size: 9 } } } },
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx) { return ctx.raw.toFixed(2); } } } }
+        }
+    });
+}
+
+function renderNetValueChart(labels, series) {
+    const ctx = document.getElementById('netValueChart');
+    if (!ctx) return;
+    if (netValueChartInstance) netValueChartInstance.destroy();
+    const colors = ['#58a6ff', '#3fb950', '#bc8cff', '#d29922', '#f85149'];
+    const datasets = series.map((s, i) => ({
+        label: s.name, data: s.data, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length] + '20',
+        borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.1
+    }));
+    netValueChartInstance = new Chart(ctx, {
+        type: 'line', data: { labels: labels, datasets: datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+            scales: { x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: 'rgba(156, 163, 175, 1)', maxTicksLimit: 10 } }, y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: 'rgba(156, 163, 175, 1)' } } },
+            plugins: { legend: { position: 'top', labels: { color: 'rgba(229, 231, 235, 1)', boxWidth: 12 } }, tooltip: { backgroundColor: 'rgba(17, 24, 39, 0.9)', titleColor: '#fff', bodyColor: '#fff', borderColor: 'rgba(75, 85, 99, 1)', borderWidth: 1 } }
+        }
+    });
+}
+
+async function loadPoolV2() {
+    try {
+        const [poolRes, explainRes] = await Promise.all([
+            fetch('/api/v2/pool/by_market').then(r => r.json()),
+            fetch('/api/v2/factor_explain').then(r => r.json())
+        ]);
+        if (!explainRes.error && explainRes.factors) {
+            let expHtml = `<div class="mb-3 text-gray-400">引擎: <span class="text-gray-200">${explainRes.engine}</span><br/>方法: ${explainRes.method}</div>`;
+            explainRes.factors.forEach(f => {
+                expHtml += `
+                <div class="mb-2">
+                    <div class="flex justify-between items-center cursor-pointer hover:text-white" onclick="this.nextElementSibling.classList.toggle('hidden')">
+                        <span class="font-bold text-gray-200">${f.label} (${f.key})</span>
+                        <span class="text-blue-400 font-mono">${(f.weight*100).toFixed(0)}% ▾</span>
+                    </div>
+                    <div class="hidden mt-1 pl-2 border-l-2 border-gray-600 text-[10px] space-y-1">
+                        <div class="text-gray-400">${f.desc}</div>
+                        <div class="text-gray-500">包含: ${(f.subs||[]).join(', ')}</div>
+                    </div>
+                </div>`;
+            });
+            document.getElementById('v2-factor-explain').innerHTML = expHtml;
+        }
+        window.poolDataCache = poolRes;
+        const markets = [{ id: 'a_share', label: 'A股' }, { id: 'hk', label: '港股' }, { id: 'us', label: '美股' }, { id: 'etf', label: 'ETF' }];
+        let tabsHtml = '';
+        markets.forEach((m, idx) => {
+            const count = ((poolRes[m.id]?.watch?.length||0) + (poolRes[m.id]?.monitor?.length||0) + (poolRes[m.id]?.deep?.length||0));
+            tabsHtml += `<button onclick="renderPoolMarket('${m.id}')" id="pool-tab-${m.id}" class="pool-tab-btn px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${idx === 0 ? 'bg-gray-800 text-blue-400 border-t-2 border-blue-500' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}">${m.label} <span class="text-xs opacity-60 ml-1">(${count})</span></button>`;
+        });
+        document.getElementById('v2-pool-market-tabs').innerHTML = tabsHtml;
+        renderPoolMarket('a_share');
+    } catch(e) { console.error(e); }
+}
+
+function renderPoolMarket(marketId) {
+    document.querySelectorAll('.pool-tab-btn').forEach(btn => btn.className = 'pool-tab-btn px-4 py-2 rounded-t-lg font-medium text-sm transition-colors text-gray-400 hover:text-gray-200 hover:bg-gray-800/50');
+    const activeBtn = document.getElementById(`pool-tab-${marketId}`);
+    if (activeBtn) activeBtn.className = 'pool-tab-btn px-4 py-2 rounded-t-lg font-medium text-sm transition-colors bg-gray-800 text-blue-400 border-t-2 border-blue-500';
+    const data = window.poolDataCache?.[marketId] || { watch: [], monitor: [], deep: [] };
+    const tierDefs = [
+        { id: 'deep', label: '🧠 深度层 (Deep)', color: 'text-green-500', desc: '评分>0.6 ≥2周 + 不为清单通过' },
+        { id: 'monitor', label: '👀 盯住层 (Monitor)', color: 'text-yellow-500', desc: '评分>0.55 ≥1周' },
+        { id: 'watch', label: '🔍 发现层 (Watch)', color: 'text-blue-500', desc: '评分>0.50' }
     ];
-    document.getElementById('metricsBody').innerHTML = metrics.map(m =>
-      '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;text-align:center">'+
-        '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+m.label+'</div>'+
-        '<div style="font-size:18px;font-weight:700;color:'+m.color+'">'+m.val+'</div>'+
-      '</div>'
-    ).join('');
-  } catch(e) {}
+    let contentHtml = '';
+    tierDefs.forEach(t => {
+        const items = data[t.id] || [];
+        let rowsHtml = '';
+        items.forEach(i => {
+            const sc = i.scores || {};
+            let sColor = 'text-red-500';
+            if (i.score >= 0.63) sColor = 'text-green-500 font-bold';
+            else if (i.score >= 0.48) sColor = 'text-green-400';
+            else if (i.score >= 0.35) sColor = 'text-yellow-500';
+            
+            const factorKeys = ['quality', 'value', 'growth', 'momentum', 'low_vol', 'sentiment', 'dividend'];
+            const factorLabels = ['质', '价', '长', '动', '波', '情', '息'];
+            let barsHtml = '<div class="flex gap-1 items-end h-8">';
+            factorKeys.forEach((fk, idx) => {
+                const val = sc[fk] || 0;
+                const h = Math.max(10, val * 100) + '%';
+                let bColor = 'bg-gray-600';
+                if (val >= 0.7) bColor = 'bg-green-500';
+                else if (val >= 0.5) bColor = 'bg-blue-500';
+                else if (val < 0.3) bColor = 'bg-red-500';
+                barsHtml += `<div class="flex flex-col items-center justify-end w-4 group relative" title="${factorLabels[idx]}: ${val.toFixed(2)}"><div class="w-full ${bColor} rounded-t-sm opacity-80 group-hover:opacity-100 transition-opacity" style="height: ${h}"></div><div class="text-[8px] text-gray-500 mt-0.5">${factorLabels[idx]}</div></div>`;
+            });
+            barsHtml += '</div>';
+            
+            rowsHtml += `
+            <div class="bg-gray-800/50 hover:bg-gray-700/50 transition-colors border border-gray-700 rounded-lg p-3 flex flex-wrap gap-4 items-center">
+                <div class="w-32">
+                    <div class="font-bold text-gray-200 text-base">${i.symbol}</div>
+                    <div class="text-xs text-gray-400 truncate" title="${i.name}">${i.name}</div>
+                    ${i.chain ? `<div class="text-[10px] bg-yellow-900/30 text-yellow-500 px-1.5 py-0.5 rounded inline-block mt-1 truncate max-w-full">${i.chain}</div>` : ''}
+                </div>
+                <div class="w-20 text-center">
+                    <div class="text-xs text-gray-500 mb-1">综合评分</div>
+                    <div class="text-xl font-mono ${sColor}">${(i.score||0).toFixed(3)}</div>
+                </div>
+                <div class="w-36 hidden sm:block">${barsHtml}</div>
+                <div class="flex-1 min-w-[200px] border-l border-gray-700 pl-4">
+                    <div class="text-xs text-gray-400 mb-1 flex items-center gap-2"><span>加入: ${i.date_added||'—'}</span></div>
+                    <div class="text-xs text-gray-300 line-clamp-2" title="${i.reason||''}">${i.reason||'无理由'}</div>
+                </div>
+            </div>`;
+        });
+        if (items.length === 0) rowsHtml = `<div class="text-sm text-gray-500 italic p-4 text-center border border-gray-800 border-dashed rounded">此层级暂无标的</div>`;
+        
+        contentHtml += `
+        <div class="mb-6">
+            <div class="flex items-center gap-2 mb-3 cursor-pointer" onclick="document.getElementById('tier-${t.id}').classList.toggle('hidden')">
+                <h4 class="font-bold text-base ${t.color}">${t.label}</h4>
+                <span class="text-xs text-gray-400 ml-2">${t.desc}</span>
+                <span class="bg-gray-800 text-gray-300 text-xs px-2 py-0.5 rounded-full ml-auto">${items.length}</span>
+            </div>
+            <div id="tier-${t.id}" class="space-y-2">${rowsHtml}</div>
+        </div>`;
+    });
+    document.getElementById('v2-pool-content').innerHTML = contentHtml;
 }
-loadMetrics();
-setInterval(load, 120000);
 
-// ─── 7面板 Tab 切换 ─────────────────────────
 function switchTab(ev, tab) {
-  ev.preventDefault();
-  // 更新 nav active 状态
+  if (ev) ev.preventDefault();
   document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
-  ev.currentTarget.classList.add('active');
+  if (ev) ev.currentTarget.classList.add('active');
 
-  // 显示/隐藏面板
-  const sections = ['tab-pool','tab-etf','tab-news','tab-reports','tab-comparison'];
-  const mainEls = [
-    document.getElementById('strategyPanels'),
-    document.getElementById('metricsPanel'),
-    document.getElementById('userSignals'),
-  ];
-  sections.forEach(id => document.getElementById(id).style.display = 'none');
-  mainEls.forEach(el => { if(el) el.style.display = 'none'; });
-
-  if (tab === 'dashboard') {
-    mainEls.forEach(el => { if(el) el.style.display = ''; });
-    return;
-  }
+  const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison'];
+  sections.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+  });
 
   const panel = document.getElementById('tab-'+tab);
   if (panel) panel.style.display = '';
 
-  // 加载数据
-  if (tab === 'pool') loadPool();
+  if (tab === 'dashboard') loadDashboardV2();
+  else if (tab === 'pool') loadPoolV2();
   else if (tab === 'etf') loadEtf();
   else if (tab === 'news') loadNews();
   else if (tab === 'reports') loadReports();
@@ -1650,46 +1880,8 @@ function switchTab(ev, tab) {
   return false;
 }
 
-async function loadPool() {
-  const el = document.getElementById('poolBody');
-  el.innerHTML = '<div class="empty">加载中...</div>';
-  try {
-    const r = await fetch('/api/v2/pool');
-    const data = await r.json();
-    const tierNames = {'watch':'🔍 发现层 (评分>0.50)','monitor':'👀 盯住层 (评分>0.55 ≥1周)','deep':'🧠 深度层 (评分>0.6 ≥2周+不为清单通过)'};
-    const tierColors = {'watch':'var(--blue)','monitor':'var(--yellow)','deep':'var(--green)'};
-    let html = '';
-    for (const tier of ['watch','monitor','deep']) {
-      const items = data[tier] || [];
-      html += `<div style="margin-bottom:20px;">
-        <strong style="color:${tierColors[tier]};font-size:15px;">${tierNames[tier]||tier.toUpperCase()}</strong>
-        <span style="color:var(--text2);font-size:12px;"> ${items.length} 只</span>`;
-      if (items.length === 0) {
-        html += '<div class="empty" style="padding:8px">暂无数据 — 需积累评分历史</div></div>';
-        continue;
-      }
-      html += '<table><tr><th>代码</th><th>名称</th><th>链/行业</th><th>综合评分</th><th>质量</th><th>价值</th><th>成长</th><th>动量</th><th>低波</th><th>情绪</th><th>风险</th><th>加入日期</th><th>理由</th></tr>';
-      items.forEach(i => {
-        const sc = i.scores || {};
-        const scoreDoc = '/score_explanation';
-        html += `<tr class="tr-hover"><td><strong>${i.symbol}</strong></td>
-          <td style="color:var(--text2)">${i.name||i.symbol}</td>
-          <td style="font-size:11px;color:var(--yellow)">${i.chain||'—'}</td>
-          <td style="color:${i.score>=0.5?'var(--green)':'var(--yellow)'}"><a href="${scoreDoc}" target="_blank" style="color:inherit;text-decoration:underline;text-decoration-style:dotted;" title="点击查看评分体系">${(i.score||0).toFixed(3)}</a></td>
-          <td>${(sc.quality||0).toFixed(2)}</td><td>${(sc.value||0).toFixed(2)}</td>
-          <td>${(sc.growth||0).toFixed(2)}</td><td>${(sc.momentum||0).toFixed(2)}</td>
-          <td>${(sc.low_vol||0).toFixed(2)}</td><td>${(sc.sentiment||0).toFixed(2)}</td>
-          <td>${(sc.risk||0).toFixed(2)}</td>
-          <td style="font-size:11px;color:var(--text2)">${i.date_added||''}</td>
-          <td style="font-size:11px;color:var(--text2)">${i.reason||''}</td></tr>`;
-      });
-      html += '</table></div>';
-    }
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
-  }
-}
+window.onload = () => { loadDashboardV2(); };
+setInterval(loadDashboardV2, 120000);
 
 async function loadEtf() {
   const el = document.getElementById('etfBody');
