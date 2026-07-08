@@ -56,6 +56,7 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     <a href="#" onclick="return switchTab(event,'dragon_tiger')">🐉 龙虎榜</a>
     <a href="#" onclick="return switchTab(event,'news')">📰 新闻</a>
     <a href="#" onclick="return switchTab(event,'reports')">📋 日报</a>
+    <a href="#" onclick="return switchTab(event,'evidence')">🔬 证据</a>
   </div>
 
   <h1>面基 · 三源融合模拟盘</h1>
@@ -251,6 +252,54 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
   <div class="card" id="tab-reports" style="display:none">
     <div class="card-header"><h3>📋 日报链接</h3></div>
     <div id="reportsBody" style="font-size:13px;"></div>
+  </div>
+  <!-- ======== 证据面板 ======== -->
+  <div id="tab-evidence" style="display:none" class="space-y-6">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4" id="evidence-grade-card">
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 xl:col-span-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-gray-100 font-semibold">🔬 数据证据链</h3>
+          <div id="evidence-grade-badge" class="text-xs px-3 py-1 rounded-full">加载中...</div>
+        </div>
+        <div id="evidence-grade-text" class="text-sm text-gray-400 mt-2">加载中...</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-gray-100 font-semibold text-sm mb-4">📊 数据质量 — 每个数据源是否可信</h3>
+        <div id="evidence-data-quality" class="space-y-2 text-xs"><div class="text-gray-400">加载中...</div></div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-gray-100 font-semibold text-sm mb-4">🎯 信号验证 — 过去预测的准确率</h3>
+        <div id="evidence-signal-accuracy" class="space-y-2 text-xs"><div class="text-gray-400">加载中...</div></div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-gray-100 font-semibold text-sm mb-4">📈 业绩归因 — 收益/亏损从哪里来</h3>
+        <div id="evidence-attribution" class="space-y-3 text-xs"><div class="text-gray-400">加载中...</div></div>
+      </div>
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-gray-100 font-semibold text-sm mb-4">🧩 因子查询 — 输入代码看评分依据</h3>
+        <div class="flex gap-2 mb-3">
+          <input type="text" id="evidence-symbol-input" placeholder="输入代码如 600519" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600 w-full" onkeydown="if(event.key==='Enter')loadFactorEvidence()" />
+          <button onclick="loadFactorEvidence()" class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium">查询</button>
+        </div>
+        <div id="evidence-factor" class="space-y-3 text-xs"><div class="text-gray-400">输入代码后点击查询</div></div>
+      </div>
+    </div>
+
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+      <h3 class="text-gray-100 font-semibold text-sm mb-4">💡 使用说明</h3>
+      <div class="text-xs text-gray-400 space-y-1">
+        <p>📌 <b>数据质量</b> — 每个数据源的新鲜度评分（A级=可信，C级=部分数据过期，D级=不可用）。</p>
+        <p>📌 <b>信号验证</b> — 系统发出BUY/SELL信号后N天验证方向正确率。首次运行 run_trading.py 后积累数据。</p>
+        <p>📌 <b>业绩归因</b> — Brinson式分解：收益来自选股/行业/因子暴露/交易时机。</p>
+        <p>📌 <b>因子查询</b> — 输入个股代码，看每个子因子原始值、排名、方向、评分依据。</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -591,7 +640,7 @@ function switchTab(ev, tab) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
   if (ev) ev.currentTarget.classList.add('active');
 
-  const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison', 'tab-dragon_tiger'];
+  const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison', 'tab-dragon_tiger', 'tab-evidence'];
   sections.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
@@ -607,6 +656,7 @@ function switchTab(ev, tab) {
   else if (tab === 'reports') loadReports();
   else if (tab === 'comparison') loadComparison();
   else if (tab === 'dragon_tiger') loadDragonTiger();
+  else if (tab === 'evidence') loadEvidence();
   return false;
 }
 
@@ -1231,6 +1281,114 @@ async function loadReports() {
     el.innerHTML = html;
   } catch(e) {
     el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadEvidence() {
+  const el = document.getElementById('tab-evidence');
+  el.style.display = '';
+  try {
+    // 1. 数据质量
+    const dqRes = await fetch('/api/v2/evidence/data-quality').then(r => r.json()).catch(() => ({}));
+    const gradeColors = {A:'text-green-400 bg-green-900/40', B:'text-yellow-400 bg-yellow-900/40', C:'text-orange-400 bg-orange-900/40', D:'text-red-400 bg-red-900/40'};
+    const gradeCls = gradeColors[dqRes.grade] || 'text-gray-400 bg-gray-700';
+    document.getElementById('evidence-grade-badge').innerHTML = `<span class="${gradeCls} px-3 py-1 rounded-full font-bold">${dqRes.grade || '?'}</span>`;
+    document.getElementById('evidence-grade-text').innerHTML = dqRes.grade_text || dqRes.evidence || '加载中...';
+
+    let dqHtml = '';
+    if (dqRes.entries) {
+      dqHtml = '<div class="divide-y divide-gray-700">';
+      dqRes.entries.forEach(e => {
+        const icon = e.freshness === 'fresh' ? '🟢' : e.freshness === 'stale' ? '🟡' : e.freshness === 'expired' ? '🔴' : '⚫';
+        const age = typeof e.age_hours === 'number' ? `${e.age_hours.toFixed(1)}h` : '?';
+        dqHtml += `<div class="flex justify-between py-1.5"><span>${icon} ${e.label}</span><span class="text-gray-400">${age} ${e.freshness}</span></div>`;
+      });
+      dqHtml += '</div>';
+    } else {
+      dqHtml = '<div class="text-gray-400">暂无数据质量信息</div>';
+    }
+    document.getElementById('evidence-data-quality').innerHTML = dqHtml;
+
+    // 2. 信号验证
+    const saRes = await fetch('/api/v2/evidence/signal-accuracy').then(r => r.json()).catch(() => ({}));
+    let saHtml = '';
+    if (saRes.data) {
+      const d = saRes.data.overall || {};
+      saHtml = `
+        <div class="bg-gray-700/40 rounded-lg p-3 mb-3">
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div><span class="text-gray-400">交易日:</span> <span class="text-gray-200">${d.total_days || 0}</span></div>
+            <div><span class="text-gray-400">总信号:</span> <span class="text-gray-200">${d.total_signals || 0}</span></div>
+            <div><span class="text-gray-400">有效价格:</span> <span class="text-gray-200">${d.price_valid || 0}</span></div>
+            <div><span class="text-gray-400">跳过(price=0):</span> <span class="text-gray-200">${d.price_zero_skipped || 0}</span></div>
+          </div>
+        </div>`;
+      if (d.total_signals === 0) {
+        saHtml += '<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ 尚无信号验证数据。cron 将在下一个交易日 08:00 自动运行 run_trading.py。</div>';
+      }
+    } else {
+      saHtml = '<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ 尚未收集信号验证数据</div>';
+    }
+    document.getElementById('evidence-signal-accuracy').innerHTML = saHtml;
+
+    // 3. 业绩归因
+    const attrRes = await fetch('/api/v2/evidence/portfolio-attribution').then(r => r.json()).catch(() => ({}));
+    let attrHtml = '';
+    if (attrRes.attribution) {
+      for (const [sname, a] of Object.entries(attrRes.attribution)) {
+        const icon = sname === 'faceji' ? '🧑‍🌾' : sname === 'silverquant' ? '🥈' : '🤖';
+        const isPos = (a.total_return || 0) >= 0;
+        attrHtml += `<div class="bg-gray-700/40 rounded-lg p-3">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-medium text-gray-200">${icon} ${sname}</span>
+            <span class="font-mono ${isPos ? 'text-green-500' : 'text-red-500'}">${a.total_return >= 0 ? '+' : ''}${a.total_return.toFixed(2)}%</span>
+          </div>
+          <div class="text-xs text-gray-400">${a.evidence || ''}</div>
+        </div>`;
+      }
+    }
+    document.getElementById('evidence-attribution').innerHTML = attrHtml || '<div class="text-gray-400">暂无归因数据</div>';
+  } catch(e) {
+    document.getElementById('evidence-data-quality').innerHTML = `<div class="text-red-400">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadFactorEvidence() {
+  const sym = document.getElementById('evidence-symbol-input').value.trim();
+  if (!sym) { document.getElementById('evidence-factor').innerHTML = '<div class="text-yellow-400 text-xs">请输入代码</div>'; return; }
+  const el = document.getElementById('evidence-factor');
+  el.innerHTML = '<div class="text-blue-400">🔍 查询中...</div>';
+  try {
+    const r = await fetch(`/api/v2/evidence/factor-breakdown/${sym}`).then(r => r.json());
+    if (r.status === 'no_data' || r.status === 'not_found') {
+      el.innerHTML = `<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ ${r.message || '未找到'}</div>`;
+      return;
+    }
+    let html = `<div class="bg-gray-700/40 rounded-lg p-3 mb-2">
+      <div class="flex justify-between items-center mb-2">
+        <div><span class="text-gray-200 font-medium">${r.symbol}</span> <span class="text-gray-400">${r.name || ''}</span></div>
+        <div><span class="text-sm font-bold ${r.signal === 'BUY' || r.signal === 'STRONGBUY' ? 'text-green-500' : r.signal === 'SELL' || r.signal === 'STRONGSELL' ? 'text-red-500' : 'text-yellow-400'}">${r.signal || 'HOLD'}</span></div>
+      </div>
+      <div class="flex justify-between text-xs"><span class="text-gray-400">综合分:</span><span class="font-mono">${(r.composite || 0).toFixed(4)}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-gray-400">v3评分:</span><span class="font-mono">${r.composite_v3 || 0}</span></div>
+      <div class="flex justify-between text-xs"><span class="text-gray-400">价格:</span><span class="font-mono">${r.price || 0}</span></div>
+    </div>`;
+
+    // 因子分解
+    if (r.evidence_chain) {
+      for (const [fname, fdata] of Object.entries(r.evidence_chain)) {
+        const isHigh = fdata.score >= 0.65;
+        const isLow = fdata.score <= 0.35;
+        const color = isHigh ? 'text-green-400' : isLow ? 'text-red-400' : 'text-gray-300';
+        html += `<div class="bg-gray-700/30 rounded-lg p-2 mb-1">
+          <div class="flex justify-between text-xs"><span class="text-gray-400">${fname}</span><span class="${color} font-mono">${fdata.score.toFixed(2)}</span></div>
+          <div class="text-[10px] text-gray-500 truncate" title="${JSON.stringify(fdata.sub_factors)}">驱动: ${fdata.top_driver || '—'}</div>
+        </div>`;
+      }
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="text-red-400 text-xs">❌ 查询失败: ${e.message}</div>`;
   }
 }
 
