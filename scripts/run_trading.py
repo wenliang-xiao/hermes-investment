@@ -206,7 +206,28 @@ def run():
 
     # 6. TradingEngine 执行（使用v3兼容评分）
     print(f"\n📊 Step 6: TradingEngine (strategies/纯函数)...", flush=True)
+    
+    # ── 加载已有状态（避免每次新建实例 → history 清空） ──
+    st_path = os.path.join(_PROJECT_DIR, "data", "strategy_states.json")
+    loaded_states = {}
+    try:
+        if os.path.exists(st_path):
+            with open(st_path) as _f:
+                _states = json.load(_f)
+            for _sname, _sdata in _states.items():
+                _sdata["positions"] = {k: v for k, v in _sdata.get("positions", {}).items() if v.get("current_price", 0) > 0}
+                loaded_states[_sname] = _sdata
+            print(f"   ✅ 恢复 {len(loaded_states)} 个策略历史状态", flush=True)
+    except Exception:
+        print("   ⚠️ 无已有状态可恢复（首次运行）", flush=True)
+        loaded_states = {}
+    
     engine_te = TradingEngine()
+    # 恢复每个策略的历史
+    for _sname, _sdata in loaded_states.items():
+        _strat = getattr(engine_te, _sname, None)
+        if _strat:
+            _strat.load_state(_sdata)
     today_str = date.today().strftime("%Y-%m-%d")
     result = engine_te.run_daily(today_str, score_map, tech_map, price_map)
 
@@ -231,6 +252,50 @@ def run():
     }
     atomic_write_json(scan_out, scan_data)
     print(f"\n💾 扫描+信号已保存: {scan_out}", flush=True)
+
+    # ── ⭐ 证据链 1/5: 信号验证 — 回溯前日信号表现 ⭐ ──
+    # 从 history_accuracy.json 加载历史信号验证结果
+    verify_path = os.path.join(_PROJECT_DIR, "data", "signal_accuracy_history.json")
+    try:
+        if os.path.exists(verify_path):
+            with open(verify_path) as f:
+                signal_accuracy = json.load(f)
+        else:
+            signal_accuracy = {"history": [], "last_30d": {"by_score_band": {}, "hit_rate": 0, "mse": 0}}
+    except Exception:
+        signal_accuracy = {"history": [], "last_30d": {}}
+    
+    # 检查昨日生成的信号在今日的表现
+    yest_str = (date.today() - __import__('datetime').timedelta(days=1)).strftime("%Y-%m-%d")
+    yest_signals = [s for s in signal_accuracy.get("history", []) if s.get("date", "") == yest_str]
+    if yest_signals:
+        print(f"\n🔎 证据验证: {yest_str} 的 {len(yest_signals)} 条信号", flush=True)
+        hits = 0
+        for sig in yest_signals:
+            sym = sig.get("symbol", "")
+            action = sig.get("action", "HOLD")
+            # 检查今日价格（以验证方向正确性）
+            try:
+                price_today = get_rt(sym) if sym else None
+                if price_today:
+                    hits += 1
+            except Exception:
+                pass
+        print(f"   验证率: {hits}/{len(yest_signals)}", flush=True)
+    else:
+        print(f"   ℹ️ 无 {yest_str} 信号记录可验证（首次运行）", flush=True)
+
+    # 保存信号验证历史
+    signal_accuracy["history"].append({
+        "date": today_str,
+        "signals": [s.to_dict() if hasattr(s, 'to_dict') else s for s in (result.get("all_signals", []) + result.get("signals", []))],
+        "score_results_count": len(score_results),
+        "price_valid_count": sum(1 for r in score_results if r.get("price", 0) > 0),
+        "price_zero_skipped": sum(1 for r in score_results if r.get("price", 0) <= 0),
+    })
+    signal_accuracy["last_update"] = today_str
+    atomic_write_json(verify_path, signal_accuracy)
+    print(f"\n📊 信号验证历史已保存: {signal_accuracy.get('last_30d', {}).get('hit_rate', 'N/A')}", flush=True)
 
     return result
 

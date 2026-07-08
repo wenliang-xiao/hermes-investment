@@ -30,6 +30,7 @@ from dashboard.api_backtest import router as backtest_router
 from dashboard.api_risk import router as risk_router
 from dashboard.api_comparison import router as comparison_router
 from dashboard.api_dragon_tiger import router as dragon_tiger_router
+from dashboard.api_evidence import router as evidence_router
 
 app.include_router(portfolio_router)
 app.include_router(pool_router)
@@ -39,6 +40,7 @@ app.include_router(backtest_router)
 app.include_router(risk_router)
 app.include_router(comparison_router)
 app.include_router(dragon_tiger_router)
+app.include_router(evidence_router)
 
 # ─── HTML 模板 ─────────────────────────────────────
 

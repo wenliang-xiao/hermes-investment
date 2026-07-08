@@ -1,0 +1,8 @@
+{
+  "total": 0,
+  "scan_date": "",
+  "etfs": [],
+  "momentum": [],
+  "error": "no_data_yet",
+  "message": "请先在 ECS 运行 scripts/run_etf_discovery.py"
+}
