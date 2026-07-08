@@ -1128,6 +1128,181 @@ def api_v2_backtest_detail(run_id: str):
     return result
 
 
+@app.get("/api/v2/portfolio/detail")
+def api_v2_portfolio_detail():
+    """模拟盘完整详情 — 持仓+交易历史+信号日志+因子分解"""
+    ts_path = ROOT / "data" / "trading_signals.json"
+    if not ts_path.exists():
+        return {"error": "no data", "date": "", "portfolios": {}, "trade_history": {}, "all_signals": []}
+
+    with open(ts_path) as f:
+        data = json.load(f)
+
+    result = {
+        "date": data.get("date", ""),
+        "generated_at": data.get("generated_at", ""),
+        "total_raw_signals": data.get("total_raw_signals", 0),
+        "after_conflict_resolution": data.get("after_conflict_resolution", 0),
+        "after_weekly_filter": data.get("after_weekly_filter", 0),
+        "simulated_trades": data.get("simulated_trades", 0),
+        "portfolios": data.get("portfolios", {}),
+        "positions": data.get("positions", {}),
+        "trade_history": data.get("trade_history", {}),
+        "final_signals": data.get("signals", []),
+        "all_signals": data.get("all_signals", []),
+    }
+
+    for strat_name, positions in result["positions"].items():
+        for sym, pos in positions.items():
+            pos["name"] = get_name(sym)
+
+    return result
+
+
+@app.get("/api/v2/portfolio/netvalue")
+def api_v2_portfolio_netvalue():
+    """净值曲线 — 从交易历史推算 + 沪深300基准"""
+    ts_path = ROOT / "data" / "trading_signals.json"
+    if not ts_path.exists():
+        return {"error": "no data", "labels": [], "series": []}
+
+    with open(ts_path) as f:
+        data = json.load(f)
+
+    portfolios = data.get("portfolios", {})
+    trade_history = data.get("trade_history", {})
+
+    series = []
+    for strat_name, strat_data in portfolios.items():
+        history = trade_history.get(strat_name, [])
+        capital = strat_data.get("capital", 1000000)
+        labels = []
+        values = []
+        current_value = capital
+        for trade in history:
+            trade_date = trade.get("date", "")
+            if trade_date:
+                labels.append(trade_date)
+                pnl = trade.get("pnl", 0)
+                if trade.get("action") == "卖出":
+                    current_value += pnl
+                values.append(round(current_value, 2))
+        if labels:
+            labels.append(datetime.now().strftime("%Y-%m-%d"))
+            total_value = strat_data.get("total_value", capital)
+            values.append(round(total_value, 2))
+
+        series.append({
+            "label": strat_data.get("label", strat_name),
+            "name": strat_name,
+            "labels": labels,
+            "values": values,
+            "total_return": strat_data.get("total_return", 0),
+            "color": {"faceji": "#58a6ff", "silverquant": "#f0883e", "tradingagents": "#bc8cff"}.get(strat_name, "#7ee787"),
+        })
+
+    return {"labels": series[0]["labels"] if series else [], "series": series}
+
+
+@app.get("/api/v2/pool/by_market")
+def api_v2_pool_by_market():
+    """票池按市场分组 — A股/港股/美股/ETF"""
+    pool_dir = ROOT / "data" / "pool"
+    result = {"a_share": {"watch": [], "monitor": [], "deep": []},
+              "hk": {"watch": [], "monitor": [], "deep": []},
+              "us": {"watch": [], "monitor": [], "deep": []},
+              "etf": {"watch": [], "monitor": [], "deep": []}}
+
+    for tier in ("watch", "monitor", "deep"):
+        path = pool_dir / f"{tier}.json"
+        if not path.exists():
+            continue
+        with open(path) as f:
+            raw = f.read().strip()
+            items = json.loads(raw) if raw else []
+        for item in items:
+            sym = item.get("symbol", "")
+            item["name"] = get_name(sym)
+            item["chain"] = _guess_chain(sym)
+            market = _classify_market(sym)
+            if market in result:
+                result[market][tier].append(item)
+
+    return result
+
+
+@app.get("/api/v2/factor_explain")
+def api_v2_factor_explain():
+    """因子评分体系说明 — 7因子定义+计算方法+参考范围"""
+    return {
+        "engine": "factor_engine v4.0",
+        "range": "[0, 1]",
+        "method": "scipy rankdata 截面百分位 + 产业链中性化",
+        "factors": [
+            {"key": "quality", "label": "质量", "weight": 0.18,
+             "subs": ["ROE", "毛利率", "资产负债率(反向)", "每股经营现金流", "净利率"],
+             "desc": "盈利能力强、财务健康的公司"},
+            {"key": "value", "label": "价值", "weight": 0.15,
+             "subs": ["PE历史百分位(反向)", "PB(反向)", "PE_TTM(反向)"],
+             "desc": "估值低于历史和同行的公司"},
+            {"key": "growth", "label": "成长", "weight": 0.17,
+             "subs": ["营收增速TTM", "净利增速TTM", "ROE加速度"],
+             "desc": "营收和利润持续高增长的公司"},
+            {"key": "momentum", "label": "动量", "weight": 0.15,
+             "subs": ["20日回报", "60日回报", "120日回报"],
+             "desc": "近期价格表现强势的公司"},
+            {"key": "low_vol", "label": "低波", "weight": 0.12,
+             "subs": ["20日年化波动率(反向)", "60日最大回撤(反向)"],
+             "desc": "价格波动小、回撤小的公司"},
+            {"key": "sentiment", "label": "情绪/资金", "weight": 0.10,
+             "subs": ["20日成交量比", "20日换手率"],
+             "desc": "市场关注度和技术信号"},
+            {"key": "dividend", "label": "股息", "weight": 0.07,
+             "subs": ["股息率"],
+             "desc": "现金分红回报高的公司"},
+            {"key": "risk", "label": "风险", "weight": 0.12,
+             "subs": ["PE过高风险", "60日波动率"],
+             "desc": "风险标记因子(仅用于信息输出，不参与综合分)"},
+        ],
+        "weight_system": {
+            "method": "ICWeightSystem 三层融合",
+            "layer1": "滚动IC/IR信噪比 (6个月窗口, 半衰期0.35)",
+            "layer2": "宏观条件调整 (复苏/扩张/过热/衰退 × 8风格)",
+            "layer3": "贝叶斯收缩 (shrink_target=3.0)",
+            "final": "70% rolling_IC_base + 30% conditional_adjusted",
+        },
+        "signal_thresholds": {
+            "STRONGBUY": ">= 0.63",
+            "BUY": ">= 0.48",
+            "HOLD": ">= 0.35",
+            "SELL": ">= 0.25",
+            "STRONGSELL": "< 0.25",
+        },
+    }
+
+
+def _classify_market(symbol):
+    """根据代码分类市场"""
+    sym = str(symbol)
+    if sym.endswith(".HK"):
+        return "hk"
+    if sym.endswith(".US") or sym in ("GOOGL", "AAPL", "AMZN", "MSFT", "NVDA", "META", "TSLA",
+                                       "GOOG", "NFLX", "JPM", "V", "JNJ", "WMT", "PG", "MA",
+                                       "HD", "DIS", "BAC", "XOM", "KO", "PEP", "PFE", "MRK",
+                                       "INTC", "CSCO", "VZ", "T", "ABT", "CVX", "MU", "QQQ",
+                                       "SPY", "TLT", "GLD", "SLV", "USO", "XLF", "XLK", "VST"):
+        return "us"
+    if sym.startswith("=") or sym in ("CL=F", "GC=F", "HG=F"):
+        return "us"
+    if sym.isdigit() and len(sym) == 6:
+        if sym.startswith(("51", "15", "16", "56", "58", "159")):
+            return "etf"
+        return "a_share"
+    if sym.startswith("^"):
+        return "us"
+    return "us"
+
+
 @app.get("/api/risk")
 def api_risk():
     """组合风险指标 — VaR/集中度/波动率"""

@@ -197,11 +197,14 @@ class BaseStrategy:
         self.positions[sym] = {
             "entry_price": adj_price, "quantity": qty,
             "entry_date": date.today().strftime("%Y-%m-%d"),
-            "peak": adj_price, "current_price": adj_price
+            "peak": adj_price, "current_price": adj_price,
+            "entry_score": getattr(signal, "score", None),
+            "reason": signal.reason,
         }
         self.history.append({"date": str(date.today()), "symbol": sym,
                              "action": "买入", "price": adj_price, "cost": round(total_cost, 2),
-                             "reason": signal.reason})
+                             "reason": signal.reason,
+                             "score": getattr(signal, "score", None)})
         return True
 
     def execute_sell(self, signal):
@@ -219,7 +222,10 @@ class BaseStrategy:
         self.cash += adj_price * pos["quantity"]
         self.history.append({"date": str(date.today()), "symbol": sym,
                              "action": "卖出", "price": adj_price,
-                             "pnl": round(pnl, 2), "reason": signal.reason})
+                             "pnl": round(pnl, 2), "reason": signal.reason,
+                             "entry_price": pos["entry_price"],
+                             "entry_date": pos.get("entry_date", ""),
+                             "hold_days": (date.today() - datetime.strptime(pos.get("entry_date", str(date.today())), "%Y-%m-%d").date()).days if pos.get("entry_date") else 0})
         del self.positions[sym]
         return True
 
@@ -517,25 +523,23 @@ class TradingEngine:
             "after_conflict_resolution": len(resolved),
             "after_weekly_filter": len(final),
             "signals": [s.to_dict() for s in final],
+            "all_signals": [s.to_dict() for s in all_signals],
             "simulated_trades": sim_trades,
             "positions": {
-                name: {sym: {"entry_price": pos["entry_price"],
-                             "current_price": pos.get("current_price", pos["entry_price"]),
-                             "quantity": pos["quantity"],
-                             "entry_date": pos.get("entry_date", ""),
-                             "pnl_pct": round((pos.get("current_price", pos["entry_price"]) - pos["entry_price"]) / pos["entry_price"] * 100, 2)}
-                        for sym, pos in strategy.positions.items()}
+                name: {
+                    sym: self._build_position_detail(sym, pos, strategy, score_map, price_map)
+                    for sym, pos in strategy.positions.items()
+                }
                 for name, strategy in self.strategies.items()
             },
             "portfolios": {
-                name: {
-                    "cash": strategy.cash,
-                    "position_count": len(strategy.positions),
-                    "total_invested": sum(pos["entry_price"] * pos["quantity"] for pos in strategy.positions.values()),
-                    "history_count": len(strategy.history),
-                }
+                name: self._build_portfolio_detail(strategy, score_map, price_map)
                 for name, strategy in self.strategies.items()
-            }
+            },
+            "trade_history": {
+                name: strategy.history[-50:]
+                for name, strategy in self.strategies.items()
+            },
         }
 
         if save:
@@ -545,6 +549,79 @@ class TradingEngine:
             print(f"\n  💾 信号+模拟盘已保存: {out_path}", flush=True)
 
         return output
+
+    def _build_position_detail(self, sym, pos, strategy, score_map, price_map):
+        """构建单持仓的完整详情"""
+        entry_price = pos["entry_price"]
+        current_price = pos.get("current_price", entry_price)
+        quantity = pos["quantity"]
+        peak = pos.get("peak", entry_price)
+        cost = entry_price * quantity
+        market_value = current_price * quantity
+        pnl = (current_price - entry_price) * quantity
+        pnl_pct = (current_price - entry_price) / entry_price * 100 if entry_price else 0
+        dd_from_peak = (current_price - peak) / peak * 100 if peak else 0
+        dd_from_entry = (current_price - entry_price) / entry_price * 100 if entry_price else 0
+        total_value = strategy.current_value()
+        pct = market_value / total_value * 100 if total_value else 0
+        entry_date = pos.get("entry_date", "")
+        hold_days = 0
+        if entry_date:
+            try:
+                hold_days = (date.today() - datetime.strptime(entry_date, "%Y-%m-%d").date()).days
+            except Exception:
+                pass
+        entry_score = pos.get("entry_score")
+        current_score = score_map.get(sym, 0)
+        name = strategy._get_name(sym) if hasattr(strategy, "_get_name") else sym
+        return {
+            "symbol": sym,
+            "name": name,
+            "entry_price": round(entry_price, 4),
+            "current_price": round(current_price, 4),
+            "quantity": quantity,
+            "cost": round(cost, 2),
+            "market_value": round(market_value, 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "peak_price": round(peak, 4),
+            "drawdown_from_peak": round(dd_from_peak, 2),
+            "drawdown_from_entry": round(dd_from_entry, 2),
+            "pct": round(pct, 2),
+            "entry_date": entry_date,
+            "entry_score": entry_score,
+            "current_score": round(current_score, 2) if isinstance(current_score, (int, float)) else current_score,
+            "hold_days": hold_days,
+            "reason": pos.get("reason", ""),
+            "stop_loss": round(entry_price * 0.92, 4),
+            "strategy": strategy.name,
+        }
+
+    def _build_portfolio_detail(self, strategy, score_map, price_map):
+        """构建策略组合的完整详情"""
+        total_value = strategy.current_value()
+        total_invested = sum(pos["entry_price"] * pos["quantity"] for pos in strategy.positions.values())
+        total_pnl = total_value - strategy.capital
+        total_return = total_pnl / strategy.capital * 100 if strategy.capital else 0
+        win_trades = [h for h in strategy.history if h.get("action") == "卖出" and h.get("pnl", 0) > 0]
+        lose_trades = [h for h in strategy.history if h.get("action") == "卖出" and h.get("pnl", 0) <= 0]
+        win_rate = len(win_trades) / max(1, len(win_trades) + len(lose_trades)) * 100
+        return {
+            "label": strategy.name,
+            "cash": round(strategy.cash, 2),
+            "capital": strategy.capital,
+            "total_value": round(total_value, 2),
+            "total_invested": round(total_invested, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_return": round(total_return, 2),
+            "position_count": len(strategy.positions),
+            "history_count": len(strategy.history),
+            "cash_pct": round((strategy.cash / total_value) * 100, 2) if total_value else 0,
+            "invested_pct": round((total_invested / total_value) * 100, 2) if total_value else 0,
+            "win_rate": round(win_rate, 1),
+            "win_trades": len(win_trades),
+            "lose_trades": len(lose_trades),
+        }
 
     def get_summary_table(self, output):
         """生成日报用的信号摘要表（文本）"""
