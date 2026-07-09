@@ -1,5 +1,504 @@
 [
   {
+    "symbol": "300502",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "AI算力-光模块",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-光模块领域, 中国在光模块制造全球领先，800G→1.6T迭代由中际旭创(全球市占20%+)/新易盛主导，海外CSP大客户已认证量产"
+  },
+  {
+    "symbol": "601012",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-光伏",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
+  },
+  {
+    "symbol": "688599",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-光伏",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
+  },
+  {
+    "symbol": "300274",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-光伏",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
+  },
+  {
+    "symbol": "300750",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-动力电池",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料"
+  },
+  {
+    "symbol": "300014",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-动力电池",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料"
+  },
+  {
+    "symbol": "002594",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-整车",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+  },
+  {
+    "symbol": "1211.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-整车",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+  },
+  {
+    "symbol": "1810.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-整车",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+  },
+  {
+    "symbol": "9868.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "新能源-整车",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+  },
+  {
+    "symbol": "0700.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "互联网-平台",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
+  },
+  {
+    "symbol": "9988.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "互联网-平台",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
+  },
+  {
+    "symbol": "3690.HK",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "互联网-平台",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
+  },
+  {
+    "symbol": "603259",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "医药-CXO",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包"
+  },
+  {
+    "symbol": "300760",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "医药-CXO",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包"
+  },
+  {
+    "symbol": "600900",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "电力-AI基建",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
+  },
+  {
+    "symbol": "601985",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "电力-AI基建",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
+  },
+  {
+    "symbol": "601877",
+    "score": 0.855,
+    "scores": {
+      "decoupling_domain": "电力-AI基建",
+      "decoupling_role": "china_leaders",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
+  },
+  {
+    "symbol": "688256",
+    "score": 0.72,
+    "scores": {
+      "decoupling_domain": "AI算力-GPU",
+      "decoupling_role": "china_potential",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代"
+  },
+  {
+    "symbol": "002371",
+    "score": 0.72,
+    "scores": {
+      "decoupling_domain": "半导体-设备",
+      "decoupling_role": "china_potential",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
+  },
+  {
+    "symbol": "688012",
+    "score": 0.72,
+    "scores": {
+      "decoupling_domain": "半导体-设备",
+      "decoupling_role": "china_potential",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
+  },
+  {
+    "symbol": "688120",
+    "score": 0.72,
+    "scores": {
+      "decoupling_domain": "半导体-设备",
+      "decoupling_role": "china_potential",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
+  },
+  {
+    "symbol": "688041",
+    "score": 0.72,
+    "scores": {
+      "decoupling_domain": "AI算力-GPU",
+      "decoupling_role": "china_potential",
+      "decoupling_confidence": "high"
+    },
+    "factor_breakdown": {},
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代"
+  },
+  {
+    "symbol": "688088",
+    "score": 0.6708,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.8333,
+      "growth": 0.8333,
+      "momentum": 0.0,
+      "low_vol": 1.0,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 1.0
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 0.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "视觉AI SDK，手机+汽车+机器人三大感知场景。低波动防御属性；估值合理"
+  },
+  {
+    "symbol": "601398",
+    "score": 0.626,
+    "scores": {
+      "quality": 0.4891,
+      "value": 0.7767,
+      "growth": 0.6076,
+      "momentum": 0.5939,
+      "low_vol": 0.4591,
+      "sentiment": 0.8273,
+      "dividend": 0.5,
+      "risk": 0.754
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.4455,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.9086,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9213,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.4091,
+      "growth:profit_ttm": 0.4136,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 0.5636,
+      "momentum:60d": 0.6091,
+      "momentum:120d": 0.6091,
+      "low_vol:20d_vol": 0.9091,
+      "low_vol:max_dd_60d": 0.0091,
+      "sentiment:volume_ratio": 0.8545,
+      "sentiment:turnover": 0.8,
+      "risk:pe_excessive": 0.5806,
+      "risk:volatility": 0.9273
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "市场情绪积极；估值合理"
+  },
+  {
+    "symbol": "002142",
+    "score": 0.6204,
+    "scores": {
+      "quality": 0.5945,
+      "value": 0.5994,
+      "growth": 0.6926,
+      "momentum": 0.7424,
+      "low_vol": 0.4727,
+      "sentiment": 0.7409,
+      "dividend": 0.5,
+      "risk": 0.6208
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.9727,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.3656,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9326,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.5909,
+      "growth:profit_ttm": 0.5545,
+      "growth:roe_trend": 0.9322,
+      "momentum:20d": 0.7182,
+      "momentum:60d": 0.7182,
+      "momentum:120d": 0.7909,
+      "low_vol:20d_vol": 0.8727,
+      "low_vol:max_dd_60d": 0.0727,
+      "sentiment:volume_ratio": 0.9455,
+      "sentiment:turnover": 0.5364,
+      "risk:pe_excessive": 0.3871,
+      "risk:volatility": 0.8545
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "近期动量强劲；市场情绪积极"
+  },
+  {
+    "symbol": "600016",
+    "score": 0.6179,
+    "scores": {
+      "quality": 0.4927,
+      "value": 0.7591,
+      "growth": 0.6372,
+      "momentum": 0.5273,
+      "low_vol": 0.5273,
+      "sentiment": 0.6818,
+      "dividend": 0.5,
+      "risk": 0.818
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.4636,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.8333,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9438,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.5455,
+      "growth:profit_ttm": 0.4,
+      "growth:roe_trend": 0.9661,
+      "momentum:20d": 0.5273,
+      "momentum:60d": 0.5182,
+      "momentum:120d": 0.5364,
+      "low_vol:20d_vol": 0.9545,
+      "low_vol:max_dd_60d": 0.1,
+      "sentiment:volume_ratio": 0.9,
+      "sentiment:turnover": 0.4636,
+      "risk:pe_excessive": 0.6452,
+      "risk:volatility": 0.9909
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "估值合理；市场情绪积极"
+  },
+  {
+    "symbol": "000001",
+    "score": 0.6091,
+    "scores": {
+      "quality": 0.5045,
+      "value": 0.7595,
+      "growth": 0.5051,
+      "momentum": 0.6697,
+      "low_vol": 0.4864,
+      "sentiment": 0.6955,
+      "dividend": 0.5,
+      "risk": 0.7523
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.5227,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.8011,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9775,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.2182,
+      "growth:profit_ttm": 0.3818,
+      "growth:roe_trend": 0.9153,
+      "momentum:20d": 0.6727,
+      "momentum:60d": 0.6545,
+      "momentum:120d": 0.6818,
+      "low_vol:20d_vol": 0.9364,
+      "low_vol:max_dd_60d": 0.0364,
+      "sentiment:volume_ratio": 0.8273,
+      "sentiment:turnover": 0.5636,
+      "risk:pe_excessive": 0.5591,
+      "risk:volatility": 0.9455
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "估值合理；市场情绪积极"
+  },
+  {
     "symbol": "300059",
     "score": 0.6068,
     "scores": {
@@ -15,6 +514,46 @@
     "stoplist_passed": true
   },
   {
+    "symbol": "600104",
+    "score": 0.6067,
+    "scores": {
+      "quality": 0.3894,
+      "value": 0.6942,
+      "growth": 0.5061,
+      "momentum": 0.2091,
+      "low_vol": 0.8545,
+      "sentiment": 0.7136,
+      "dividend": 0.5,
+      "risk": 0.9864
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.3182,
+      "quality:gross_margin": 0.1287,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.7849,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.7978,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.4364,
+      "growth:profit_ttm": 0.5818,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 0.3545,
+      "momentum:60d": 0.1182,
+      "momentum:120d": 0.1545,
+      "low_vol:20d_vol": 0.9455,
+      "low_vol:max_dd_60d": 0.7636,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.4273,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 0.9727
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "低波动防御属性；市场情绪积极"
+  },
+  {
     "symbol": "GOOGL",
     "score": 0.6027,
     "scores": {
@@ -28,5 +567,45 @@
     },
     "date_added": "2026-07-02",
     "stoplist_passed": true
+  },
+  {
+    "symbol": "601166",
+    "score": 0.6008,
+    "scores": {
+      "quality": 0.5164,
+      "value": 0.767,
+      "growth": 0.5921,
+      "momentum": 0.5273,
+      "low_vol": 0.4864,
+      "sentiment": 0.5955,
+      "dividend": 0.5,
+      "risk": 0.8214
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.5818,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.8011,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.4,
+      "growth:profit_ttm": 0.4273,
+      "growth:roe_trend": 0.9492,
+      "momentum:20d": 0.4909,
+      "momentum:60d": 0.6,
+      "momentum:120d": 0.4909,
+      "low_vol:20d_vol": 0.9182,
+      "low_vol:max_dd_60d": 0.0545,
+      "sentiment:volume_ratio": 0.5,
+      "sentiment:turnover": 0.6909,
+      "risk:pe_excessive": 0.6882,
+      "risk:volatility": 0.9545
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "估值合理"
   }
 ]

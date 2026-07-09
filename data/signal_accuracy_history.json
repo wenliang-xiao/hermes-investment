@@ -5,5 +5,183 @@
     "mse": 0,
     "total_signals": 0
   },
-  "history": []
+  "history": [
+    {
+      "date": "2026-07-09",
+      "signals": [
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "300458",
+          "name": "全志科技",
+          "price": 39.76,
+          "reason": "评分6.6+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.6
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "688343",
+          "name": "云天励飞",
+          "price": 86.06,
+          "reason": "评分6.2+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.2
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "301269",
+          "name": "华大九天",
+          "price": 117.18,
+          "reason": "评分6.1+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.1
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "300124",
+          "name": "汇川技术",
+          "price": 63.2,
+          "reason": "评分6.1+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.1
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "600887",
+          "name": "伊利股份",
+          "price": 25.22,
+          "reason": "评分6.0+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.0
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "600900",
+          "name": "长江电力",
+          "price": 27.83,
+          "reason": "槽位建仓(评分7.2)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 7.2
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "688343",
+          "name": "云天励飞",
+          "price": 86.06,
+          "reason": "槽位建仓(评分6.2)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.2
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "301269",
+          "name": "华大九天",
+          "price": 117.18,
+          "reason": "槽位建仓(评分6.1)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.1
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "300124",
+          "name": "汇川技术",
+          "price": 63.2,
+          "reason": "槽位建仓(评分6.1)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.1
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "600887",
+          "name": "伊利股份",
+          "price": 25.22,
+          "reason": "槽位建仓(评分6.0)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.0
+        },
+        {
+          "strategy": "silverquant",
+          "action": "SELL",
+          "symbol": "300458",
+          "name": "全志科技",
+          "price": 39.76,
+          "reason": "MASeller(MA死叉)",
+          "priority": "MED",
+          "size_pct": null,
+          "pnl_pct": 3.74,
+          "score": 6.6
+        },
+        {
+          "strategy": "tradingagents",
+          "action": "BUY",
+          "symbol": "600900",
+          "name": "长江电力",
+          "price": 27.83,
+          "reason": "辩论分7.2(bull优先)",
+          "priority": "HIGH",
+          "size_pct": 12.0,
+          "pnl_pct": null,
+          "score": 7.2
+        },
+        {
+          "strategy": "tradingagents",
+          "action": "BUY",
+          "symbol": "300458",
+          "name": "全志科技",
+          "price": 39.76,
+          "reason": "辩论分6.6(bull优先)",
+          "priority": "HIGH",
+          "size_pct": 12.0,
+          "pnl_pct": null,
+          "score": 6.6
+        },
+        {
+          "strategy": "tradingagents",
+          "action": "BUY",
+          "symbol": "688343",
+          "name": "云天励飞",
+          "price": 86.06,
+          "reason": "辩论分6.2(bull优先)",
+          "priority": "HIGH",
+          "size_pct": 12.0,
+          "pnl_pct": null,
+          "score": 6.2
+        }
+      ],
+      "score_results_count": 47,
+      "price_valid_count": 47,
+      "price_zero_skipped": 0
+    }
+  ],
+  "last_update": "2026-07-09"
 }

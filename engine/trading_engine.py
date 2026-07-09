@@ -173,6 +173,15 @@ class BaseStrategy:
         self.positions = state_dict.get("positions", {})
         self.history = state_dict.get("history", [])
 
+    def current_value(self):
+        """计算当前总资产 = 现金 + 持仓市值"""
+        total = self.cash
+        for pos in self.positions.values():
+            price = pos.get("current_price", pos.get("entry_price", 0))
+            qty = pos.get("quantity", 0)
+            total += price * qty
+        return total
+
     def save_state(self):
         return {
             "cash": self.cash,
