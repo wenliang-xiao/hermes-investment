@@ -33,6 +33,7 @@ from dashboard.api_dragon_tiger import router as dragon_tiger_router
 from dashboard.api_evidence import router as evidence_router
 from dashboard.api_execution import router as execution_router
 from dashboard.api_layers import router as layers_router
+from dashboard.api_chain import router as chain_router
 
 app.include_router(portfolio_router)
 app.include_router(pool_router)
@@ -45,6 +46,7 @@ app.include_router(dragon_tiger_router)
 app.include_router(evidence_router)
 app.include_router(execution_router)
 app.include_router(layers_router)
+app.include_router(chain_router)
 
 # ─── HTML 模板 ─────────────────────────────────────
 
