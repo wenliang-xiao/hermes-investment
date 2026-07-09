@@ -44,6 +44,28 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+
+/* Layer Bar */
+.layer-card { transition: all 0.15s; }
+.layer-card:hover { border-color: var(--accent); }
+.layer-l1 .badge { background: #1a3a2a; color: var(--green); }
+.layer-l2 .badge { background: #1a2a3a; color: #58a6ff; }
+.layer-l3 .badge { background: #2a1a3a; color: #bc8cff; }
+.layer-l5 .badge { background: #2a2a1a; color: #d29922; }
+.layer-l6 .badge { background: #1a1a2a; color: #79c0ff; }
+.layer-detail { display: none; }
+.layer-detail.open { display: block; }
+
+/* Execution Board */
+.signal-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+.signal-card.buy { border-left: 3px solid var(--green); }
+.signal-card.sell { border-left: 3px solid var(--red); }
+.signal-card.hold { border-left: 3px solid #d29922; }
+.signal-card.wait { border-left: 3px solid var(--text2); }
+.evidence-line { font-size: 12px; color: var(--text2); padding: 2px 0; }
+.evidence-line .label { color: var(--text1); font-weight: 600; }
+.evidence-toggle { cursor: pointer; color: var(--accent); font-size: 12px; }
+.evidence-toggle:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -59,11 +81,60 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     <a href="#" onclick="return switchTab(event,'evidence')">🔬 证据</a>
   </div>
 
+  <!-- ======== 六层横条 ======== -->
+  <div id="layer-bar" class="grid grid-cols-5 gap-2 mb-2 text-xs">
+    <div class="layer-card layer-l1 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l1')">
+      <div class="flex justify-between items-center">
+        <span class="font-semibold text-gray-300">L1 宏观</span>
+        <span id="l1-status" class="badge">-</span>
+      </div>
+      <div id="l1-content" class="text-gray-400 mt-1"></div>
+    </div>
+    <div class="layer-card layer-l2 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l2')">
+      <div class="flex justify-between items-center">
+        <span class="font-semibold text-gray-300">L2 配置</span>
+        <span id="l2-status" class="badge">-</span>
+      </div>
+      <div id="l2-content" class="text-gray-400 mt-1"></div>
+    </div>
+    <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l3')">
+      <div class="flex justify-between items-center">
+        <span class="font-semibold text-gray-300">L3-L4 选股</span>
+        <span id="l3-status" class="badge">-</span>
+      </div>
+      <div id="l3-content" class="text-gray-400 mt-1"></div>
+    </div>
+    <div class="layer-card layer-l5 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l5')">
+      <div class="flex justify-between items-center">
+        <span class="font-semibold text-gray-300">L5 风控</span>
+        <span id="l5-status" class="badge">-</span>
+      </div>
+      <div id="l5-content" class="text-gray-400 mt-1"></div>
+    </div>
+    <div class="layer-card layer-l6 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l6')">
+      <div class="flex justify-between items-center">
+        <span class="font-semibold text-gray-300">L6 纪律</span>
+        <span id="l6-status" class="badge">-</span>
+      </div>
+      <div id="l6-content" class="text-gray-400 mt-1"></div>
+    </div>
+  </div>
+
   <h1>面基 · 三源融合模拟盘</h1>
   <div class="subtitle" id="runInfo">加载中...</div>
 
   <!-- ======== 模拟盘 V2 ======== -->
   <div id="tab-dashboard" class="space-y-6">
+    <!-- ======== 执行决策区（置顶） ======== -->
+    <div id="execution-board" class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-gray-100 font-semibold">🎯 今日执行决策</h3>
+        <div id="board-data-quality" class="text-xs text-gray-400">数据质量: —</div>
+      </div>
+      <div id="board-content">
+        <div class="text-gray-400 text-sm">加载中...</div>
+      </div>
+    </div>
     <div id="v2-portfolio-overview" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
     
     <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -649,7 +720,7 @@ function switchTab(ev, tab) {
   const panel = document.getElementById('tab-'+tab);
   if (panel) panel.style.display = '';
 
-  if (tab === 'dashboard') loadDashboardV2();
+  if (tab === 'dashboard') { loadDashboardV2(); loadExecutionBoard(); }
   else if (tab === 'pool') loadPoolV2();
   else if (tab === 'etf') loadEtf();
   else if (tab === 'news') loadNews();
@@ -660,8 +731,165 @@ function switchTab(ev, tab) {
   return false;
 }
 
-window.onload = () => { loadDashboardV2(); };
-setInterval(loadDashboardV2, 120000);
+// ═══════════════════════════════════════════
+// 六层横条
+// ═══════════════════════════════════════════
+async function loadLayerBar() {
+  try {
+    const res = await fetch('/api/v2/layers/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    const layers = data.layers || {};
+    
+    // L1: 宏观
+    const l1 = layers.l1_macro || {};
+    const dg = l1.dual_gate || {};
+    document.getElementById('l1-content').textContent = 
+      `双门:${dg.macro||'?'}/${dg.trend||'?'} · ${l1.quadrant||'?'} · ${l1.trend_temp||'平'}`;
+    document.getElementById('l1-status').textContent = l1.strategy_switch === 'on' ? '🟢' : l1.strategy_switch === 'off' ? '🔴' : '🟡';
+    
+    // L2: 配置
+    const l2 = layers.l2_allocation || {};
+    const a = l2.actual || {};
+    document.getElementById('l2-content').textContent = 
+      `A股${a['A股']||'?'}% · ETF${a['ETF']||'?'}% · 债券${a['债券']||'?'}% · 黄金${a['黄金']||'?'}%`;
+    const devs = Object.entries(l2.deviations || {}).filter(([k,v]) => Math.abs(v) > 5);
+    document.getElementById('l2-status').textContent = devs.length > 0 ? `⚠️${devs.length}` : '✅';
+    
+    // L3-L4: 选股
+    const l34 = layers.l3_l4_stock_picking || {};
+    document.getElementById('l3-content').textContent = 
+      `候选${l34.total_candidates||0}只 · 链${(l34.active_chains||[]).length||'?'}条活跃`;
+    document.getElementById('l3-status').textContent = (l34.new_today||0) > 0 ? `🆕+${l34.new_today}` : `${l34.total_candidates||0}只`;
+    
+    // L5: 风控
+    const l5 = layers.l5_risk || {};
+    const l5status = l5.status || 'normal';
+    document.getElementById('l5-content').textContent = 
+      `止损${l5.triggered_stops||0}只 · 回撤${l5.max_drawdown||0}%`;
+    const statusIcon = l5status === 'critical' ? '🔴' : l5status === 'warning' ? '🟡' : '🟢';
+    document.getElementById('l5-status').textContent = `${statusIcon} ${l5status}`;
+    
+    // L6: 纪律
+    const l6 = layers.l6_discipline || {};
+    document.getElementById('l6-content').textContent = 
+      `本周${l6.weekly_trades||0}/${l6.weekly_limit||3}次`;
+    document.getElementById('l6-status').textContent = l6.over_limit ? '🔴超限' : '✅';
+  } catch(e) {
+    console.error('LayerBar error:', e);
+  }
+}
+
+function toggleLayerDetail(layer) {
+  // Future: expand detailed view for each layer
+}
+
+// ═══════════════════════════════════════════
+// 执行决策区
+// ═══════════════════════════════════════════
+async function loadExecutionBoard() {
+  const boardEl = document.getElementById('board-content');
+  const dqEl = document.getElementById('board-data-quality');
+  if (!boardEl) return;
+  boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载执行决策...</div>';
+  try {
+    const res = await fetch('/api/v2/execution/board');
+    if (!res.ok) { boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据</div>'; return; }
+    const data = await res.json();
+    if (data.status !== 'ok' || !data.board) {
+      boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据（需运行run_trading.py生成）</div>';
+      return;
+    }
+    
+    // 数据质量
+    try {
+      const dqRes = await fetch('/api/v2/evidence/data-quality');
+      const dqData = await dqRes.json();
+      if (dqEl) dqEl.textContent = `数据质量: ${dqData.grade || '?'} (${(dqData.overall_score || 0).toFixed(2)})`;
+    } catch(e) {}
+    
+    const board = data.board;
+    let html = '';
+    
+    // BUY
+    if (board.buy && board.buy.length > 0) {
+      html += '<div class="mb-3"><h4 class="text-green-400 font-medium mb-2">🟢 建议买入</h4>';
+      board.buy.forEach(s => { html += renderSignalCard(s, 'buy'); });
+      html += '</div>';
+    }
+    // SELL
+    if (board.sell && board.sell.length > 0) {
+      html += '<div class="mb-3"><h4 class="text-red-400 font-medium mb-2">🔴 建议卖出</h4>';
+      board.sell.forEach(s => { html += renderSignalCard(s, 'sell'); });
+      html += '</div>';
+    }
+    // HOLD
+    if (board.hold && board.hold.length > 0) {
+      html += '<div class="mb-3"><h4 class="text-yellow-400 font-medium mb-2">🟡 继续持有</h4>';
+      board.hold.forEach(s => { html += renderSignalCard(s, 'hold'); });
+      html += '</div>';
+    }
+    // WAIT
+    if (board.wait && board.wait.length > 0) {
+      html += '<div class="mb-3"><h4 class="text-gray-400 font-medium mb-2">◻️ 等待加仓</h4>';
+      board.wait.forEach(s => { html += renderSignalCard(s, 'wait'); });
+      html += '</div>';
+    }
+    
+    if (!html) html = '<div class="text-gray-400 text-sm">今日无待处理信号</div>';
+    boardEl.innerHTML = html;
+  } catch(e) {
+    boardEl.innerHTML = '<div class="text-gray-400 text-sm">执行决策暂不可用</div>';
+    console.error('Execution board error:', e);
+  }
+}
+
+function renderSignalCard(signal, actionClass) {
+  const e = signal.evidence || {};
+  const w = e.why_high || [];
+  const l = e.why_low || [];
+  const conf = (signal.action_confidence || 0);
+  const comp = (signal.composite || 0);
+  
+  let html = `<div class="signal-card ${actionClass}">
+    <div class="flex justify-between items-center mb-1">
+      <span><strong>${signal.symbol}</strong> <span class="text-gray-400 text-xs">${actionClass === 'buy' ? '评分' : '信号'}:${(comp).toFixed(2)}</span></span>
+      <span class="text-xs text-gray-400">置信度:${(conf*100).toFixed(0)}%</span>
+    </div>`;
+  
+  if (signal.build_checklist) {
+    const cl = signal.build_checklist;
+    const passed = Object.values(cl).filter(v => v.status === true).length;
+    const total = Object.keys(cl).length;
+    html += `<div class="evidence-line">📋 建仓检查: ${passed}/${total}</div>`;
+  }
+  if (signal.trail_stop) {
+    const ts = signal.trail_stop;
+    html += `<div class="evidence-line">🛡️ TrailStop: ${ts.status} (距止损${ts.distance_pct||'?'}%)</div>`;
+  }
+  if (w.length > 0) html += `<div class="evidence-line">📈 拉高: ${w.slice(0,2).join(' · ')}</div>`;
+  if (l.length > 0) html += `<div class="evidence-line">📉 拖低: ${l.slice(0,2).join(' · ')}</div>`;
+  
+  // Evidence chain toggle
+  html += `<div class="evidence-toggle" onclick="toggleEvidence('${signal.symbol}')">🔎 展开证据链</div>`;
+  html += `<div id="ev-${signal.symbol}" style="display:none" class="mt-2 text-xs text-gray-400 bg-gray-900 rounded p-2">`;
+  if (e.chain) {
+    e.chain.forEach(s => {
+      const icon = s.status === 'missing' ? '⬜' : s.status === 'warning' ? '⚠️' : '✅';
+      html += `<div>${icon} [${s.order}] ${s.label}: ${s.rationale}</div>`;
+    });
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+function toggleEvidence(symbol) {
+  const el = document.getElementById('ev-' + symbol);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+window.onload = () => { loadLayerBar(); loadDashboardV2(); };
+setInterval(() => { loadLayerBar(); loadDashboardV2(); }, 120000);
 
 async function loadEtf() {
   const el = document.getElementById('etfBody');

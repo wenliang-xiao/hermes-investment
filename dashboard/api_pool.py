@@ -1,17 +1,19 @@
 """票池 / 因子说明 / 深度研报 API"""
-
 import json
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from dashboard.shared import ROOT, get_name, _guess_chain, _classify_market
+from engine.evidence_builder import build_evidence_from_score
 
 router = APIRouter()
 
 
 @router.get("/api/v2/pool")
 def api_v2_pool():
-    """三层票池数据 (watch/monitor/deep) + 名称+产业链映射"""
+    """三层票池数据 (watch/monitor/deep) + 名称+产业链映射+证据包"""
     pool_dir = ROOT / "data" / "pool"
+    sig_path = ROOT / "data" / "trading_signals.json"
+    score_map = _load_score_map(sig_path)
     result = {}
     for tier in ("watch", "monitor", "deep"):
         path = pool_dir / f"{tier}.json"
@@ -21,19 +23,42 @@ def api_v2_pool():
                 items = json.loads(raw) if raw else []
         else:
             items = []
-        # 加名称和产业链
         for item in items:
             sym = item.get("symbol", "")
             item["name"] = get_name(sym)
             item["chain"] = _guess_chain(sym)
+            # 证据包
+            score_item = score_map.get(sym)
+            if score_item:
+                item["evidence"] = build_evidence_from_score(sym, score_item)
         result[tier] = items
     return result
 
 
+def _load_score_map(sig_path):
+    """加载评分数据 → {symbol: score_item}"""
+    if not sig_path.exists():
+        return {}
+    try:
+        with open(sig_path) as f:
+            data = json.load(f)
+        port = data.get("portfolios", {})
+        score_map = {}
+        for sname, sinfo in port.items():
+            scores = sinfo.get("scores", {})
+            if isinstance(scores, dict) and scores.get("composite"):
+                score_map[sname] = sinfo
+        return score_map
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+
 @router.get("/api/v2/pool/by_market")
 def api_v2_pool_by_market():
-    """票池按市场分组 — A股/港股/美股/ETF"""
+    """票池按市场分组 — A股/港股/美股/ETF + 证据包"""
     pool_dir = ROOT / "data" / "pool"
+    sig_path = ROOT / "data" / "trading_signals.json"
+    score_map = _load_score_map(sig_path)
     result = {"a_share": {"watch": [], "monitor": [], "deep": []},
               "hk": {"watch": [], "monitor": [], "deep": []},
               "us": {"watch": [], "monitor": [], "deep": []},
@@ -50,6 +75,9 @@ def api_v2_pool_by_market():
             sym = item.get("symbol", "")
             item["name"] = get_name(sym)
             item["chain"] = _guess_chain(sym)
+            score_item = score_map.get(sym)
+            if score_item:
+                item["evidence"] = build_evidence_from_score(sym, score_item)
             market = _classify_market(sym)
             if market in result:
                 result[market][tier].append(item)

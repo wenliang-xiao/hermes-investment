@@ -7,8 +7,13 @@ from dashboard.shared import (
     ROOT, get_name, load_shadow, build_summary, build_chart_data,
     build_history, _clean_signals, _aggregate_strategy_portfolios,
 )
+from engine.execution_checker import ExecutionChecker
+from engine.evidence_builder import EvidenceBuilder
 
 router = APIRouter()
+
+_checker = ExecutionChecker()
+_builder = EvidenceBuilder()
 
 
 @router.get("/api/portfolio")
@@ -242,6 +247,7 @@ def api_v2_portfolio_detail():
                 "entry_score": pos.get("entry_score"),
                 "current_score": pos.get("current_score"),
                 "factor_scores": pos.get("factor_scores"),
+                "evidence": _build_position_evidence(sym, current, qty, entry, pnl, pos, sname),
             }
         enriched_positions[sname] = pos_list
 
@@ -260,6 +266,15 @@ def api_v2_portfolio_detail():
     }
 
     return result
+
+
+def _build_position_evidence(sym, current, qty, entry, pnl, pos, strategy):
+    """为持仓构建TrailStop证据包"""
+    position_data = {"entry_price": entry, "current_price": current,
+                     "quantity": qty, "pnl": pnl, "_peak_price": pos.get("peak_price", current)}
+    check = _checker.check(sym, position=position_data)
+    packet = _builder.build(sym, position=position_data)
+    return {"trail_stop": check.get("trail_stop", {}), "evidence_packet": packet.to_dict()}
 
 
 @router.get("/api/v2/portfolio/netvalue")
