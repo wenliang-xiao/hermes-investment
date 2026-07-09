@@ -792,6 +792,14 @@ async function loadExecutionBoard() {
   const dqEl = document.getElementById('board-data-quality');
   if (!boardEl) return;
   boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载执行决策...</div>';
+  
+  // 超时兜底：8 秒还没加载完就显示降级信息
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏱️ 执行决策加载超时—数据管线可能正在刷新，请2分钟后刷新查看</div><div class="text-xs text-gray-500 mt-1">提示：执行决策需要 run_trading.py 生成评分数据</div>';
+    if (dqEl) dqEl.textContent = '数据质量: ⏳ 超时';
+  }, 8000);
   try {
     const res = await fetch('/api/v2/execution/board');
     if (!res.ok) { boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据</div>'; return; }
@@ -837,9 +845,15 @@ async function loadExecutionBoard() {
     }
     
     if (!html) html = '<div class="text-gray-400 text-sm">今日无待处理信号</div>';
-    boardEl.innerHTML = html;
+    if (!timedOut) {
+      boardEl.innerHTML = html;
+      clearTimeout(timeoutId);
+    }
   } catch(e) {
-    boardEl.innerHTML = '<div class="text-gray-400 text-sm">执行决策暂不可用</div>';
+    if (!timedOut) {
+      boardEl.innerHTML = '<div class="text-gray-400 text-sm">执行决策暂不可用</div>';
+      clearTimeout(timeoutId);
+    }
     console.error('Execution board error:', e);
   }
 }

@@ -238,7 +238,7 @@ def api_v2_portfolio_detail():
                 "pnl_pct": pnl_pct,
                 "hold_days": hold_days,
                 "entry_date": pos.get("entry_date", ""),
-                "reason": pos.get("reason", f"建仓评分{pos.get('entry_score', '?')}分"),
+                "reason": pos.get("reason", f"建仓评分{pos.get('entry_score', '?')}分") if pos.get("reason") else "无理由（需run_trading生成）",
                 "stop_loss": round(entry * 0.92, 2),
                 "pct": pct,
                 "peak_price": pos.get("peak_price", entry),
@@ -247,6 +247,7 @@ def api_v2_portfolio_detail():
                 "entry_score": pos.get("entry_score"),
                 "current_score": pos.get("current_score"),
                 "factor_scores": pos.get("factor_scores"),
+                "is_delisted": not current or current <= 0,
                 "evidence": _build_position_evidence(sym, current, qty, entry, pnl, pos, sname),
             }
         enriched_positions[sname] = pos_list

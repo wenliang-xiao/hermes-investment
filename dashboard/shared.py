@@ -132,18 +132,20 @@ def build_history(book):
     trades = []
     for h in history:
         pnl = h.get("pnl")
+        price = h.get("price", 0)
         trades.append({
             "time": h.get("time", ""),
             "symbol": h.get("symbol", ""),
             "name": h.get("name", ""),
             "action": h.get("action", ""),
-            "price": h.get("price", 0),
+            "price": price,
             "quantity": h.get("quantity", 0),
             "reason": h.get("reason", ""),
             "cost": h.get("cost", 0),
             "pnl": pnl,
             "pnl_str": f"{pnl:+.0f}" if pnl is not None else "",
             "is_win": pnl > 0 if pnl is not None else None,
+            "is_delisted": not price or price <= 0,
         })
     # Build PnL history for chart (daily PnL from history records)
     return trades[::-1]  # newest first

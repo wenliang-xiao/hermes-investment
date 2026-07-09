@@ -212,6 +212,8 @@ class BaseStrategy:
         }
         self.history.append({"date": str(date.today()), "symbol": sym,
                              "action": "买入", "price": adj_price, "cost": round(total_cost, 2),
+                             "quantity": qty,
+                             "factor_scores": getattr(signal, "factor_scores", None),
                              "reason": signal.reason,
                              "score": getattr(signal, "score", None)})
         return True
@@ -222,19 +224,30 @@ class BaseStrategy:
         if sym not in self.positions:
             return False
         if not signal.price or signal.price <= 0:
-            print(f"  ⚠️ 跳过 sell({sym}): price={signal.price} 无效", flush=True)
+            print(f"  ⚠️ 跳过 sell({sym}): price={signal.price} 无效（可能停牌/退市）", flush=True)
             return False
         pos = self.positions[sym]
+        qty = pos.get("quantity", 0)
+        if qty <= 0:
+            print(f"  ⚠️ 跳过 sell({sym}): quantity={qty} 无效", flush=True)
+            return False
         price = signal.price
-        adj_price, cost_detail = calc_adjusted_price(price, pos["quantity"], "sell", sym)
-        pnl = (adj_price - pos["entry_price"]) * pos["quantity"]
-        self.cash += adj_price * pos["quantity"]
+        adj_price, cost_detail = calc_adjusted_price(price, qty, "sell", sym)
+        pnl = (adj_price - pos["entry_price"]) * qty
+        self.cash += adj_price * qty
+        hold_days = 0
+        if pos.get("entry_date"):
+            try:
+                hold_days = (date.today() - datetime.strptime(pos["entry_date"], "%Y-%m-%d").date()).days
+            except ValueError:
+                hold_days = 0
         self.history.append({"date": str(date.today()), "symbol": sym,
                              "action": "卖出", "price": adj_price,
+                             "quantity": qty,
                              "pnl": round(pnl, 2), "reason": signal.reason,
                              "entry_price": pos["entry_price"],
                              "entry_date": pos.get("entry_date", ""),
-                             "hold_days": (date.today() - datetime.strptime(pos.get("entry_date", str(date.today())), "%Y-%m-%d").date()).days if pos.get("entry_date") else 0})
+                             "hold_days": hold_days})
         del self.positions[sym]
         return True
 

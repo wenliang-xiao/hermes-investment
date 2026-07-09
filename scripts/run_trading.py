@@ -251,7 +251,43 @@ def run():
         "signals": result
     }
     atomic_write_json(scan_out, scan_data)
-    print(f"\n💾 扫描+信号已保存: {scan_out}", flush=True)
+    print(f"💾 扫描+信号已保存: {scan_out}", flush=True)
+
+    # ── 刷新宏观缓存 ──
+    print("\n🌍 Step: 刷新宏观引擎缓存...", flush=True)
+    try:
+        from engine.macro_engine import MacroEngine
+        me = MacroEngine()
+        macro_state = me.refresh()
+        print(f"   ✅ 宏观: {macro_state.get('quadrant','?')} | 开关: {macro_state.get('strategy_switch','?')} | 趋势: {macro_state.get('trend_temp','?')}", flush=True)
+    except Exception as e:
+        print(f"   ⚠️ 宏观缓存刷新失败: {e}", flush=True)
+
+    # ── 同步评分到 pool JSON ──
+    pool_out = os.path.join(_PROJECT_DIR, "data", "pool", "deep.json")
+    if os.path.exists(pool_out):
+        try:
+            with open(pool_out) as _pf:
+                pool_items = json.load(_pf)
+            # 构建评分map
+            score_map = {r["symbol"]: r for r in score_results}
+            updated = 0
+            for item in pool_items:
+                sym = item.get("symbol", "")
+                sr = score_map.get(sym)
+                if sr:
+                    item["score"] = sr.get("composite_v4", 0)
+                    item["score_v3"] = sr.get("score", 0)
+                    item["factor_breakdown"] = sr.get("factor_breakdown", {})
+                    item["scores"] = sr.get("scores", {})
+                    item["price"] = sr.get("price", 0)
+                    updated += 1
+            atomic_write_json(pool_out, pool_items)
+            print(f"  ✅ 同步 {updated}/{len(pool_items)} 只标的评分到 pool/deep.json", flush=True)
+        except Exception as _e:
+            print(f"  ⚠️ 无法同步评分到 pool/deep.json: {_e}", flush=True)
+    else:
+        print(f"  ⚠️ pool/deep.json 不存在，跳过评分同步", flush=True)
 
     # ── ⭐ 证据链 1/5: 信号验证 — 回溯前日信号表现 ⭐ ──
     # 从 history_accuracy.json 加载历史信号验证结果

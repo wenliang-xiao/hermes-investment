@@ -47,7 +47,7 @@ class MacroEngine:
         self.last_refreshed = None
 
     def refresh(self, force=False):
-        cache_file = os.path.join(os.path.dirname(__file__), "data", "macro_engine_cache.json")
+        cache_file = os.path.join(_PROJECT_DIR, "data", "macro_engine_cache.json")
 
         if not force and self.last_refreshed:
             age = (datetime.now() - self.last_refreshed).total_seconds()
