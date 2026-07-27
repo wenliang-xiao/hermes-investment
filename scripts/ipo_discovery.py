@@ -250,5 +250,49 @@ def run():
     }
 
 
+# ── 蜻蜓CSC IPO增强 ─────────────────────────────
+
+def enrich_ipo_batch(ipo_list: list[dict]) -> list[dict]:
+    """用蜻蜓CSC丰富IPO信息: 行业/PE排名/ROE排名"""
+    try:
+        from data.sources.qingting_source import QTSource
+        qt = QTSource()
+        if not qt.api_key:
+            return ipo_list
+    except Exception:
+        return ipo_list
+    for ipo in ipo_list:
+        code = ipo.get("code", "")
+        if not code or code.endswith(".HK"):
+            continue
+        clean = code.replace(".SH", "").replace(".SZ", "").zfill(6)
+        try:
+            prof = qt.get_company_profile(clean)
+            if prof:
+                ipo["industry"] = prof.get("industryName", "")
+        except Exception:
+            pass
+        try:
+            rank = qt.get_industry_rank(clean, metric="pe")
+            if rank:
+                ipo["pe_rank"] = rank.get("industryRank", "")
+                ipo["pe_avg"] = rank.get("industryAvg")
+        except Exception:
+            pass
+        try:
+            rank_roe = qt.get_industry_rank(clean, metric="jzcsyl")
+            if rank_roe:
+                ipo["roe_rank"] = rank_roe.get("industryRank", "")
+        except Exception:
+            pass
+    return ipo_list
+
+
 if __name__ == "__main__":
-    run()
+    result = run()
+    # 增强IPO信息
+    if result and result.get("discoveries"):
+        enriched = enrich_ipo_batch(result["discoveries"])
+        for d in enriched[:5]:
+            print(f"  [增强] {d.get('code','')} {d.get('name','')} "
+                  f"行业={d.get('industry','?')} PE排名={d.get('pe_rank','?')}")
