@@ -265,29 +265,31 @@ def run():
 
     # ── 同步评分到 pool JSON ──
     pool_out = os.path.join(_PROJECT_DIR, "data", "pool", "deep.json")
-    if os.path.exists(pool_out):
-        try:
-            with open(pool_out) as _pf:
-                pool_items = json.load(_pf)
-            # 构建评分map
-            score_map = {r["symbol"]: r for r in score_results}
-            updated = 0
-            for item in pool_items:
-                sym = item.get("symbol", "")
-                sr = score_map.get(sym)
-                if sr:
-                    item["score"] = sr.get("composite_v4", 0)
-                    item["score_v3"] = sr.get("score", 0)
-                    item["factor_breakdown"] = sr.get("factor_breakdown", {})
-                    item["scores"] = sr.get("scores", {})
-                    item["price"] = sr.get("price", 0)
-                    updated += 1
-            atomic_write_json(pool_out, pool_items)
-            print(f"  ✅ 同步 {updated}/{len(pool_items)} 只标的评分到 pool/deep.json", flush=True)
-        except Exception as _e:
-            print(f"  ⚠️ 无法同步评分到 pool/deep.json: {_e}", flush=True)
-    else:
-        print(f"  ⚠️ pool/deep.json 不存在，跳过评分同步", flush=True)
+    pool_dirs_to_sync = ["deep.json", "watch.json", "monitor.json"]
+    for _pfname in pool_dirs_to_sync:
+        _pool_path = os.path.join(_PROJECT_DIR, "data", "pool", _pfname)
+        if os.path.exists(_pool_path):
+            try:
+                with open(_pool_path) as _pf:
+                    pool_items = json.load(_pf)
+                score_map = {r["symbol"]: r for r in score_results}
+                updated = 0
+                for item in pool_items:
+                    sym = item.get("symbol", "")
+                    sr = score_map.get(sym)
+                    if sr:
+                        item["score"] = sr.get("composite_v4", 0)
+                        item["score_v3"] = sr.get("score", 0)
+                        item["factor_breakdown"] = sr.get("factor_breakdown", {})
+                        item["scores"] = sr.get("scores", {})
+                        item["price"] = sr.get("price", 0)
+                        if not item.get("name"):
+                            item["name"] = sr.get("name", sym)
+                        updated += 1
+                atomic_write_json(_pool_path, pool_items)
+                print(f"  ✅ 同步 {updated}/{len(pool_items)} 只标的评分到 pool/{_pfname}", flush=True)
+            except Exception as _e:
+                print(f"  ⚠️ 无法同步 pool/{_pfname}: {_e}", flush=True)
 
     # ── ⭐ 证据链 1/5: 信号验证 — 回溯前日信号表现 ⭐ ──
     # 从 history_accuracy.json 加载历史信号验证结果

@@ -25,7 +25,32 @@ import sys, os, json, time, urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_INVESTMENT_ROOT = str(Path(__file__).parent.parent)
+sys.path.insert(0, _INVESTMENT_ROOT)
+
+# ── Bootstrap: manually register investment_system package ──
+# The Hermes editable finder interferes with standard package resolution.
+# We register the package + subpackages explicitly so all downstream
+# 'from investment_system.xxx import yyy' work without changes.
+import importlib, importlib.util as _iu
+_IS_SPEC = _iu.spec_from_file_location('investment_system',
+    os.path.join(_INVESTMENT_ROOT, '__init__.py'),
+    submodule_search_locations=[_INVESTMENT_ROOT])
+_IS_MOD = importlib.util.module_from_spec(_IS_SPEC)
+sys.modules['investment_system'] = _IS_MOD
+_IS_SPEC.loader.exec_module(_IS_MOD)
+# Subpackage auto-discovery
+for _dir in os.listdir(_INVESTMENT_ROOT):
+    _pkg_init = os.path.join(_INVESTMENT_ROOT, _dir, '__init__.py')
+    if os.path.isfile(_pkg_init):
+        _mod_name = f'investment_system.{_dir}'
+        if _mod_name not in sys.modules:
+            _spec = _iu.spec_from_file_location(_mod_name, _pkg_init, submodule_search_locations=[os.path.join(_INVESTMENT_ROOT, _dir)])
+            if _spec:
+                _mod = importlib.util.module_from_spec(_spec)
+                sys.modules[_mod_name] = _mod
+                _spec.loader.exec_module(_mod)
+
 from investment_system import config as cfg
 from investment_system.data.data_layer import (
     get_stock_daily, get_financial_report, get_macro_data,

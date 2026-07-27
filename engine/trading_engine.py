@@ -27,8 +27,8 @@ print = functools.partial(print, flush=True)
 # ═══════════════════════════════════════════
 # 交易纪律常量
 # ═══════════════════════════════════════════
-MAX_TRADES_PER_WEEK_PER_STRATEGY = 1
-MAX_TRADES_PER_WEEK_TOTAL = 3
+MAX_TRADES_PER_WEEK_PER_STRATEGY = 3
+MAX_TRADES_PER_WEEK_TOTAL = 5
 TRADE_COOLDOWN_DAYS = 1  # 同一标的买卖后冷却天数
 
 # ═══════════════════════════════════════════
@@ -120,10 +120,14 @@ class TradeCalendar:
     def record_trade(self, strategy_name, signal_dict):
         """记录已执行的交易"""
         wk = self.week_key()
-        if wk not in self.log["week_count"]:
-            self.log["week_count"][wk] = {}
-        self.log["week_count"][wk][strategy_name] = \
-            self.log["week_count"][wk].get(strategy_name, 0) + 1
+        action = signal_dict.get("action", "")
+
+        # SELL 不占用周频 BUY 预算（止损/止盈不计入次数限制）
+        if action != "SELL":
+            if wk not in self.log["week_count"]:
+                self.log["week_count"][wk] = {}
+            self.log["week_count"][wk][strategy_name] = \
+                self.log["week_count"][wk].get(strategy_name, 0) + 1
 
         # 冷却
         sym = signal_dict.get("symbol", "")

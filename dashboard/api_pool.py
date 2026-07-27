@@ -26,7 +26,7 @@ def api_v2_pool():
         for item in items:
             sym = item.get("symbol", "")
             item["name"] = get_name(sym)
-            item["chain"] = _guess_chain(sym)
+            item["chain"] = _guess_chain(sym, score_map)
             # 证据包
             score_item = score_map.get(sym)
             if score_item:
@@ -36,18 +36,22 @@ def api_v2_pool():
 
 
 def _load_score_map(sig_path):
-    """加载评分数据 → {symbol: score_item}"""
-    if not sig_path.exists():
+    """加载评分数据 → {symbol: score_item}
+    
+    从 scan_snapshot_latest.json.results 读取个股评分数据
+    （trading_signals.json.portfolios 存的是组合摘要，不包含评分）"""
+    scan_path = ROOT / "data" / "scan_snapshot_latest.json"
+    if not scan_path.exists():
         return {}
     try:
-        with open(sig_path) as f:
+        with open(scan_path) as f:
             data = json.load(f)
-        port = data.get("portfolios", {})
+        results = data.get("results", [])
         score_map = {}
-        for sname, sinfo in port.items():
-            scores = sinfo.get("scores", {})
-            if isinstance(scores, dict) and scores.get("composite"):
-                score_map[sname] = sinfo
+        for r in results:
+            sym = r.get("symbol", "")
+            if sym:
+                score_map[sym] = r
         return score_map
     except (json.JSONDecodeError, KeyError):
         return {}
@@ -74,7 +78,7 @@ def api_v2_pool_by_market():
         for item in items:
             sym = item.get("symbol", "")
             item["name"] = get_name(sym)
-            item["chain"] = _guess_chain(sym)
+            item["chain"] = _guess_chain(sym, score_map)
             score_item = score_map.get(sym)
             if score_item:
                 item["evidence"] = build_evidence_from_score(sym, score_item)

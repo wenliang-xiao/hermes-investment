@@ -35,11 +35,25 @@ _CHAIN_NAMES = {
     "GEV": "AI算力-电力", "0700.HK": "互联网-平台", "9988.HK": "互联网-平台",
     "BABA": "互联网-平台", "MSFT": "AI算力-软件", "META": "互联网-社交",
     "AAPL": "消费电子-手机", "AMZN": "互联网-电商",
+    # 长鑫存储/HBM链
+    "688825": "存储/HBM链", "603986": "存储/HBM链",
+    "300672": "存储/HBM链", "002049": "存储/HBM链",
+    "688525": "存储/HBM链",
 }
 
 
-def _guess_chain(symbol):
-    return _CHAIN_NAMES.get(symbol, "其他")
+def _guess_chain(symbol, score_map=None):
+    """从多种数据源推断产业链"""
+    # 1) 先从评分数据取（scan_snapshot_latest.json 动态数据）
+    if score_map and symbol in score_map:
+        chain = score_map[symbol].get("chain")
+        if chain and chain != "其他":
+            return chain
+    # 2) 回退到硬编码映射
+    chain = _CHAIN_NAMES.get(symbol)
+    if chain:
+        return chain
+    return "其他"
 
 
 def _classify_market(symbol):

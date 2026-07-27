@@ -1,31 +1,5 @@
 [
   {
-    "symbol": "300502",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "AI算力-光模块",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: AI算力-光模块领域, 中国在光模块制造全球领先，800G→1.6T迭代由中际旭创(全球市占20%+)/新易盛主导，海外CSP大客户已认证量产"
-  },
-  {
-    "symbol": "601012",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "新能源-光伏",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
-  },
-  {
     "symbol": "688599",
     "score": 0.855,
     "scores": {
@@ -36,7 +10,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高",
+    "name": "天合光能"
   },
   {
     "symbol": "300274",
@@ -49,20 +24,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高"
-  },
-  {
-    "symbol": "300750",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "新能源-动力电池",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料"
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高",
+    "name": "阳光电源"
   },
   {
     "symbol": "300014",
@@ -75,7 +38,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料"
+    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料",
+    "name": "亿纬锂能"
   },
   {
     "symbol": "002594",
@@ -88,7 +52,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势",
+    "name": "比亚迪"
   },
   {
     "symbol": "1211.HK",
@@ -101,7 +66,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势",
+    "name": "比亚迪HK"
   },
   {
     "symbol": "1810.HK",
@@ -114,7 +80,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势",
+    "name": "小米集团"
   },
   {
     "symbol": "9868.HK",
@@ -127,7 +94,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势"
+    "reason": "脱钩比较优势: 新能源-整车领域, 中国新能源车产量占全球60%+，比亚迪超越Tesla成全球最大；小米/蔚来/小鹏形成完整产品矩阵；三电+智驾+成本三重优势",
+    "name": "小鹏汽车"
   },
   {
     "symbol": "0700.HK",
@@ -140,7 +108,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta",
+    "name": "腾讯控股"
   },
   {
     "symbol": "9988.HK",
@@ -153,7 +122,8 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta",
+    "name": "阿里巴巴"
   },
   {
     "symbol": "3690.HK",
@@ -166,153 +136,24 @@
     "factor_breakdown": {},
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta"
-  },
-  {
-    "symbol": "603259",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "医药-CXO",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包"
-  },
-  {
-    "symbol": "300760",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "医药-CXO",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包"
+    "reason": "脱钩比较优势: 互联网-平台领域, 中国市场已形成微信/淘宝/美团超级App生态，MAU>10亿；美国平台因数据主权无法进入中国；腾讯PE处于历史低位vs Meta",
+    "name": "美团"
   },
   {
     "symbol": "600900",
-    "score": 0.855,
+    "score": 0.6875,
     "scores": {
-      "decoupling_domain": "电力-AI基建",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
-  },
-  {
-    "symbol": "601985",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "电力-AI基建",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
-  },
-  {
-    "symbol": "601877",
-    "score": 0.855,
-    "scores": {
-      "decoupling_domain": "电力-AI基建",
-      "decoupling_role": "china_leaders",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价"
-  },
-  {
-    "symbol": "688256",
-    "score": 0.72,
-    "scores": {
-      "decoupling_domain": "AI算力-GPU",
-      "decoupling_role": "china_potential",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代"
-  },
-  {
-    "symbol": "002371",
-    "score": 0.72,
-    "scores": {
-      "decoupling_domain": "半导体-设备",
-      "decoupling_role": "china_potential",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
-  },
-  {
-    "symbol": "688012",
-    "score": 0.72,
-    "scores": {
-      "decoupling_domain": "半导体-设备",
-      "decoupling_role": "china_potential",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
-  },
-  {
-    "symbol": "688120",
-    "score": 0.72,
-    "scores": {
-      "decoupling_domain": "半导体-设备",
-      "decoupling_role": "china_potential",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快"
-  },
-  {
-    "symbol": "688041",
-    "score": 0.72,
-    "scores": {
-      "decoupling_domain": "AI算力-GPU",
-      "decoupling_role": "china_potential",
-      "decoupling_confidence": "high"
-    },
-    "factor_breakdown": {},
-    "date_added": "2026-07-09",
-    "stoplist_passed": true,
-    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代"
-  },
-  {
-    "symbol": "688088",
-    "score": 0.6708,
-    "scores": {
-      "quality": 0.7,
+      "quality": 0.5,
       "value": 0.8333,
-      "growth": 0.8333,
-      "momentum": 0.0,
+      "growth": 0.3333,
+      "momentum": 0.3333,
       "low_vol": 1.0,
-      "sentiment": 0.5,
+      "sentiment": 1.0,
       "dividend": 0.5,
       "risk": 1.0
     },
     "factor_breakdown": {
-      "quality:roe": 1.0,
+      "quality:roe": 0.0,
       "quality:gross_margin": 1.0,
       "quality:debt_ratio": 0.5,
       "quality:ocf_per_share": 0.5,
@@ -321,22 +162,66 @@
       "value:pb": 0.5,
       "value:pe_ttm": 1.0,
       "dividend:yield": 0.5,
-      "growth:rev_ttm": 1.0,
+      "growth:rev_ttm": 0.0,
       "growth:profit_ttm": 1.0,
-      "growth:roe_trend": 0.5,
+      "growth:roe_trend": 0.0,
       "momentum:20d": 0.0,
-      "momentum:60d": 0.0,
+      "momentum:60d": 1.0,
       "momentum:120d": 0.0,
       "low_vol:20d_vol": 1.0,
       "low_vol:max_dd_60d": 1.0,
       "sentiment:volume_ratio": 1.0,
-      "sentiment:turnover": 0.0,
+      "sentiment:turnover": 1.0,
       "risk:pe_excessive": 1.0,
       "risk:volatility": 1.0
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "视觉AI SDK，手机+汽车+机器人三大感知场景。低波动防御属性；估值合理"
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价",
+    "score_v3": 7.19,
+    "price": 28.9,
+    "name": "长江电力"
+  },
+  {
+    "symbol": "AAPL",
+    "score": 0.6437,
+    "scores": {
+      "quality": 0.4,
+      "value": 0.3333,
+      "growth": 0.8333,
+      "momentum": 1.0,
+      "low_vol": 0.3333,
+      "sentiment": 1.0,
+      "dividend": 0.5,
+      "risk": 0.75
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 1.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.6667,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-15",
+    "stoplist_passed": true,
+    "reason": "市场情绪积极",
+    "name": "苹果"
   },
   {
     "symbol": "601398",
@@ -376,7 +261,49 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "市场情绪积极；估值合理"
+    "reason": "市场情绪积极；估值合理",
+    "name": "工商银行"
+  },
+  {
+    "symbol": "SPY",
+    "score": 0.6254,
+    "scores": {
+      "quality": 0.4842,
+      "value": 0.4242,
+      "growth": 0.693,
+      "momentum": 0.7879,
+      "low_vol": 0.5,
+      "sentiment": 0.8636,
+      "dividend": 0.5,
+      "risk": 0.75
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.4211,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.2727,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.8947,
+      "growth:profit_ttm": 0.6842,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 0.6364,
+      "momentum:60d": 0.8182,
+      "momentum:120d": 0.9091,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.7273,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-20",
+    "stoplist_passed": true,
+    "reason": "市场情绪积极；近期动量强劲",
+    "name": "SPY"
   },
   {
     "symbol": "002142",
@@ -416,7 +343,8 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "近期动量强劲；市场情绪积极"
+    "reason": "近期动量强劲；市场情绪积极",
+    "name": "宁波银行"
   },
   {
     "symbol": "600016",
@@ -456,7 +384,8 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "估值合理；市场情绪积极"
+    "reason": "估值合理；市场情绪积极",
+    "name": "民生银行"
   },
   {
     "symbol": "000001",
@@ -496,7 +425,90 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "估值合理；市场情绪积极"
+    "reason": "估值合理；市场情绪积极",
+    "name": "平安银行"
+  },
+  {
+    "symbol": "000333",
+    "score": 0.6083,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.8333,
+      "growth": 0.3333,
+      "momentum": 1.0,
+      "low_vol": 0.0,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 1.0
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-17",
+    "stoplist_passed": true,
+    "reason": "市场情绪积极；近期动量强劲",
+    "name": "美的集团"
+  },
+  {
+    "symbol": "FXI",
+    "score": 0.6075,
+    "scores": {
+      "quality": 0.5895,
+      "value": 0.6364,
+      "growth": 0.4298,
+      "momentum": 0.5455,
+      "low_vol": 0.5909,
+      "sentiment": 0.8636,
+      "dividend": 0.5,
+      "risk": 0.7045
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.9474,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9091,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.3158,
+      "growth:profit_ttm": 0.4737,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 0.5455,
+      "momentum:60d": 0.5455,
+      "momentum:120d": 0.5455,
+      "low_vol:20d_vol": 0.9091,
+      "low_vol:max_dd_60d": 0.2727,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.7273,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 0.9091
+    },
+    "date_added": "2026-07-20",
+    "stoplist_passed": true,
+    "reason": "市场情绪积极",
+    "name": "FXI"
   },
   {
     "symbol": "300059",
@@ -511,7 +523,8 @@
       "risk": 0.613
     },
     "date_added": "2026-07-02",
-    "stoplist_passed": true
+    "stoplist_passed": true,
+    "name": "东方财富"
   },
   {
     "symbol": "600104",
@@ -551,7 +564,8 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "低波动防御属性；市场情绪积极"
+    "reason": "低波动防御属性；市场情绪积极",
+    "name": "上汽集团"
   },
   {
     "symbol": "GOOGL",
@@ -566,7 +580,49 @@
       "risk": 0.6833
     },
     "date_added": "2026-07-02",
-    "stoplist_passed": true
+    "stoplist_passed": true,
+    "name": "谷歌"
+  },
+  {
+    "symbol": "GEV",
+    "score": 0.6021,
+    "scores": {
+      "quality": 0.4,
+      "value": 0.3333,
+      "growth": 0.8333,
+      "momentum": 1.0,
+      "low_vol": 0.5,
+      "sentiment": 1.0,
+      "dividend": 0.5,
+      "risk": 0.25
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 1.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-15",
+    "stoplist_passed": true,
+    "reason": "燃气轮机+电网，AI数据中心电力需求直接受益。近期动量强劲；市场情绪积极；成长性突出",
+    "name": "GE Vernova"
   },
   {
     "symbol": "601166",
@@ -606,6 +662,609 @@
     },
     "date_added": "2026-07-09",
     "stoplist_passed": true,
-    "reason": "估值合理"
+    "reason": "估值合理",
+    "name": "兴业银行"
+  },
+  {
+    "symbol": "688088",
+    "score": 0.5521,
+    "scores": {
+      "quality": 0.6067,
+      "value": 0.8,
+      "growth": 0.5333,
+      "momentum": 0.0222,
+      "low_vol": 0.8667,
+      "sentiment": 0.1333,
+      "dividend": 0.5,
+      "risk": 0.9545
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.6667,
+      "quality:gross_margin": 0.8667,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.9,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.3333,
+      "growth:profit_ttm": 0.6667,
+      "growth:roe_trend": 0.6,
+      "momentum:20d": 0.0667,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 0.7333,
+      "sentiment:volume_ratio": 0.1333,
+      "sentiment:turnover": 0.1333,
+      "risk:pe_excessive": 0.9091,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "视觉AI SDK，手机+汽车+机器人三大感知场景。低波动防御属性；估值合理",
+    "score_v3": 5.97,
+    "price": 30.05,
+    "name": "虹软科技"
+  },
+  {
+    "symbol": "300308",
+    "score": 0.55,
+    "scores": {
+      "quality": 0.4,
+      "value": 0.5,
+      "growth": 0.1667,
+      "momentum": 0.3333,
+      "low_vol": 1.0,
+      "sentiment": 0.75,
+      "dividend": 0.5,
+      "risk": 0.75
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.5,
+      "quality:gross_margin": 0.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.5,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 0.5,
+      "momentum:20d": 0.0,
+      "momentum:60d": 0.5,
+      "momentum:120d": 0.5,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 0.5,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-14",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-光模块领域, 中国在光模块制造全球领先，800G→1.6T迭代由中际旭创(全球市占20%+)/新易盛主导，海外CSP大客户已认证量产",
+    "score_v3": 5.95,
+    "price": 1046.51,
+    "name": "中际旭创"
+  },
+  {
+    "symbol": "688041",
+    "score": 0.5458,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.3889,
+      "growth": 0.7778,
+      "momentum": 0.0,
+      "low_vol": 0.6667,
+      "sentiment": 0.6667,
+      "dividend": 0.5,
+      "risk": 0.6667
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.6667,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.3333,
+      "momentum:20d": 0.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 0.3333,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 0.3333,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 0.3333
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代",
+    "score_v3": 5.91,
+    "price": 314.28,
+    "name": "海光信息"
+  },
+  {
+    "symbol": "688012",
+    "score": 0.5444,
+    "scores": {
+      "quality": 0.3,
+      "value": 0.3889,
+      "growth": 0.4444,
+      "momentum": 0.8889,
+      "low_vol": 0.5,
+      "sentiment": 0.6667,
+      "dividend": 0.5,
+      "risk": 0.6667
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 0.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.3333,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.3333,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.3333,
+      "growth:profit_ttm": 0.3333,
+      "growth:roe_trend": 0.6667,
+      "momentum:20d": 1.0,
+      "momentum:60d": 0.6667,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.6667,
+      "low_vol:max_dd_60d": 0.3333,
+      "sentiment:volume_ratio": 0.6667,
+      "sentiment:turnover": 0.6667,
+      "risk:pe_excessive": 0.6667,
+      "risk:volatility": 0.6667
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快",
+    "score_v3": 5.9,
+    "price": 388.5,
+    "name": "中微公司"
+  },
+  {
+    "symbol": "603259",
+    "score": 0.5375,
+    "scores": {
+      "quality": 0.3,
+      "value": 0.5,
+      "growth": 1.0,
+      "momentum": 1.0,
+      "low_vol": 0.0,
+      "sentiment": 1.0,
+      "dividend": 0.5,
+      "risk": 0.0
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 0.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.0,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包",
+    "score_v3": 5.84,
+    "price": 125.0,
+    "name": "药明康德"
+  },
+  {
+    "symbol": "300750",
+    "score": 0.5354,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.5,
+      "growth": 0.6667,
+      "momentum": 0.6667,
+      "low_vol": 0.5,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 0.25
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.5,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 0.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 1.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-动力电池领域, 宁德时代全球市占37%+比亚迪17%，合计超50%；正极/负极/电解液/隔膜全链自控；LG/松下依赖中国材料",
+    "score_v3": 5.82,
+    "price": 383.01,
+    "name": "宁德时代"
+  },
+  {
+    "symbol": "300502",
+    "score": 0.4813,
+    "scores": {
+      "quality": 0.6,
+      "value": 0.5,
+      "growth": 0.5,
+      "momentum": 0.5,
+      "low_vol": 0.25,
+      "sentiment": 0.75,
+      "dividend": 0.5,
+      "risk": 0.25
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 0.5,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.5,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.0,
+      "momentum:20d": 0.5,
+      "momentum:60d": 0.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 0.5,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.5,
+      "risk:pe_excessive": 0.0,
+      "risk:volatility": 0.5
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-光模块领域, 中国在光模块制造全球领先，800G→1.6T迭代由中际旭创(全球市占20%+)/新易盛主导，海外CSP大客户已认证量产",
+    "score_v3": 5.33,
+    "price": 476.02,
+    "name": "新易盛"
+  },
+  {
+    "symbol": "688120",
+    "score": 0.4792,
+    "scores": {
+      "quality": 0.5,
+      "value": 0.8333,
+      "growth": 0.3333,
+      "momentum": 0.6667,
+      "low_vol": 0.3333,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 0.1667
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.3333,
+      "quality:gross_margin": 0.6667,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 0.3333,
+      "momentum:60d": 1.0,
+      "momentum:120d": 0.6667,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 0.6667,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 0.3333,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快",
+    "score_v3": 5.31,
+    "price": 263.9,
+    "name": "华海清科"
+  },
+  {
+    "symbol": "688256",
+    "score": 0.4688,
+    "scores": {
+      "quality": 0.5,
+      "value": 0.5,
+      "growth": 0.8333,
+      "momentum": 0.6667,
+      "low_vol": 0.25,
+      "sentiment": 0.0,
+      "dividend": 0.5,
+      "risk": 0.5
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 0.5,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 1.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 0.5,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: AI算力-GPU领域, CUDA生态+台积电2nm垄断使NVDA形成双护城河；中国GPU受制于先进制程封锁，寒武纪/海光仅能在推理侧和信创场景替代",
+    "score_v3": 5.22,
+    "price": 1225.0,
+    "name": "寒武纪"
+  },
+  {
+    "symbol": "601012",
+    "score": 0.4646,
+    "scores": {
+      "quality": 0.3,
+      "value": 0.5,
+      "growth": 0.3333,
+      "momentum": 0.3333,
+      "low_vol": 0.5,
+      "sentiment": 0.5,
+      "dividend": 0.5,
+      "risk": 0.75
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.0,
+      "quality:gross_margin": 0.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.5,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.5,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 0.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 1.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 0.5,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 新能源-光伏领域, 中国垄断光伏产业链70-95%各环节产能，硅料/硅片/电池/组件全链领先；美国First Solar薄膜路线差异化但成本高",
+    "score_v3": 5.18,
+    "price": 12.42,
+    "name": "隆基绿能"
+  },
+  {
+    "symbol": "300760",
+    "score": 0.4625,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.5,
+      "growth": 0.0,
+      "momentum": 0.0,
+      "low_vol": 1.0,
+      "sentiment": 0.0,
+      "dividend": 0.5,
+      "risk": 1.0
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 1.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 0.0,
+      "momentum:20d": 0.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 1.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 1.0,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 医药-CXO领域, 中国CXO(药明康德/康龙化成)占据全球临床前CRO 30%+份额，工程师红利+成本优势不可替代；美国Biotech高度依赖中国外包",
+    "score_v3": 5.16,
+    "price": 146.38,
+    "name": "迈瑞医疗"
+  },
+  {
+    "symbol": "601877",
+    "score": 0.4625,
+    "scores": {
+      "quality": 0.7,
+      "value": 0.5,
+      "growth": 0.6667,
+      "momentum": 0.3333,
+      "low_vol": 0.5,
+      "sentiment": 0.0,
+      "dividend": 0.5,
+      "risk": 0.5
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 1.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 1.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.0,
+      "growth:profit_ttm": 1.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 0.0,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 0.0,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价",
+    "score_v3": 5.16,
+    "price": 24.45,
+    "name": "正泰电器"
+  },
+  {
+    "symbol": "002371",
+    "score": 0.4305,
+    "scores": {
+      "quality": 0.5,
+      "value": 0.3889,
+      "growth": 0.4444,
+      "momentum": 0.4444,
+      "low_vol": 0.5,
+      "sentiment": 0.1667,
+      "dividend": 0.5,
+      "risk": 0.5
+    },
+    "factor_breakdown": {
+      "quality:roe": 0.6667,
+      "quality:gross_margin": 0.3333,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.6667,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 0.6667,
+      "growth:profit_ttm": 0.6667,
+      "growth:roe_trend": 0.0,
+      "momentum:20d": 0.6667,
+      "momentum:60d": 0.3333,
+      "momentum:120d": 0.3333,
+      "low_vol:20d_vol": 1.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 0.3333,
+      "risk:pe_excessive": 0.0,
+      "risk:volatility": 1.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 半导体-设备领域, AMAT/Lam/KLA/TEL四巨头垄断全球半导体设备70%+份额；中国北方华创/中微在刻蚀/薄膜沉积已突破28nm，14nm验证中，国产化率从5%→20%快",
+    "score_v3": 4.87,
+    "price": 757.0,
+    "name": "北方华创"
+  },
+  {
+    "symbol": "601985",
+    "score": 0.3125,
+    "scores": {
+      "quality": 0.5,
+      "value": 0.1667,
+      "growth": 0.6667,
+      "momentum": 0.6667,
+      "low_vol": 0.0,
+      "sentiment": 0.0,
+      "dividend": 0.5,
+      "risk": 0.0
+    },
+    "factor_breakdown": {
+      "quality:roe": 1.0,
+      "quality:gross_margin": 0.0,
+      "quality:debt_ratio": 0.5,
+      "quality:ocf_per_share": 0.5,
+      "quality:net_margin": 0.5,
+      "value:pe_percentile": 0.0,
+      "value:pb": 0.5,
+      "value:pe_ttm": 0.0,
+      "dividend:yield": 0.5,
+      "growth:rev_ttm": 1.0,
+      "growth:profit_ttm": 0.0,
+      "growth:roe_trend": 1.0,
+      "momentum:20d": 1.0,
+      "momentum:60d": 0.0,
+      "momentum:120d": 1.0,
+      "low_vol:20d_vol": 0.0,
+      "low_vol:max_dd_60d": 0.0,
+      "sentiment:volume_ratio": 0.0,
+      "sentiment:turnover": 0.0,
+      "risk:pe_excessive": 0.0,
+      "risk:volatility": 0.0
+    },
+    "date_added": "2026-07-09",
+    "stoplist_passed": true,
+    "reason": "脱钩比较优势: 电力-AI基建领域, 中国在特高压/核电/水电建设能力全球第一(国家电网主导)；AI数据中心对电力的爆发需求使电力股从防御型→成长型重估；长江电力作为水电龙头享受确定性溢价",
+    "score_v3": 3.81,
+    "price": 8.9,
+    "name": "中国核电"
   }
 ]

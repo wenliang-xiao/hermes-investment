@@ -896,11 +896,13 @@ class FactorEngine:
 
             results.append({
                 "symbol": sym,
+                "name": sym,
                 "date": date.today().isoformat(),
                 "scores": sym_style,
                 "composite": round(composite, 4),
                 "weights_used": {f: round(w, 4) for f, w in weights.items()},
                 "factor_breakdown": sym_sub,
+                "chain": chain_map.get(sym, "其他"),
                 "macro_state": macro_state,
                 "data_quality": dq,
             })
@@ -965,8 +967,25 @@ class PoolManager:
         """
         today = date.today().isoformat()
 
+        # 名字解析
+        def _get_name(sym):
+            try:
+                from data.stock_names import get_name as _gn
+                n = _gn(sym)
+                if n and n != sym:
+                    return n
+            except: pass
+            try:
+                from config import WATCHLIST as _wl
+                info = _wl.get(sym, {})
+                if isinstance(info, dict) and info.get("name"):
+                    return info["name"]
+            except: pass
+            return sym
+
         watch = [{
             "symbol": r["symbol"],
+            "name": _get_name(r["symbol"]),
             "score": r["composite"],
             "scores": r["scores"],
             "factor_breakdown": r.get("factor_breakdown", {}),

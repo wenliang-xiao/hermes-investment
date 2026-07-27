@@ -46,6 +46,7 @@ def main():
             "symbol": sym,
             "composite": r["composite"],
             "scores": r.get("scores", {}),
+            "factor_breakdown": r.get("factor_breakdown", {}),
             "macro_state": r.get("macro_state", "扩张期"),
         })
 
