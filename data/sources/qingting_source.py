@@ -218,6 +218,76 @@ class QTSource:
             return self._profile_cache[stock_code]
         return {}
 
+    def get_company_profile_batch(self, symbols: list[str]) -> dict[str, dict]:
+        """批量获取公司资料（带限频保护）"""
+        results = {}
+        for i, sym in enumerate(symbols):
+            if i > 0:
+                time.sleep(0.3)
+            prof = self.get_company_profile(sym)
+            if prof:
+                results[sym] = prof
+        return results
+
+    def get_industry_ranks_for_symbols(self, symbols: list[str],
+                                        metric: str = "jzcsyl") -> dict[str, dict]:
+        """
+        批量获取行业排名 — 按行业分组，避免重复API调用。
+        先获取公司资料确定各标的行业，再每行业调用一次 industryRank 提取所有标的排名。
+        返回 {symbol: {industryName, rank, total, value, industryAvg, normalized}}
+        """
+        # 1. 获取所有标的的行业
+        sym_industries: dict[str, str] = {}
+        for sym in symbols:
+            sym_clean = sym.replace(".SH", "").replace(".SZ", "").zfill(6)
+            prof = self.get_company_profile(sym_clean)
+            if prof and prof.get("industryName"):
+                sym_industries[sym] = prof["industryName"]
+
+        # 2. 按行业分组
+        industry_groups: dict[str, list[str]] = {}
+        for sym, ind in sym_industries.items():
+            if ind not in industry_groups:
+                industry_groups[ind] = []
+            industry_groups[ind].append(sym)
+
+        # 3. 每行业调用一次，提取所有同行业标的排名
+        results: dict[str, dict] = {}
+        for ind, syms_in_ind in industry_groups.items():
+            first_sym = syms_in_ind[0].replace(".SH", "").replace(".SZ", "").zfill(6)
+            rank_data = self.get_industry_rank(first_sym, metric=metric)
+            if not rank_data:
+                continue
+            industry_list = rank_data.get("industryList", [])
+            for sym in syms_in_ind:
+                sym_clean = sym.replace(".SH", "").replace(".SZ", "").zfill(6)
+                for item in industry_list:
+                    if item.get("secCode", "").zfill(6) == sym_clean:
+                        try:
+                            rank_str = str(item.get("rank", ""))
+                            total_str = str(rank_data.get("industryRank", ""))
+                            rank_parts = total_str.split("/")
+                            rank_num = int(rank_str) if rank_str.isdigit() else None
+                            total = int(rank_parts[1]) if len(rank_parts) > 1 else None
+                            avg_val = rank_data.get("industryAvg")
+                            val = item.get("value")
+                            norm = (total - rank_num) / total if (rank_num is not None and total) else 0.5
+                            results[sym] = {
+                                "industryName": ind,
+                                "rank": rank_num,
+                                "total": total,
+                                "value": float(val) if val else None,
+                                "industryAvg": float(avg_val) if avg_val else None,
+                                "normalized": norm,
+                            }
+                        except (ValueError, IndexError):
+                            pass
+                        break
+                if sym not in results:
+                    results[sym] = {"industryName": ind, "rank": None, "total": None,
+                                    "value": None, "industryAvg": None, "normalized": 0.5}
+        return results
+
     def clear_cache(self):
         self._fin_cache.clear()
         self._rank_cache.clear()

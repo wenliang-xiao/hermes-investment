@@ -62,7 +62,13 @@ SUB_FACTOR_DEFS = {
     # ── 情绪/资金因子 ──
     "sentiment:volume_ratio":{"source": "derived",    "method": "vol_ratio_20d",   "higher_is_better": True,  "label": "量比"},
     "sentiment:turnover":    {"source": "derived",    "method": "turnover_20d",    "higher_is_better": True,  "label": "换手率"},
-    # ── 风险因子(反向:越低越好) ──
+    # ── 行业排名因子（蜻蜓CSC，2026-07-27新增） ──
+    "industry:pe_rank":      {"source": "qingting_industry", "metric": "pe",     "higher_is_better": False, "label": "PE行业排名"},
+    "industry:roe_rank":     {"source": "qingting_industry", "metric": "jzcsyl","higher_is_better": True,  "label": "ROE行业排名"},
+    "industry:margin_rank":  {"source": "qingting_industry", "metric": "mll",   "higher_is_better": True,  "label": "毛利率行业排名"},
+    # ── 行业热度因子（行业情绪） ──
+    "sentiment:industry_heat":{"source": "qingting_industry", "metric": "heat", "higher_is_better": None,  "label": "行业情绪热度"},
+    # ── 风险加固因子 ──
     "risk:pe_excessive":     {"source": "derived",    "method": "pe_excessive",    "higher_is_better": False, "label": "PE过高风险"},
     "risk:volatility":       {"source": "derived",    "method": "vol_60d",         "higher_is_better": False, "label": "60日波动风险"},
 }
@@ -79,8 +85,10 @@ STYLE_FACTORS = {
                   "label": "动量", "default_weight": 0.15},
     "low_vol":   {"subs": ["low_vol:20d_vol", "low_vol:max_dd_60d"],
                   "label": "低波", "default_weight": 0.12},
-    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover"],
-                  "label": "情绪/资金", "default_weight": 0.10},
+    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover", "sentiment:industry_heat"],
+                  "label": "情绪/资金", "default_weight": 0.12},
+    "industry":  {"subs": ["industry:pe_rank", "industry:roe_rank", "industry:margin_rank"],
+                  "label": "行业地位", "default_weight": 0.10},
     "dividend":   {"subs": ["dividend:yield"],
                    "label": "股息", "default_weight": 0.07},
     "risk":       {"subs": ["risk:pe_excessive", "risk:volatility"],
@@ -89,10 +97,10 @@ STYLE_FACTORS = {
 
 # 宏观状态到风格因子的条件权重调整因子（乘数）
 MACRO_WEIGHT_ADJUST = {
-    "复苏期":  {"quality": 1.3, "value": 1.2, "growth": 1.1, "momentum": 0.8, "low_vol": 0.7, "sentiment": 0.9, "risk": 1.0, "dividend": 1.4},
-    "扩张期":  {"quality": 0.8, "value": 0.7, "growth": 1.4, "momentum": 1.5, "low_vol": 0.6, "sentiment": 1.2, "risk": 0.8, "dividend": 0.6},
-    "过热期":  {"quality": 1.1, "value": 1.3, "growth": 0.7, "momentum": 0.7, "low_vol": 1.2, "sentiment": 0.8, "risk": 1.3, "dividend": 1.2},
-    "衰退期":  {"quality": 1.4, "value": 0.7, "growth": 0.5, "momentum": 0.5, "low_vol": 1.5, "sentiment": 0.6, "risk": 1.4, "dividend": 1.5},
+    "复苏期":  {"quality": 1.3, "value": 1.2, "growth": 1.1, "momentum": 0.8, "low_vol": 0.7, "sentiment": 0.9, "industry": 1.0, "risk": 1.0, "dividend": 1.4},
+    "扩张期":  {"quality": 0.8, "value": 0.7, "growth": 1.4, "momentum": 1.5, "low_vol": 0.6, "sentiment": 1.2, "industry": 1.1, "risk": 0.8, "dividend": 0.6},
+    "过热期":  {"quality": 1.1, "value": 1.3, "growth": 0.7, "momentum": 0.7, "low_vol": 1.2, "sentiment": 0.8, "industry": 1.3, "risk": 1.3, "dividend": 1.2},
+    "衰退期":  {"quality": 1.4, "value": 0.7, "growth": 0.5, "momentum": 0.5, "low_vol": 1.5, "sentiment": 0.6, "industry": 0.8, "risk": 1.4, "dividend": 1.5},
 }
 
 
@@ -241,15 +249,41 @@ def aggregate_style(style_name: str, sub_scores: dict[str, float],
     return weighted / total_w if total_w > 0 else 0.5
 
 
+INDUSTRY_TO_CHAIN = {
+    # 链→主要行业映射（蜻蜓industryName前缀匹配）
+    "半导体":        ["半导体", "集成电路", "芯片"],
+    "AI算力":        ["AI", "人工智能", "算力", "服务器", "光模块", "通信设备", "云计算"],
+    "新能源":        ["新能源", "光伏", "风电", "锂电", "电池", "储能", "新能源车", "汽车整车", "汽车零部件"],
+    "消费电子":      ["消费电子", "电子", "元器件", "面板", "LED", "光学", "声学"],
+    "食品饮料":      ["食品", "饮料", "酿酒", "调味", "乳品", "农副食品"],
+    "医药医疗":      ["医药", "医疗", "生物", "制药", "器械", "医", "药"],
+    "金融地产":      ["银行", "证券", "保险", "房地产", "多元金融"],
+    "周期资源":      ["煤炭", "钢铁", "有色", "石油", "石化", "化工", "采掘", "材料"],
+    "消费零售":      ["零售", "电商", "免税", "旅游", "酒店", "餐饮", "纺织", "家具", "家电"],
+    "高端制造":      ["机械", "装备", "军工", "航天", "自动化", "机器人", "精密"],
+    "传媒互联网":    ["传媒", "互联网", "游戏", "广告", "影视", "出版"],
+    "公用事业":      ["电力", "水务", "燃气", "环保", "交运", "物流", "港口", "机场", "高速公路"],
+    "地产基建":      ["建筑", "建材", "基建", "工程", "装饰", "园林"],
+}
+
+def _industry_to_chain(industry_name: str) -> str:
+    """行业名称→产业链映射"""
+    if not industry_name:
+        return "其他"
+    for chain, keywords in INDUSTRY_TO_CHAIN.items():
+        for kw in keywords:
+            if kw in industry_name:
+                return chain
+    return "其他"
+
+
 def _build_chain_map(symbols: list[str]) -> dict[str, str]:
     """
-    从 WATCHLIST 构建 {symbol: chain_name} 映射。
+    从 WATCHLIST + 蜻蜓行业 构建 {symbol: chain_name} 映射。
 
-    读取 config.WATCHLIST（或 domain.__init__.WATCHLIST fallback）
-    中每个标的的 'chain' 字段。找不到的标的标记为 '其他'。
-
-    Returns:
-        {symbol: chain_name}
+    1. 先用 WATCHLIST 的 'chain' 字段（人工精选覆盖）
+    2. 没有 chain 的用蜻蜓 basicInfo 的行业名自动映射
+    3. 都找不到的标记为 '其他'
     """
     watchlist = None
     for mod_name in ("config", "domain"):
@@ -261,16 +295,40 @@ def _build_chain_map(symbols: list[str]) -> dict[str, str]:
         except (ImportError, AttributeError):
             continue
 
-    if watchlist is None:
-        return {}
-
+    # 收集没有 chain 的标的，批量查蜻蜓
+    no_chain_syms = []
     chain_map: dict[str, str] = {}
     for sym in symbols:
-        info = watchlist.get(sym, {})
-        if isinstance(info, dict) and "chain" in info:
-            chain_map[sym] = info["chain"]
-        else:
-            chain_map[sym] = "其他"
+        if watchlist:
+            info = watchlist.get(sym, {})
+            if isinstance(info, dict) and info.get("chain"):
+                chain_map[sym] = info["chain"]
+                continue
+        no_chain_syms.append(sym)
+
+    # 用蜻蜓批量查行业
+    if no_chain_syms:
+        try:
+            from data.sources.qingting_source import QTSource
+            qt = QTSource()
+            if qt.api_key:
+                for sym in no_chain_syms:
+                    clean = sym.replace(".SH", "").replace(".SZ", "").zfill(6)
+                    prof = qt.get_company_profile(clean)
+                    if prof and prof.get("industryName"):
+                        chain_map[sym] = _industry_to_chain(str(prof["industryName"]))
+                    else:
+                        chain_map[sym] = "其他"
+            else:
+                for s in no_chain_syms:
+                    chain_map[s] = "其他"
+        except Exception:
+            for s in no_chain_syms:
+                chain_map[s] = "其他"
+    else:
+        for s in no_chain_syms:
+            chain_map[s] = "其他"
+
     return chain_map
 
 
@@ -725,7 +783,77 @@ class FactorEngine:
                         return float(roes[0] - roes[-1])  # 正=加速
                 return None
 
+        elif source == "qingting_industry":
+            return self._get_industry_value(sub_key, symbol)
+
         return None
+
+    def _get_qt_source(self):
+        """获取QTSource单例"""
+        if not hasattr(self, '_qt_inst'):
+            try:
+                from data.sources.qingting_source import QTSource
+                self._qt_inst = QTSource()
+            except Exception:
+                self._qt_inst = None
+        return self._qt_inst
+
+    def _get_industry_value(self, sub_key: str, symbol: str) -> float | None:
+        """获取行业排名/情绪因子值"""
+        qt = self._get_qt_source()
+        if not qt or not qt.api_key:
+            return None
+        sub_def = SUB_FACTOR_DEFS.get(sub_key)
+        if not sub_def:
+            return None
+        clean_code = symbol.replace(".SH", "").replace(".SZ", "").zfill(6)
+        metric = sub_def.get("metric", "jzcsyl")
+
+        if metric == "heat":
+            # 行业热度: 该标的PE / 行业平均PE, >1=比行业热
+            try:
+                # 当前PE
+                hist = self._get_hist(symbol, 10)
+                cur_pe = None
+                if hist and hist.get("pe"):
+                    pe_arr = [float(p) for p in hist["pe"] if p is not None and float(p) > 0]
+                    if pe_arr:
+                        cur_pe = pe_arr[-1]
+                if cur_pe is None:
+                    cur_pe = self._get_pe_from_hist_or_rt(symbol, hist or {})
+                if cur_pe and cur_pe > 0:
+                    # 行业平均PE
+                    rank_data = qt.get_industry_rank(clean_code, metric="pe")
+                    if rank_data:
+                        avg_pe = rank_data.get("industryAvg")
+                        if avg_pe and float(avg_pe) > 0:
+                            heat = cur_pe / float(avg_pe)
+                            # 归一化: 0.5~2x → [0,1], 1x=0.5(中性)
+                            return max(0.0, min(1.0, (heat - 0.5) / 1.5))
+            except Exception:
+                pass
+            return 0.5  # 中性
+
+        # 行业排名指标 (pe/jzcsyl/mll)
+        rank_data = qt.get_industry_rank(clean_code, metric=metric)
+        if not rank_data:
+            return None
+        rank_str = rank_data.get("industryRank", "")
+        if not rank_str or "/" not in rank_str:
+            return None
+        try:
+            parts = rank_str.split("/")
+            rank_num = int(parts[0])
+            total = int(parts[1])
+            if total <= 0:
+                return 0.5
+            # 归一化: rank/total, 范围[0,1], 越小越好
+            norm = rank_num / total
+            if sub_def.get("higher_is_better", True):
+                return 1.0 - norm  # 排名靠前=高分
+            return norm
+        except (ValueError, IndexError):
+            return None
 
     # ── 单标的全因子评分 ──
 
@@ -811,6 +939,11 @@ class FactorEngine:
             "sentiment:turnover":    (0, 10),
             "risk:pe_excessive":     (0.3, 3),
             "risk:volatility":       (0.1, 0.8),
+            # 蜻蜓行业排名 (2026-07-27)
+            "industry:pe_rank":      (0, 1),
+            "industry:roe_rank":     (0, 1),
+            "industry:margin_rank":  (0, 1),
+            "sentiment:industry_heat": (0, 1),
         }
         sub_def = SUB_FACTOR_DEFS.get(sub_key, {})
         higher_better = sub_def.get("higher_is_better", True)
