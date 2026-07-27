@@ -295,12 +295,33 @@ def _get_financial_em(symbol: str) -> dict:
         return {}
 
 _FIN_CACHE = {}
+_QT_SOURCE = None
+
+def _get_qt_source():
+    """延迟初始化的蜻蜓数据源单例"""
+    global _QT_SOURCE
+    if _QT_SOURCE is None:
+        from data.sources.qingting_source import QTSource
+        _QT_SOURCE = QTSource()
+    return _QT_SOURCE
 
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。东方财富→Tushare→baostock。同进程内缓存。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。蜻蜓CSC→东方财富→baostock。同进程内缓存。"""
     if symbol in _FIN_CACHE:
         return _FIN_CACHE[symbol]
-    # ① 东方财富 (免费无限频, 主力)
+    # ① 蜻蜓 CSC Skill 广场（专业券商API，A股全量，T+2~3h）
+    if not symbol.endswith(".HK"):  # 蜻蜓仅覆盖A股
+        try:
+            qt = _get_qt_source()
+            if qt.api_key:
+                result = qt.get_financial_report(symbol)
+                if result:
+                    logger.info(f"[data] 蜻蜓CSC → {symbol}: {len(result)} 个字段")
+                    _FIN_CACHE[symbol] = result
+                    return result
+        except Exception:
+            logger.warning(f"[data] 蜻蜓CSC({symbol}) fallback: EM")
+    # ② 东方财富 (免费无限频, 主力)
     try:
         result = _get_financial_em(symbol)
         if result:
@@ -308,7 +329,7 @@ def get_financial_report(symbol: str) -> dict:
             return result
     except Exception:
         pass
-    # ② baostock (免费无限频, 兜底)
+    # ③ baostock (免费无限频, 兜底)
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
