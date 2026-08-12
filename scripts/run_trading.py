@@ -129,6 +129,35 @@ def run():
     batch_results = engine.score_batch(symbols)
     print(f"   ✅ {len(batch_results)}只评分完成", flush=True)
 
+    # ── IC 动态权重数据闭环 (根治IC死代码: 每次评分累积真实IC历史) ──
+    # 用昨日因子分 + 今日已实现收益回算昨日IC → 权重随时间真实数据驱动
+    try:
+        from datetime import timedelta as _td
+        prev_date = (date.today() - _td(days=1)).isoformat()
+        prev_path = os.path.join(engine.ic.cache_dir, "factor_scores", f"{prev_date}.json")
+        if os.path.exists(prev_path):
+            with open(prev_path) as _f:
+                prev_scores = json.load(_f)
+            # 昨日标的今日收益 (close[-1]/close[-6]-1 一期5日, or 日收益)
+            from data.data_router import get_history
+            realized = {}
+            for s in list(prev_scores.keys())[:60]:  # 限速
+                try:
+                    df = get_history(s, days=20)
+                    if df and df.get("close") and len(df["close"]) >= 2:
+                        realized[s] = float(df["close"][-1] / df["close"][-2] - 1)
+                except Exception:
+                    continue
+            if len(realized) >= 10:
+                engine.compute_ic_from_realized(prev_date, realized)
+                print(f"   📈 IC@{prev_date}累积 ({len(realized)}样本)", flush=True)
+            else:
+                print(f"   ⏸ 昨日IC样本不足({len(realized)}), 跳过", flush=True)
+        else:
+            print("   🔄 无昨日因子分, IC今日起累积", flush=True)
+    except Exception as e:
+        print(f"   ⚠ IC累积步骤失败(不影响交易): {e}", flush=True)
+
     # 3. 转换评分 → v3兼容格式 (供TradingEngine使用)
     score_results = []
 
