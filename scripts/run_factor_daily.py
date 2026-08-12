@@ -13,7 +13,7 @@
 """
 
 import sys, os, json, logging
-from datetime import date
+from datetime import date, timedelta
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -71,6 +71,37 @@ def main():
     # 因子引擎批量评分
     engine = FactorEngine()
     scored = engine.score_batch(symbols, macro_state=args.macro_state)
+
+    # ── IC 动态权重数据闭环 (根治IC死代码) ─────────────────
+    # 用昨日因子分 + 今日已实现收益回算昨日IC, 累积入 ic_history → 权重真实驱动
+    try:
+        prev_date = (date.today() - timedelta(days=1)).isoformat()
+        scores_dir = os.path.join(engine.ic.cache_dir, "factor_scores")
+        prev_path = os.path.join(scores_dir, f"{prev_date}.json")
+        if os.path.exists(prev_path):
+            with open(prev_path) as f:
+                prev_scores = json.load(f)
+            prev_symbols = list(prev_scores.keys())
+            # 取昨日标的的今日已实现收益(close[-1]/close[-21]-1 近似一期)
+            from data.data_router import get_history
+            realized = {}
+            for s in prev_symbols:
+                try:
+                    df = get_history(s, days=30)
+                    if df and df.get("close") and len(df["close"]) >= 2:
+                        realized[s] = float(df["close"][-1] / df["close"][-2] - 1)
+                except Exception:
+                    continue
+            if len(realized) >= 10:
+                engine.compute_ic_from_realized(prev_date, realized)
+                logger.info(f"[factor_daily] IC@昨日({prev_date})已回算累积, "
+                            f"样本={len(realized)}")
+            else:
+                logger.info(f"[factor_daily] 昨日IC样本不足({len(realized)}), 跳过")
+        else:
+            logger.info(f"[factor_daily] 昨日({prev_date})无因子分, IC今日起累积")
+    except Exception as e:
+        logger.warning(f"[factor_daily] IC累积步骤失败(不影响评分): {e}")
 
     # 输出TOP N
     top_n = scored[:args.top_n]

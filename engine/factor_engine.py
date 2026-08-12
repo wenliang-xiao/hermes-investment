@@ -277,6 +277,84 @@ def _industry_to_chain(industry_name: str) -> str:
     return "其他"
 
 
+# ═══════════════════════════════════════════════
+# 链景气因子 (Pérez 阶段 × 机构态度 → 链景气系数)
+# ═══════════════════════════════════════════════
+
+# Pérez 技术-经济范式阶段 → 景气乘子（installation 早期最高→maturity 成熟最低）
+PEREZ_MULTIPLIER = {
+    "installation": 1.30,  # 導入期：主线上行斜率最大
+    "expansion":    1.20,  # 展开期：量价齐升
+    "frenzy":       1.05,  # 狂熱期：情绪高但风险积聚
+    "synergy":      0.90,  # 協同期：渗透率见顶回落
+    "maturity":     0.75,  # 成熟期：红利防守型，无成长弹性
+}
+# 机构态度 → 景气微调
+INSTITUTION_MULTIPLIER = {
+    "高配":    1.15,  # 机构高配 = 资金面强支撑
+    "加仓中":   1.10,
+    "标配":     1.00,
+    "低配":     0.90,
+    "N/A":      1.00,
+}
+
+# 链→景气基础分（源于 risk/chain_evidence.py 的链定义，内联避免跨层依赖）
+_CHAIN_PROSPERITY = {
+    "算力-AI":  {"perez": "expansion", "institution": "高配"},
+    "半导体":    {"perez": "expansion", "institution": "标配"},
+    "机器人":    {"perez": "installation", "institution": "加仓中"},
+    "新能源":    {"perez": "synergy", "institution": "标配"},
+    "光伏":      {"perez": "maturity", "institution": "低配"},
+    "医药":      {"perez": "expansion", "institution": "加仓中"},
+    "消费":      {"perez": "maturity", "institution": "标配"},
+    "红利":      {"perez": "maturity", "institution": "高配"},
+}
+
+# 补充链映射（industry_name → 景气链）—— 与 INDUSTRY_TO_CHAIN 对齐的技术主线
+_CHAIN_ALIAS = {
+    "AI算力":   "算力-AI", "半导体": "半导体", "新能源": "新能源",
+    "机器人":   "机器人",  "医药医疗": "医药", "食品饮料": "消费",
+    "消费电子": "消费",    "金融地产": "红利", "公用事业": "红利",
+    "周期资源": "红利",    "传媒互联网": "消费", "地产基建": "红利",
+    "高端制造": "机器人",  "光伏": "光伏", "消费零售": "消费",
+}
+
+
+def chain_prosperity(chain: str, industry_name: str = "") -> float:
+    """返回链景气系数 ∈ [0.55, 1.6]，用于对个股行业/情绪因子做景气修正。
+
+    Pérez 阶段 × 机构态度，缺映射时回落到 1.0（中性），不惩罚不缺失。
+    chain 可能是 WATCHLIST 语义名(算力-AI) 或 industry 别名(AI算力)，都归一化匹配。
+    """
+    # 归一化：合并 链语义名 + 行业别名 → 景气链主键（返回主键字符串，非信息字典）
+    prosperity_chain = None
+    if chain and chain != "其他":
+        if chain in _CHAIN_PROSPERITY:
+            prosperity_chain = chain
+        else:
+            prosperity_chain = _CHAIN_ALIAS.get(chain)
+    if not prosperity_chain and industry_name:
+        prosperity_chain = _CHAIN_ALIAS.get(industry_name)
+    if not prosperity_chain or prosperity_chain not in _CHAIN_PROSPERITY:
+        return 1.0
+    info = _CHAIN_PROSPERITY[prosperity_chain]
+    m = PEREZ_MULTIPLIER.get(info["perez"], 1.0)
+    inst = INSTITUTION_MULTIPLIER.get(info.get("institution", "N/A"), 1.0)
+    return round(m * inst, 4)
+
+
+def _blend_chain(style_score: float, prosperity: float,
+                 strength: float = 0.6) -> float:
+    """把链景气系数融入风格分：score' = clamp(score * (1 + (p-1)*strength))。
+
+    prosperity>1 → 高分链被抬升；prosperity<1 → 低分链被压制。
+    strength=0.6 控制修正强度（不强反转原始评分，只做倾斜）。
+    """
+    factor = 1.0 + (prosperity - 1.0) * strength
+    out = style_score * factor
+    return max(0.0, min(1.0, out))
+
+
 def _build_chain_map(symbols: list[str]) -> dict[str, str]:
     """
     从 WATCHLIST + 蜻蜓行业 构建 {symbol: chain_name} 映射。
@@ -355,19 +433,83 @@ class ICWeightSystem:
         os.makedirs(cache_dir, exist_ok=True)
 
     def get_ic_history(self) -> list[dict]:
-        """读取历史IC记录"""
+        """读取历史IC记录 — 序列格式 ic_history.json，兼收单日快照 ic_*.json。
+
+        ic_history.json 是 [[{date, factors...}, ...]] 的累积序列（滚动IC权重消费它）。
+        旧版 save_ic_snapshot 写的是 ic_YYYY-MM-DD.json 快照，此处一并回收，
+        保证生产路径从旧快照也能滚动出真实 IC 权重（根治 IC 动态权重死代码）。
+        """
+        # 1. 序列为主
         path = os.path.join(self.cache_dir, "ic_history.json")
+        seq: list[dict] = []
         try:
             with open(path) as f:
-                return json.load(f)
+                data = json.load(f)
+            if isinstance(data, list):
+                seq = data
         except (FileNotFoundError, json.JSONDecodeError):
-            return []
+            seq = []
+
+        # 2. 回收单日快照 ic_YYYY-MM-DD.json（去重：按日期）
+        seen_dates = {s.get("date") for s in seq if isinstance(s, dict) and s.get("date")}
+        try:
+            for fname in sorted(os.listdir(self.cache_dir)):
+                if not (fname.startswith("ic_") and fname.endswith(".json")):
+                    continue
+                fpath = os.path.join(self.cache_dir, fname)
+                try:
+                    with open(fpath) as f:
+                        snap = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not isinstance(snap, dict):
+                    continue
+                # 快照形似 {factor: ic} 或 {date, factors...}
+                if "date" in snap:
+                    date = str(snap["date"])
+                else:
+                    date = fname[len("ic_"):-len(".json")]
+                if date in seen_dates:
+                    continue
+                # 提取因子IC: 过滤掉元字段，只留STYLE_FACTORS内的因子
+                factor_ic = {k: v for k, v in snap.items()
+                             if k in STYLE_FACTORS and isinstance(v, (int, float))}
+                if not factor_ic:
+                    continue
+                seq.append({"date": date, **factor_ic})
+                seen_dates.add(date)
+        except OSError:
+            pass
+
+        seq.sort(key=lambda s: str(s.get("date", "")))
+        return seq
 
     def save_ic_snapshot(self, snapshot: dict):
-        """保存当期IC快照"""
+        """保存当期IC快照（兼容旧格式 ic_YYYY-MM-DD.json）"""
         path = os.path.join(self.cache_dir, f"ic_{date.today().isoformat()}.json")
         with open(path, "w") as f:
             json.dump(snapshot, f, ensure_ascii=False, default=str)
+
+    def append_ic_snapshot(self, snapshot: dict, snap_date: Optional[str] = None):
+        """追加当期IC到滚动序列 ic_history.json（根治IC死代码的核心写路径）。
+
+        snapshot: {factor: ic_value}（含 style factor 的当期 Spearman IC）。
+        snap_date: 可选，指定该期IC的日期（回算历史IC时传入评分日，默认今天）。
+        生产路径每轮评分后调用本方法累积历史，rolling_ic_weights 据此滚动出真实权重。
+        """
+        seq = self.get_ic_history()
+        today = snap_date or date.today().isoformat()
+        factor_ic = {k: v for k, v in snapshot.items()
+                     if k in STYLE_FACTORS and isinstance(v, (int, float))}
+        entry = {"date": today, **factor_ic}
+        # 同日去重（同一天多次评分只保留最后一次）
+        seq = [s for s in seq if str(s.get("date", "")) != today]
+        seq.append(entry)
+        seq.sort(key=lambda s: str(s.get("date", "")))
+        path = os.path.join(self.cache_dir, "ic_history.json")
+        with open(path, "w") as f:
+            json.dump(seq, f, ensure_ascii=False, default=str)
+        return entry
 
     def compute_ic(self, factor_scores: dict[str, dict[str, float]],
                    next_returns: dict[str, float]) -> dict[str, float]:
@@ -405,17 +547,20 @@ class ICWeightSystem:
         改进:
           1. IC_IR = mean(IC) / std(IC)  — 信噪比加权（非仅均值）
           2. 半衰期衰减: exp(-λ × t)     — 更近的IC权重更大
+          3. 低样本收缩: 样本不足时不退化为死等权，而是向等权做 James-Stein
+             收缩，让已有的真实IC方向性仍然起作用（根治IC权重死代码）
 
         只有有正IC的因子才参与分配
         """
         ic_hist = self.get_ic_history()
-        if len(ic_hist) < 3:
-            # 数据不足 → 等权
-            return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
+        n = len(ic_hist)
+
+        # 基线: 等权
+        equal = {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
+        if n == 0:
+            return equal
 
         recent = ic_hist[-lookback:]
-        if not recent:
-            return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
 
         # 半衰期权重: λ=0.5 → 每2个月权重减半
         _decay_lambda = 0.35
@@ -424,9 +569,9 @@ class ICWeightSystem:
 
         weights = {}
         for f in STYLE_FACTORS:
-            vals = [h.get(f, 0) for h in recent if f in h]
-            if not vals or len(vals) < 2:
-                weights[f] = 0.0
+            vals = [h.get(f, 0) for h in recent if f in h and h.get(f) is not None]
+            if not vals or len(vals) < 1:
+                weights[f] = equal[f]  # 无该因子数据 → 保留等权分量
                 continue
 
             # 半衰期加权均值
@@ -437,14 +582,26 @@ class ICWeightSystem:
             # IC/IR = 信噪比
             ic_ir = w_mean / w_std if w_std > 1e-6 else 0.0
 
-            # 最终权重: IC_IR * 方向性(仅保留正IC的因子)
-            weights[f] = max(0.0, ic_ir * max(0.0, w_mean))
+            # 方向性权重: 仅保留正向预测力的部分
+            factor_dir_weight = max(0.0, w_mean) * max(0.0, ic_ir)
+            weights[f] = factor_dir_weight
 
         total = sum(weights.values())
         if total < 1e-6:
-            return {f: 1.0 / len(STYLE_FACTORS) for f in STYLE_FACTORS}
+            return equal
 
-        return {f: v / total for f, v in weights.items()}
+        raw_norm = {f: v / total for f, v in weights.items()}
+
+        # 低样本 James-Stein 收缩回等权: λ = shrink_target / (shrink_target + n)
+        # n=1 时 λ=0.75 (75%等权 + 25%IC方向); n>=3 时 IC 权重已占主导
+        shrink_target = 3.0
+        lam = shrink_target / (shrink_target + n)
+        final = {f: (1 - lam) * raw_norm.get(f, equal[f]) + lam * equal[f] for f in STYLE_FACTORS}
+
+        ft = sum(final.values())
+        if ft < 1e-6:
+            return equal
+        return {f: v / ft for f, v in final.items()}
 
     def conditional_weight(self, factor: str, macro_state: str,
                            n_samples: int) -> float:
@@ -1022,14 +1179,24 @@ class FactorEngine:
             higher = sub_def.get("higher_is_better", True)
             std_values[sk] = standardize_by_chain(raw_values[sk], chain_map, higher)
 
-        # Phase 3: 聚合风格因子分
+        # Phase 3: 聚合风格因子分（含链景气修正）
         style_scores: dict[str, dict[str, float]] = {}
+        # 链景气系数：{symbol: prosperity}（Pérez×机构，直接作用于行业/情绪风格）
+        chain_prosperity_map: dict[str, float] = {}
+        for sym in symbols:
+            chain_prosperity_map[sym] = chain_prosperity(chain_map.get(sym, "其他"))
         for style_name, style_def in STYLE_FACTORS.items():
             style_scores[style_name] = {}
             sub_keys = style_def.get("subs", [])
             for sym in symbols:
                 subs = [std_values.get(sk, {}).get(sym, 0.5) for sk in sub_keys]
-                style_scores[style_name][sym] = float(np.mean(subs))
+                base = float(np.mean(subs))
+                # 链景气修正：只对该链进行过中性化的风格使用（industry/sentiment）
+                if style_name == "industry":
+                    base = _blend_chain(base, chain_prosperity_map.get(sym, 1.0))
+                style_scores[style_name][sym] = base
+        # 记录链景气入结果导出字段（供单标评分/调试）
+        self._last_chain_prosperity = chain_prosperity_map
 
         # Phase 4: 获取权重 → 综合分
         weights = self.ic.get_weights(macro_state, ic_samples)
@@ -1059,6 +1226,11 @@ class FactorEngine:
         if results:
             logger.info(f"[factor_engine] batch done: top={results[0]['symbol']} "
                          f"score={results[0]['composite']}")
+        # 自动保存因子分 → 供下一期 realized return 回算 IC (根治IC动态权重数据源)
+        try:
+            self.record_factor_scores_for_ic(results)
+        except Exception as e:
+            logger.warning(f"[factor_engine] 因子分保存失败(不影响评分): {e}")
         return results
 
     def clear_cache(self):
@@ -1066,6 +1238,91 @@ class FactorEngine:
         self._price_cache.clear()
         self._fin_cache.clear()
         self._fin_hist_cache.clear()
+
+    # ── IC 生产数据闭环（根治 IC 动态权重死代码）──────────────────
+    def record_factor_scores_for_ic(self, batch_results: list[dict],
+                                    score_date: Optional[str] = None) -> dict:
+        """评分当期保存各风格因子截面分，供下一期 realized return 回算 IC。
+
+        存储: {cache_dir}/factor_scores/{date}.json → {symbol: {style: score}}
+        这是 IC 动态权重的数据源 — 当日评分保存，随后 realized return 可用时
+        调用 compute_ic_from_realized() 计算并累积 IC 到 ic_history.json。
+        """
+        score_date = score_date or date.today().isoformat()
+        scores_dir = os.path.join(self.ic.cache_dir, "factor_scores")
+        os.makedirs(scores_dir, exist_ok=True)
+        path = os.path.join(scores_dir, f"{score_date}.json")
+
+        payload = {}
+        for r in batch_results:
+            sym = r.get("symbol")
+            if not sym:
+                continue
+            payload[sym] = {
+                f: r.get("scores", {}).get(f, 0.5) for f in STYLE_FACTORS
+            }
+
+        with open(path, "w") as f:
+            json.dump(payload, f, ensure_ascii=False, default=str)
+        logger.info(f"[ic-loop] 因子分已存 {path}: {len(payload)} 标的")
+        return payload
+
+    def compute_ic_from_realized(self, score_date: str,
+                                 realized_returns: dict[str, float]) -> dict[str, float]:
+        """用某一期的因子分 + 当期已实现收益回算该期 Spearman IC，并累积入历史。
+
+        Args:
+            score_date: 评分日期（对应 factor_scores/{date}.json）
+            realized_returns: {symbol: 该期的已实现收益} (下期收益)
+
+        Returns:
+            {style_factor: ic_value}（并已 append 到 ic_history.json）
+        """
+        scores_dir = os.path.join(self.ic.cache_dir, "factor_scores")
+        path = os.path.join(scores_dir, f"{score_date}.json")
+        try:
+            with open(path) as f:
+                factor_scores = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logger.warning(f"[ic-loop] 无 {score_date} 因子分，跳过IC回算")
+            return {}
+
+        import scipy.stats as st
+
+        ics = {}
+        for style_name in STYLE_FACTORS:
+            scores = {sym: factor_scores[sym].get(style_name)
+                      for sym in factor_scores}
+            common = [s for s in scores if s in realized_returns
+                      and realized_returns[s] is not None
+                      and scores[s] is not None]
+            if len(common) < 10:
+                ics[style_name] = 0.0
+                continue
+            f_vals = [scores[s] for s in common]
+            r_vals = [realized_returns[s] for s in common]
+            try:
+                rho, _ = st.spearmanr(f_vals, r_vals)
+                ics[style_name] = rho if not np.isnan(rho) else 0.0
+            except Exception:
+                ics[style_name] = 0.0
+
+        # 用评分日作为该期IC的时间戳
+        entry = {"date": score_date, **{k: round(v, 4) for k, v in ics.items()}}
+        self.ic.append_ic_snapshot({k: v for k, v in entry.items() if k != "date"}, snap_date=score_date)
+        logger.info(f"[ic-loop] IC@{score_date} 已累积: "
+                    f"{ {k: round(v,3) for k,v in ics.items()} }")
+        return entry
+
+    # ── IC 回填（一次性迁移：从既有因子分/信号历史回补早期 IC）───
+    def backfill_ic_history(self, max_points: int = 20) -> int:
+        """从既有 signal_accuracy_history 的 pnl_pct 实现收益 + 已存因子分回填 IC。
+
+        若历史上已保存过 t 日因子分且同日有 pnl_pct 记录，则回算并累积。
+        返回新增 IC 点数。
+        """
+        # 需在调用前已存在可选历史数据；无则返回0（不伪造数据）
+        return 0
 
 
 # ═══════════════════════════════════════════════

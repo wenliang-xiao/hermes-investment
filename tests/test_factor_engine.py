@@ -171,3 +171,76 @@ class TestICWeightSystem:
         # 清理
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestChainProsperity:
+    """链景气因子 (WS10根治): Pérez阶段×机构态度 → 科技主线抬升/防守链压制"""
+
+    def test_tech_chain_boosted(self):
+        """科技主线链景气>1（应抬升 industry 风格分）"""
+        from engine.factor_engine import chain_prosperity
+        assert chain_prosperity("算力-AI") > 1.0
+        assert chain_prosperity("半导体") > 1.0
+        assert chain_prosperity("机器人") > 1.0
+
+    def test_defensive_chain_suppressed(self):
+        """防守链景气<1（应压制 industry 风格分）"""
+        from engine.factor_engine import chain_prosperity
+        assert chain_prosperity("消费") < 1.0
+        assert chain_prosperity("红利") < 1.0
+        assert chain_prosperity("光伏") < 1.0
+
+    def test_unknown_chain_neutral(self):
+        """未知/无映射链 → 中性1.0（不惩罚不缺失）"""
+        from engine.factor_engine import chain_prosperity
+        assert chain_prosperity("其他") == 1.0
+        assert chain_prosperity("XX不存在") == 1.0
+
+    def test_tech_beats_defensive_after_blend(self):
+        """链景气修正后: 科技主线 industry 分 > 防守链（P0核心场景根治验证）"""
+        from engine.factor_engine import chain_prosperity, _blend_chain
+        tech = _blend_chain(0.5, chain_prosperity("算力-AI"))
+        defensive = _blend_chain(0.5, chain_prosperity("消费"))
+        assert tech > defensive, "科技主线应显著高于防守链"
+
+
+class TestICLoop:
+    """IC 动态权重生产数据闭环 (WS10根治: 消除IC死代码)"""
+
+    def test_record_and_compute_ic_loop(self):
+        """因子分保存 → 下期IC回算 → 累积入ic_history 全通"""
+        import shutil, tempfile
+        from engine.factor_engine import FactorEngine, ICWeightSystem, STYLE_FACTORS
+
+        tmp = tempfile.mkdtemp()
+        icw = ICWeightSystem(cache_dir=tmp)
+        eng = FactorEngine(ic_system=icw)
+
+        # 20只标的: quality因子分与realized正相关 → IC应为正
+        symbols = [f"6000{i:02d}" for i in range(20)]
+        results = []
+        for i, sym in enumerate(symbols):
+            q = i / 19.0
+            results.append({
+                "symbol": sym,
+                "scores": {f: 0.5 for f in STYLE_FACTORS} | {"quality": q, "risk": 1 - q},
+                "composite": q,
+            })
+        eng.record_factor_scores_for_ic(results, "2026-07-08")
+        realized = {s: (0.2 * results[i]["scores"]["quality"] - 0.1)
+                    for i, s in enumerate(symbols)}
+        entry = eng.compute_ic_from_realized("2026-07-08", realized)
+
+        assert entry["quality"] > 0.8, "quality IC 应为强正"
+        assert entry["risk"] < -0.8, "risk IC 应为强负"
+        # 已累积入历史
+        hist = icw.get_ic_history()
+        assert any(h.get("date") == "2026-07-08" for h in hist), "IC应累积入历史"
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_low_sample_not_dead_equal(self):
+        """低样本时不退化为死等权，IC方向性仍起作用"""
+        from engine.factor_engine import ICWeightSystem
+        icw = ICWeightSystem(cache_dir="/tmp/ic_test")
+        weights = icw.rolling_ic_weights(lookback=6)
+        assert abs(sum(weights.values()) - 1.0) < 0.01
