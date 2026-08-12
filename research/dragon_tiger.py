@@ -176,20 +176,19 @@ def fetch_daily_dragon_tiger(date: Optional[str] = None) -> list[dict]:
 
 
 def _enrich_seat_details(records: list[dict]):
-    """为每条记录补充买卖席位明细"""
+    """为每条记录补充买卖席位明细 — 并发+超时, 避免逐股串行3分钟挂死"""
     import akshare as ak
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    for rec in records:
+    def _enrich_one(rec: dict):
         code = rec["symbol"]
         date_str = str(rec["date"]).replace("-", "")
-
         try:
             # 获取该股票的龙虎榜日期列表
             dates_df = ak.stock_lhb_stock_detail_date_em(symbol=code)
             if dates_df is None or dates_df.empty:
-                continue
+                return
 
-            # 找匹配日期
             target_date = None
             for _, dr in dates_df.iterrows():
                 dt_val = dr.get("交易日")
@@ -203,56 +202,47 @@ def _enrich_seat_details(records: list[dict]):
                         break
 
             if target_date is None:
-                continue
+                return
 
-            # 格式化日期供API
             if isinstance(target_date, str):
                 api_date = target_date.replace("-", "")
             else:
                 api_date = target_date.strftime("%Y%m%d")
 
-            # 买入席位
-            try:
-                buy_df = ak.stock_lhb_stock_detail_em(symbol=code, date=api_date, flag="买入")
-                if buy_df is not None and not buy_df.empty:
-                    for _, sr in buy_df.iterrows():
-                        seat_name = str(sr.get("交易营业部名称", ""))
-                        seat = {
-                            "name": seat_name,
-                            "amount": _parse_amount(sr.get("买入金额", 0)),
-                            "pct": _parse_amount(sr.get("买入金额-占总成交比例", 0)),
-                            "is_institution": _detect_institution(seat_name),
-                            "is_famous": _detect_famous(seat_name),
-                            "celebrity": _detect_famous(seat_name),
-                        }
-                        rec["buy_seats"].append(seat)
-                        if seat["is_famous"]:
-                            rec["famous_seats_buy"].append(seat)
-            except Exception:
-                pass
-
-            # 卖出席位
-            try:
-                sell_df = ak.stock_lhb_stock_detail_em(symbol=code, date=api_date, flag="卖出")
-                if sell_df is not None and not sell_df.empty:
-                    for _, sr in sell_df.iterrows():
-                        seat_name = str(sr.get("交易营业部名称", ""))
-                        seat = {
-                            "name": seat_name,
-                            "amount": _parse_amount(sr.get("卖出金额", 0)),
-                            "pct": _parse_amount(sr.get("卖出金额-占总成交比例", 0)),
-                            "is_institution": _detect_institution(seat_name),
-                            "is_famous": _detect_famous(seat_name),
-                            "celebrity": _detect_famous(seat_name),
-                        }
-                        rec["sell_seats"].append(seat)
-                        if seat["is_famous"]:
-                            rec["famous_seats_sell"].append(seat)
-            except Exception:
-                pass
-
+            for flag, buy_key, pct_key, rec_key, famous_key in [
+                ("买入", "买入金额", "买入金额-占总成交比例", "buy_seats", "famous_seats_buy"),
+                ("卖出", "卖出金额", "卖出金额-占总成交比例", "sell_seats", "famous_seats_sell"),
+            ]:
+                try:
+                    df = ak.stock_lhb_stock_detail_em(symbol=code, date=api_date, flag=flag)
+                    if df is not None and not df.empty:
+                        for _, sr in df.iterrows():
+                            seat_name = str(sr.get("交易营业部名称", ""))
+                            seat = {
+                                "name": seat_name,
+                                "amount": _parse_amount(sr.get(buy_key, 0)),
+                                "pct": _parse_amount(sr.get(pct_key, 0)),
+                                "is_institution": _detect_institution(seat_name),
+                                "is_famous": _detect_famous(seat_name),
+                                "celebrity": _detect_famous(seat_name),
+                            }
+                            rec[rec_key].append(seat)
+                            if seat["is_famous"]:
+                                rec[famous_key].append(seat)
+                except Exception:
+                    continue
         except Exception:
-            continue
+            return
+
+    # 并发执行席位明细抓取 (限10并发防封, 每只独立超时)
+    active = [rec for rec in records if rec.get("symbol")]
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(_enrich_one, rec): rec for rec in active}
+        for fut in as_completed(futs, timeout=45):
+            try:
+                fut.result()
+            except Exception:
+                continue
 
 
 def analyze_top_stocks(records: list[dict], limit: int = 10) -> list[dict]:
