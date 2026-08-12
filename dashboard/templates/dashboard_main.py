@@ -79,6 +79,8 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     <a href="#" onclick="return switchTab(event,'news')">📰 新闻</a>
     <a href="#" onclick="return switchTab(event,'reports')">📋 日报</a>
     <a href="#" onclick="return switchTab(event,'evidence')">🔬 证据</a>
+    <a href="#" onclick="return switchTab(event,'gurus')">🏆 大师持仓</a>
+    <a href="#" onclick="return switchTab(event,'insights')">💡 观点</a>
   </div>
 
   <!-- ======== 六层横条 ======== -->
@@ -371,6 +373,16 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
         <p>📌 <b>因子查询</b> — 输入个股代码，看每个子因子原始值、排名、方向、评分依据。</p>
       </div>
     </div>
+  </div>
+
+  <!-- ======== 大师持仓面板 ======== -->
+  <div id="tab-gurus" style="display:none" class="space-y-6">
+    <div id="gurus-content"></div>
+  </div>
+
+  <!-- ======== 观点库面板 ======== -->
+  <div id="tab-insights" style="display:none" class="space-y-6">
+    <div id="insights-content"></div>
   </div>
 </div>
 
@@ -711,7 +723,7 @@ function switchTab(ev, tab) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
   if (ev) ev.currentTarget.classList.add('active');
 
-  const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison', 'tab-dragon_tiger', 'tab-evidence'];
+  const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison', 'tab-dragon_tiger', 'tab-evidence', 'tab-gurus', 'tab-insights'];
   sections.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
@@ -728,6 +740,8 @@ function switchTab(ev, tab) {
   else if (tab === 'comparison') loadComparison();
   else if (tab === 'dragon_tiger') loadDragonTiger();
   else if (tab === 'evidence') loadEvidence();
+  else if (tab === 'gurus') loadGurusTab();
+  else if (tab === 'insights') loadInsightsTab();
   return false;
 }
 
@@ -1871,6 +1885,207 @@ async function refreshDragonTiger() {
   await loadDragonTiger(true);
   btn.textContent = '🔄 刷新';
   btn.disabled = false;
+}
+
+// ═══════════════════════════════════════════
+// 大师持仓
+// ═══════════════════════════════════════════
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+async function loadGurusTab() {
+  const el = document.getElementById('gurus-content');
+  if (!el) return;
+  el.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载大师持仓...</div>';
+  try {
+    const res = await fetch('/api/v2/gurus');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const gurus = Array.isArray(data) ? data : (data.gurus || data.data || []);
+    if (gurus.length === 0) {
+      el.innerHTML = '<div class="text-gray-500 italic p-4 text-center border border-gray-800 border-dashed rounded">暂无大师数据</div>';
+      return;
+    }
+    let rows = '';
+    gurus.forEach(function(g) {
+      const slug = g.slug || '';
+      const name = g.name || g.display_name || slug;
+      const cnt = (g.holdings_count != null) ? g.holdings_count : (g.count || 0);
+      rows +=
+        '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
+          '<td class="py-2 pr-2 border-0 font-medium text-blue-400 cursor-pointer" onclick="loadGuruDetail(\\'' + escHtml(slug) + '\\')">' + escHtml(name) +
+            ' <span class="text-gray-500 text-xs">›</span></td>' +
+          '<td class="py-2 pr-2 text-right font-mono text-gray-200 border-0">' + (cnt || 0) + '</td>' +
+          '<td class="py-2 pr-2 text-right font-mono text-green-500 border-0">' + escHtml(g.total_usd_fmt || '—') + '</td>' +
+        '</tr>';
+    });
+    el.innerHTML =
+      '<div class="card">' +
+        '<div class="card-header"><h3>🏆 大师持仓</h3></div>' +
+        '<div class="overflow-x-auto"><table class="w-full text-sm">' +
+          '<thead><tr class="text-left text-xs text-gray-400">' +
+            '<th class="py-2 pr-2 border-0">大师</th>' +
+            '<th class="py-2 pr-2 text-right border-0">持仓数</th>' +
+            '<th class="py-2 pr-2 text-right border-0">总市值</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div>' +
+      '</div>';
+  } catch (e) {
+    console.error('大师持仓列表加载失败:', e);
+    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 大师持仓加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function loadGuruDetail(slug) {
+  const el = document.getElementById('gurus-content');
+  if (!el) return;
+  el.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载持仓明细...</div>';
+  try {
+    const res = await fetch('/api/v2/gurus/' + encodeURIComponent(slug));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const holdings = Array.isArray(data) ? data : (data.holdings || data.data || []);
+    const guruName = data.name || data.display_name || slug;
+    let rows = '';
+    (holdings || []).forEach(function(h) {
+      const chg = h.chg_pct;
+      const chgCls = chg >= 0 ? 'text-green-500' : 'text-red-500';
+      rows +=
+        '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
+          '<td class="py-1.5 pr-2 border-0 font-mono text-blue-400">' + escHtml(h.ticker || h.symbol || '') + '</td>' +
+          '<td class="py-1.5 pr-2 text-gray-200 border-0">' + escHtml(h.name || '') + '</td>' +
+          '<td class="py-1.5 pr-2 text-right font-mono text-gray-300 border-0">' + escHtml(h.shares != null ? h.shares.toLocaleString() : '—') + '</td>' +
+          '<td class="py-1.5 pr-2 text-right font-mono text-green-500 border-0">' + escHtml(h.value_usd_fmt || '—') + '</td>' +
+          '<td class="py-1.5 pr-2 text-right font-mono ' + chgCls + ' border-0">' + (chg != null ? (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : '—') + '</td>' +
+          '<td class="py-1.5 pr-2 text-right font-mono text-gray-300 border-0">' + (h.weight_pct != null ? h.weight_pct.toFixed(2) + '%' : '—') + '</td>' +
+        '</tr>';
+    });
+    el.innerHTML =
+      '<div class="flex items-center justify-between mb-3">' +
+        '<button onclick="loadGurusTab()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">‹ 返回大师列表</button>' +
+        '<h3 class="font-bold text-base">🏆 ' + escHtml(guruName) + ' 持仓明细' + '</h3>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="overflow-x-auto"><table class="w-full text-sm">' +
+          '<thead><tr class="text-left text-xs text-gray-400">' +
+            '<th class="py-2 pr-2 border-0">代码</th>' +
+            '<th class="py-2 pr-2 border-0">名称</th>' +
+            '<th class="py-2 pr-2 text-right border-0">股数</th>' +
+            '<th class="py-2 pr-2 text-right border-0">市值</th>' +
+            '<th class="py-2 pr-2 text-right border-0">当日涨跌</th>' +
+            '<th class="py-2 pr-2 text-right border-0">权重</th>' +
+          '</tr></thead>' +
+          '<tbody>' + (rows || '<tr><td colspan="6" class="text-center py-4 text-gray-500 border-0">暂无持仓数据</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>';
+  } catch (e) {
+    console.error('大师持仓明细加载失败:', e);
+    el.innerHTML =
+      '<div class="flex items-center mb-3"><button onclick="loadGurusTab()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">‹ 返回</button></div>' +
+      '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 持仓明细加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+// ═══════════════════════════════════════════
+// 观点库
+// ═══════════════════════════════════════════
+async function loadInsightsTab() {
+  const el = document.getElementById('insights-content');
+  if (!el) return;
+  el.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载观点库...</div>';
+  try {
+    const [insRes, sumRes] = await Promise.all([
+      fetch('/api/v2/insights'),
+      fetch('/api/v2/insights/summary')
+    ]);
+    if (!insRes.ok) throw new Error('insights HTTP ' + insRes.status);
+    const insData = await insRes.json();
+    const insights = Array.isArray(insData) ? insData : (insData.insights || insData.data || []);
+
+    let summary = null;
+    if (sumRes.ok) { summary = await sumRes.json(); }
+
+    // 未成交标的顶部名细表
+    const top = (insights || []).slice(0, 20);
+    let topRows = '';
+    top.forEach(function(i) {
+      const chg = i.chg_pct;
+      const chgCls = (chg == null) ? 'text-gray-400' : (chg >= 0 ? 'text-green-500' : 'text-red-500');
+      topRows +=
+        '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
+          '<td class="py-1.5 pr-2 border-0 font-mono text-blue-400">' + escHtml(i.ticker || i.symbol || '') + '</td>' +
+          '<td class="py-1.5 pr-2 text-gray-200 border-0">' + escHtml(i.name || '') + '</td>' +
+          '<td class="py-1.5 pr-2 text-gray-300 border-0">' + escHtml(i.reason || i.view || '') + '</td>' +
+          '<td class="py-1.5 pr-2 font-mono text-right border-0 ' + chgCls + '">' + (chg != null ? (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%' : '—') + '</td>' +
+        '</tr>';
+    });
+
+    // 原因分布
+    let distRows = '';
+    let distData = [];
+    if (summary) {
+      distData = summary.reason_distribution || summary.distribution || summary.by_reason || [];
+      if (!Array.isArray(distData)) distData = Object.keys(distData).map(function(k) { return { reason: k, count: distData[k] }; });
+    }
+    if (distData.length === 0) {
+      // 从明细里统计兜底
+      const m = {};
+      (insights || []).forEach(function(i) { const r = (i.reason || '其他'); m[r] = (m[r] || 0) + 1; });
+      distData = Object.keys(m).map(function(k) { return { reason: k, count: m[k] }; });
+    }
+    distData.forEach(function(d) {
+      distRows +=
+        '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
+          '<td class="py-1.5 pr-2 border-0 text-gray-200">' + escHtml(d.reason || d.name || '其他') + '</td>' +
+          '<td class="py-1.5 pr-2 text-right font-mono text-gray-300 border-0">' + (d.count || 0) + '</td>' +
+        '</tr>';
+    });
+
+    let summaryCards = '';
+    if (summary) {
+      const total = summary.total != null ? summary.total : (insights || []).length;
+      const unfilled = summary.unfilled != null ? summary.unfilled : total;
+      summaryCards =
+        '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">' +
+          '<div class="bg-gray-800 border border-gray-700 rounded-xl p-3"><div class="text-xs text-gray-400 mb-1">观点总数</div><div class="text-lg font-bold font-mono">' + (total || 0) + '</div></div>' +
+          '<div class="bg-gray-800 border border-gray-700 rounded-xl p-3"><div class="text-xs text-gray-400 mb-1">未成交</div><div class="text-lg font-bold font-mono">' + (unfilled || 0) + '</div></div>' +
+          '<div class="bg-gray-800 border border-gray-700 rounded-xl p-3"><div class="text-xs text-gray-400 mb-1">今日新增</div><div class="text-lg font-bold font-mono text-green-400">' + (summary.new_today || (summary.today || 0)) + '</div></div>' +
+          '<div class="bg-gray-800 border border-gray-700 rounded-xl p-3"><div class="text-xs text-gray-400 mb-1">已成交</div><div class="text-lg font-bold font-mono text-blue-400">' + (summary.filled || 0) + '</div></div>' +
+        '</div>';
+    }
+
+    el.innerHTML =
+      (summaryCards || '') +
+      '<div class="card">' +
+        '<div class="card-header"><h3>💡 未成交观点 · 标的</h3></div>' +
+        '<div class="overflow-x-auto"><table class="w-full text-sm">' +
+          '<thead><tr class="text-left text-xs text-gray-400">' +
+            '<th class="py-2 pr-2 border-0">代码</th>' +
+            '<th class="py-2 pr-2 border-0">名称</th>' +
+            '<th class="py-2 pr-2 border-0">观点/理由</th>' +
+            '<th class="py-2 pr-2 text-right border-0">涨跌</th>' +
+          '</tr></thead>' +
+          '<tbody>' + (topRows || '<tr><td colspan="4" class="text-center py-4 text-gray-500 border-0">暂无观点数据</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="card-header"><h3>📊 原因分布</h3></div>' +
+        '<div class="overflow-x-auto"><table class="w-full text-sm">' +
+          '<thead><tr class="text-left text-xs text-gray-400">' +
+            '<th class="py-2 pr-2 border-0">原因</th>' +
+            '<th class="py-2 pr-2 text-right border-0">条数</th>' +
+          '</tr></thead>' +
+          '<tbody>' + (distRows || '<tr><td colspan="2" class="text-center py-4 text-gray-500 border-0">暂无分布数据</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>';
+  } catch (e) {
+    console.error('观点库加载失败:', e);
+    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 观点库加载失败: ' + escHtml(e.message) + '</div>';
+  }
 }
 
 </script>
