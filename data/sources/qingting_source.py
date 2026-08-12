@@ -72,21 +72,50 @@ class QTSource:
         self._profile_cache: dict = {}
 
     def _get(self, path: str, params: dict = None, skill_id: str = None) -> dict:
-        """发送 GET 请求到蜻蜓 API"""
+        """发送 GET 请求到蜻蜓 API（带连接重建重试, 防 Bad file descriptor）"""
         url = f"{self.base_url}{path}"
         headers = {}
         if skill_id:
             headers["X-Calling-Skill-Id"] = skill_id
+        last_err: Exception | None = None
+        for attempt in range(3):  # 最多3次尝试
+            try:
+                resp = self._session.get(url, params=params, headers=headers, timeout=15)
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.ConnectionError as e:
+                # 连接重建: errno 9 (Bad file descriptor) / stale keep-alive
+                logger.warning(f"[QTSource] GET {path} conn err (attempt {attempt+1}): {e} — 重建连接")
+                last_err = e
+                self._reconnect()
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"[QTSource] GET {path} timeout (attempt {attempt+1}): {e}")
+                last_err = e
+                time.sleep(0.5 * (attempt + 1))
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"[QTSource] GET {path} failed: {e}")
+                return {}
+            except json.JSONDecodeError:
+                logger.warning(f"[QTSource] GET {path} non-JSON: {resp.text[:200]}")
+                return {}
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+        logger.warning(f"[QTSource] GET {path} failed after retries: {last_err}")
+        return {}
+
+    def _reconnect(self) -> None:
+        """销毁旧会话, 建立全新连接池（解决长扫描中 keep-alive 连接过期问题）"""
         try:
-            resp = self._session.get(url, params=params, headers=headers, timeout=15)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"[QTSource] GET {path} failed: {e}")
-            return {}
-        except json.JSONDecodeError:
-            logger.warning(f"[QTSource] GET {path} non-JSON: {resp.text[:200]}")
-            return {}
+            self._session.close()
+        except Exception:
+            pass
+        import time as _t
+        _t.sleep(0.3)
+        self._session = requests.Session()
+        self._session.headers.update({
+            "X-API-Key": self.api_key,
+            "Content-Type": "application/json",
+        })
 
     def get_financial_report(self, stock_code: str) -> dict:
         """

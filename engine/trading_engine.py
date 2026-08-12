@@ -107,13 +107,21 @@ class TradeCalendar:
         if total >= MAX_TRADES_PER_WEEK_TOTAL:
             return False, f"所有策略本周合计已交易{total}次，达到上限"
 
-        # 标的冷却检查
+        # 标的冷却检查 — 按策略+标的隔离, 同一天各策略独立建仓互不阻塞
         if symbol:
             cooldowns = self.log.get("cooldowns", {})
-            if symbol in cooldowns:
-                last_trade_date = datetime.strptime(cooldowns[symbol], "%Y-%m-%d")
-                if (datetime.now() - last_trade_date).days < TRADE_COOLDOWN_DAYS:
-                    return False, f"{symbol}在冷却期内(最后交易{cooldowns[symbol]})"
+            # 冷却键改为 strategy:symbol, 避免一个策略买入阻塞其它策略
+            cd_key = f"{strategy_name}:{symbol}"
+            last_trade_date = None
+            if cd_key in cooldowns:
+                last_trade_date = datetime.strptime(cooldowns[cd_key], "%Y-%m-%d").date()
+            elif symbol in cooldowns:
+                # 旧格式兼容: 一级symbol键
+                last_trade_date = datetime.strptime(cooldowns[symbol], "%Y-%m-%d").date()
+            if last_trade_date is not None:
+                # 用 date.today() 做自然日差: 当天交易(0天)不受冷却, 次日才恢复
+                if (date.today() - last_trade_date).days < TRADE_COOLDOWN_DAYS:
+                    return False, f"{symbol}在冷却期内({strategy_name}最后交易{cooldowns.get(cd_key, cooldowns.get(symbol))})"
 
         return True, "ok"
 
@@ -129,15 +137,15 @@ class TradeCalendar:
             self.log["week_count"][wk][strategy_name] = \
                 self.log["week_count"][wk].get(strategy_name, 0) + 1
 
-        # 冷却
+        # 冷却 — 按 strategy:symbol 键(与can_trade一致)
         sym = signal_dict.get("symbol", "")
         if sym:
-            self.log["cooldowns"][sym] = date.today().strftime("%Y-%m-%d")
+            self.log["cooldowns"][f"{strategy_name}:{sym}"] = date.today().strftime("%Y-%m-%d")
 
-        # 记录
+        # 记录 — 此方法仅在实际成交(模拟盘execute_buy/sell成功)后调用, 标记已执行
         entry = signal_dict.copy()
         entry["recorded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        entry["executed"] = False
+        entry["executed"] = True
         self.log["trades"].append(entry)
         self._save()
 
