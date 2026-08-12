@@ -810,9 +810,9 @@ class FactorEngine:
         metric = sub_def.get("metric", "jzcsyl")
 
         if metric == "heat":
-            # 行业热度: 该标的PE / 行业平均PE, >1=比行业热
+            # 行业热度/主线热度: 综合 (PE热度 + 量价主线热度), 捕捉科技主线启动期
+            heat_pe = 0.5  # 默认中性
             try:
-                # 当前PE
                 hist = self._get_hist(symbol, 10)
                 cur_pe = None
                 if hist and hist.get("pe"):
@@ -822,17 +822,32 @@ class FactorEngine:
                 if cur_pe is None:
                     cur_pe = self._get_pe_from_hist_or_rt(symbol, hist or {})
                 if cur_pe and cur_pe > 0:
-                    # 行业平均PE
                     rank_data = qt.get_industry_rank(clean_code, metric="pe")
                     if rank_data:
                         avg_pe = rank_data.get("industryAvg")
                         if avg_pe and float(avg_pe) > 0:
                             heat = cur_pe / float(avg_pe)
                             # 归一化: 0.5~2x → [0,1], 1x=0.5(中性)
-                            return max(0.0, min(1.0, (heat - 0.5) / 1.5))
+                            heat_pe = max(0.0, min(1.0, (heat - 0.5) / 1.5))
             except Exception:
                 pass
-            return 0.5  # 中性
+            # 量价主线热度: 用20日动量和量比捕捉"主线启动"信号
+            # 独立于PE估值(PE可能缺失/估值低不代表不热), 解决科技主线启动期被低估
+            heat_mom = 0.5
+            try:
+                # 直接取20日动量原始值(如0.08=8%)
+                raw = self._get_sub_value("momentum:20d", symbol)
+                mom = float(raw) if raw is not None else 0.0
+                # 20日动量 → 热度: 0%→0.5, +5%→0.6, +10%→0.7, +20%→1.0
+                heat_mom = max(0.0, min(1.0, 0.5 + (mom / 0.20) * 0.5))
+            except Exception:
+                pass
+            # 综合: PE热度为主, 量价热度为修正(权重 0.6/0.4)
+            # PE缺失时权重转向量价, 避免死中性
+            if abs(heat_pe - 0.5) < 1e-6 and heat_pe == 0.5:
+                # PE给出中性(数据缺失) → 完全依赖量价主线热度
+                return heat_mom
+            return 0.6 * heat_pe + 0.4 * heat_mom
 
         # 行业排名指标 (pe/jzcsyl/mll)
         rank_data = qt.get_industry_rank(clean_code, metric=metric)
