@@ -150,6 +150,7 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-13 | 新增 `scripts/cron_watchdog.py` 看门狗 + cron job `factor-snapshot-watchdog`（主动故障检测） | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/daily_factor_scan.py` 单入口编排器，修复 `faceji-factor-daily-scan` 的陈旧/错误 prompt | 502 故障 + cron 规范化 |
 | 2026-08-13 | `data/sources/yahoo_source.py` 增加 502/429/5xx 指数退避自动重试 | 502 故障修复 |
 | 2026-08-13 | 本文档创建（替代并废弃旧 `HERMES_CRON_CONFIG.md`） | cron 规范化 |
