@@ -23,7 +23,7 @@
 
 ## 1. 任务总览
 
-共 **4 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
+共 **5 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
 
 | Job ID | 名称 | Schedule | 频率 | 推送目标 | 工作目录 |
 |---|---|---|---|---|---|
@@ -31,10 +31,12 @@
 | `233e3070a0b3` | 面基日报·盘后 | `0 18 * * 1-5` | 工作日 18:00 | 飞书「知行合一」群 | investment_system |
 | `aa3d2e888cc7` | 面基周报 | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
 | `1f704ff45437` | faceji-factor-daily-scan | `30 9 * * 1-5` | 工作日 09:30 | origin（本对话） | investment_system |
+| `64b330ed994e` | factor-snapshot-watchdog | `0 17 * * 1-5` | 工作日 17:00 | origin（本对话） | investment_system |
 
 > **推送目标说明:**
 > - 日报×2 + 周报 → 飞书群 `oc_4c9d6445fab7f3a2ada0c410f3aa7043`（知行合一）
 > - faceji-factor-daily-scan → `origin`（创建时所在的对话/频道）
+> - factor-snapshot-watchdog → `origin`（no_agent 看门狗，健康时静默，快照缺失时告警）
 
 ---
 
@@ -81,6 +83,20 @@
 
 **运行时长:** 全量 ~50-60 分钟。**必须 background 运行 + poll**，不要前台短超时跑。
 **可续扫:** 超时/中断后重跑同一命令即从已完成的批次继续。
+
+### 2.5 factor-snapshot-watchdog (`64b330ed994e`) 🐕 主动故障检测
+
+**用途:** 主动监测因子扫描快照是否连续缺失，**及时发现问题**（用户核心诉求）。
+
+- **Schedule:** 工作日 17:00（晚于 09:30 因子扫描，确认当天是否产出快照）
+- **模式:** `no_agent=True` 看门狗（watchdog pattern）——健康时无 stdout（静默不打扰），
+  快照缺失时输出告警并投递给用户。
+- **执行脚本:** `~/.hermes/scripts/factor_snapshot_watchdog.sh` → `scripts/cron_watchdog.py`
+- **检查逻辑:** 最近 5 个交易日（不含今天）是否有 `scan_snapshot_YYYY-MM-DD.json`，
+  列出缺失日期 + 最后好快照 + 建议动作。
+
+**为什么用 no_agent:** 无 LLM 参与，确定性执行；看门狗模式天然只在该报错时报错，
+不会产生噪音消息。
 
 ---
 
