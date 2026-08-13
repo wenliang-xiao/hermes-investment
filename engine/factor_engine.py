@@ -762,14 +762,14 @@ class FactorEngine:
                 return float(rt["pe"])
         except Exception:
             pass
-        # 尝试用 yfinance ticker.info 获取 (最可靠)
+        # 尝试用 yfinance ticker.info 获取 (最可靠) — 走带重试的 get_rt_yahoo
         try:
-            import yfinance as yf
-            ticker = yf.Ticker(symbol)
-            info = ticker.info or {}
-            pe_val = info.get("trailingPE") or info.get("forwardPE") or info.get("peRatio")
-            if pe_val and float(pe_val) > 0:
-                return float(pe_val)
+            from data.sources.yahoo_source import get_rt_yahoo
+            rt = get_rt_yahoo(symbol)
+            if rt:
+                pe_val = rt.get("pe")
+                if pe_val and float(pe_val) > 0:
+                    return float(pe_val)
         except Exception:
             pass
         return None
