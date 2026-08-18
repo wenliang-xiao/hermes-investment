@@ -18,7 +18,7 @@
 import numpy as np
 from typing import Any, Optional
 from datetime import datetime, date, timedelta
-import logging, json, os, time, sys
+import logging, json, os, time, sys, threading
 
 # Path setup for dual-mode imports (analysis/ or project root)
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -689,6 +689,8 @@ class FactorEngine:
         self._price_cache: dict[str, dict] = {}
         self._fin_cache: dict[str, dict] = {}
         self._fin_hist_cache: dict[str, list] = {}
+        # 并发安全 (2026-08-18): score_batch 线程池并发采集 → 缓存双检锁
+        self._cache_lock = threading.RLock()
 
     # ── 子因子原始值计算 ──
 
@@ -705,12 +707,14 @@ class FactorEngine:
     def _get_hist(self, symbol: str, days: int = 250) -> dict:
         """获取历史行情（带缓存）"""
         cache_key = f"{symbol}_{days}"
-        if cache_key in self._price_cache:
-            return self._price_cache[cache_key]
+        with self._cache_lock:  # 双检锁
+            if cache_key in self._price_cache:
+                return self._price_cache[cache_key]
         from data.data_router import get_history
         try:
             df = get_history(symbol, days)
-            self._price_cache[cache_key] = df
+            with self._cache_lock:
+                self._price_cache[cache_key] = df
             return df
         except Exception as e:
             logger.warning(f"[factor_engine] get_history({symbol}) failed: {e}")
@@ -718,12 +722,14 @@ class FactorEngine:
 
     def _get_fin(self, symbol: str) -> dict:
         """获取财务数据（带缓存）"""
-        if symbol in self._fin_cache:
-            return self._fin_cache[symbol]
+        with self._cache_lock:  # 双检锁
+            if symbol in self._fin_cache:
+                return self._fin_cache[symbol]
         from data.data_layer import get_financial_report
         try:
             fin = get_financial_report(symbol) or {}
-            self._fin_cache[symbol] = fin
+            with self._cache_lock:
+                self._fin_cache[symbol] = fin
             return fin
         except Exception as e:
             logger.warning(f"[factor_engine] get_financial_report({symbol}) failed: {e}")
@@ -731,12 +737,14 @@ class FactorEngine:
 
     def _get_fin_hist(self, symbol: str) -> list:
         """获取财务历史（带缓存）"""
-        if symbol in self._fin_hist_cache:
-            return self._fin_hist_cache[symbol]
+        with self._cache_lock:  # 双检锁
+            if symbol in self._fin_hist_cache:
+                return self._fin_hist_cache[symbol]
         from data.data_layer import get_financial_history
         try:
             fh = get_financial_history(symbol, quarters=4) or []
-            self._fin_hist_cache[symbol] = fh
+            with self._cache_lock:
+                self._fin_hist_cache[symbol] = fh
             return fh
         except Exception:
             return []
@@ -947,13 +955,15 @@ class FactorEngine:
 
     def _get_qt_source(self):
         """获取QTSource单例"""
-        if not hasattr(self, '_qt_inst'):
+        with self._cache_lock:  # 双检锁: 防止并发首调重复创建
+            if hasattr(self, '_qt_inst'):
+                return self._qt_inst
             try:
                 from data.sources.qingting_source import QTSource
                 self._qt_inst = QTSource()
             except Exception:
                 self._qt_inst = None
-        return self._qt_inst
+            return self._qt_inst
 
     def _get_industry_value(self, sub_key: str, symbol: str) -> float | None:
         """获取行业排名/情绪因子值"""
@@ -1166,11 +1176,29 @@ class FactorEngine:
         for sk in SUB_FACTOR_DEFS:
             raw_values[sk] = {}
 
-        for i, sym in enumerate(symbols):
-            for sk in SUB_FACTOR_DEFS:
-                raw_values[sk][sym] = self._get_sub_value(sk, sym)
-            if (i + 1) % 20 == 0:
-                logger.info(f"  [factor_engine] {i+1}/{n} symbols collected")
+        # P0性能 (2026-08-18): 52标串行采集 15+min 跑不完 cron →
+        # ThreadPoolExecutor 并发采集 (蜻蜓网络 IO 是瓶颈, 并发大幅提速)。
+        # 线程安全: 数据源层已加锁 (baostock 全局锁 / QTSource session+缓存锁)。
+        def _collect_one(sym: str) -> dict[str, float | None]:
+            return {sk: self._get_sub_value(sk, sym) for sk in SUB_FACTOR_DEFS}
+
+        _BATCH_WORKERS = 6
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=_BATCH_WORKERS) as pool:
+            futures = {pool.submit(_collect_one, sym): sym for sym in symbols}
+            done = 0
+            for fut in as_completed(futures):
+                sym = futures[fut]
+                try:
+                    sub_values = fut.result()
+                except Exception as e:
+                    logger.warning(f"[factor_engine] collect({sym}) failed: {e}")
+                    sub_values = {}
+                for sk, v in sub_values.items():
+                    raw_values[sk][sym] = v
+                done += 1
+                if done % 20 == 0:
+                    logger.info(f"  [factor_engine] {done}/{n} symbols collected")
 
         # Phase 2: 对每个子因子做产业链内截面分位数标准化（行业中性化）
         chain_map = _build_chain_map(symbols)

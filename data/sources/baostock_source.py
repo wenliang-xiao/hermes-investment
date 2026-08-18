@@ -12,11 +12,15 @@ P0 加固 (2026-08-18):
 """
 from __future__ import annotations
 from pathlib import Path
-import sys, os, json, signal, time, logging
+import sys, os, json, signal, time, logging, threading
 from datetime import datetime
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+# 并发安全 (2026-08-18): baostock C 层全局单例, 多线程并发调用会共享句柄炸掉
+# → 所有 C 层调用(login/query/next)必须串行化
+_BS_LOCK = threading.RLock()
 
 _CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -51,8 +55,10 @@ def _timeout_guard(seconds: float):
     """SIGALRM 超时守护上下文 — baostock C 层 socket recv 挂死时强制中断。
 
     已验证: SIGALRM 可打断 C 层阻塞 recv (114.94.20.42:10030 挂死场景 5s 内中断)。
+    并发安全 (2026-08-18): SIGALRM 仅主线程可用 — worker 线程跳过 (依赖 _BS_LOCK 串行化
+    + requests/socket 层超时兜底; 且 C 层调用已被 _BS_LOCK 保护, 不会并行进入)。
     """
-    if seconds <= 0:
+    if seconds <= 0 or threading.current_thread() is not threading.main_thread():
         yield
         return
 
@@ -70,7 +76,7 @@ def _timeout_guard(seconds: float):
 
 def _bs_login(bs):
     """带超时的 baostock 登录 (挂死时抛 BSTimeoutError)"""
-    with _timeout_guard(BS_LOGIN_TIMEOUT):
+    with _BS_LOCK, _timeout_guard(BS_LOGIN_TIMEOUT):
         lg = bs.login()
     if lg.error_code != "0":
         raise RuntimeError(f"baostock login failed: {lg.error_msg}")
@@ -79,7 +85,7 @@ def _bs_login(bs):
 
 def _bs_query(bs, bs_code: str, fields: str, start_date: str, end_date: str):
     """带超时的 baostock 历史查询 (挂死时抛 BSTimeoutError)"""
-    with _timeout_guard(BS_CALL_TIMEOUT):
+    with _BS_LOCK, _timeout_guard(BS_CALL_TIMEOUT):
         rs = bs.query_history_k_data_plus(
             bs_code, fields,
             start_date=start_date, end_date=end_date,
@@ -156,24 +162,25 @@ def get_history_a(symbol: str, days: int = 1200):
 def _get_history_a_bs(symbol: str, days: int = 1200):
     """baostock 主路径（带超时 + 持久会话）"""
     import pandas as pd
-    bs = _bs_session()  # 进程内仅 login 一次
-    bs_code = _a_code(symbol)
+    with _BS_LOCK:  # 保护 query + rs.next() 读取全流程 (C 层共享句柄)
+        bs = _bs_session()  # 进程内仅 login 一次
+        bs_code = _a_code(symbol)
 
-    fields = "date,open,high,low,close,volume,amount,peTTM,pctChg"
+        fields = "date,open,high,low,close,volume,amount,peTTM,pctChg"
 
-    from datetime import datetime, timedelta
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=int(days * 1.4))).strftime("%Y-%m-%d")
+        from datetime import datetime, timedelta
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=int(days * 1.4))).strftime("%Y-%m-%d")
 
-    # Query (超时守护) — 持久会话不再每次 login/logout
-    rs = _bs_query(bs, bs_code, fields, start_date, end_date)
+        # Query (超时守护) — 持久会话不再每次 login/logout
+        rs = _bs_query(bs, bs_code, fields, start_date, end_date)
 
-    if rs.error_code != "0":
-        return None
+        if rs.error_code != "0":
+            return None
 
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
+        rows = []
+        while rs.next():
+            rows.append(rs.get_row_data())
 
     if not rows:
         # baostock没数据 → AKShare ETF 历史

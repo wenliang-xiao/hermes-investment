@@ -13,7 +13,7 @@ P0 加固 (2026-08-18):
   - 修复: ①显式 (connect, read) 双超时 ②SIGALRM 进程级硬超时包住整个请求
     ③行业排名/财务磁盘缓存跨进程复用 (蜻蜓日频数据, 当日缓存有效)
 """
-import os, json, time, logging, signal
+import os, json, time, logging, signal, threading
 from typing import Optional
 from pathlib import Path
 from datetime import date
@@ -43,7 +43,9 @@ def _qt_hard_timeout_guard(seconds: float = QT_HARD_TIMEOUT):
 
     @contextmanager
     def _guard():
-        if seconds <= 0:
+        if seconds <= 0 or threading.current_thread() is not threading.main_thread():
+            # 并发安全 (2026-08-18): SIGALRM 仅主线程可用 —
+            # worker 线程依赖 requests (connect, read) 双超时兜底
             yield
             return
 
@@ -116,6 +118,10 @@ class QTSource:
         self._fin_cache: dict = {}
         self._rank_cache: dict = {}
         self._profile_cache: dict = {}
+        # 并发安全 (2026-08-18): score_batch 线程池并发采集 —
+        # session 替换/缓存读改写/磁盘缓存写 全部加锁
+        self._lock = threading.RLock()
+        self._disk_lock = threading.Lock()
 
     def _get(self, path: str, params: dict = None, skill_id: str = None) -> dict:
         """发送 GET 请求到蜻蜓 API（带连接重建重试 + P0超时防护）"""
@@ -126,8 +132,11 @@ class QTSource:
         last_err: Exception | None = None
         for attempt in range(3):  # 最多3次尝试
             try:
+                # 取 session 引用 (替换由 _reconnect 在锁内完成; 引用获取锁保护)
+                with self._lock:
+                    session = self._session
                 with _qt_hard_timeout_guard():
-                    resp = self._session.get(
+                    resp = session.get(
                         url, params=params, headers=headers,
                         timeout=(QT_CONNECT_TIMEOUT, QT_READ_TIMEOUT),
                     )
@@ -160,17 +169,18 @@ class QTSource:
 
     def _reconnect(self) -> None:
         """销毁旧会话, 建立全新连接池（解决长扫描中 keep-alive 连接过期问题）"""
-        try:
-            self._session.close()
-        except Exception:
-            pass
-        import time as _t
-        _t.sleep(0.3)
-        self._session = requests.Session()
-        self._session.headers.update({
-            "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
-        })
+        with self._lock:  # 并发安全: 防止 worker 线程同时重建 session
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            import time as _t
+            _t.sleep(0.3)
+            self._session = requests.Session()
+            self._session.headers.update({
+                "X-API-Key": self.api_key,
+                "Content-Type": "application/json",
+            })
 
     def get_financial_report(self, stock_code: str) -> dict:
         """
@@ -179,8 +189,9 @@ class QTSource:
         返回 dict 键名与 data_layer.get_financial_report() 兼容
         """
         stock_code = stock_code.replace(".SH", "").replace(".SZ", "").zfill(6)
-        if stock_code in self._fin_cache:
-            return self._fin_cache[stock_code]
+        with self._lock:  # 双检锁: 避免并发重复请求
+            if stock_code in self._fin_cache:
+                return self._fin_cache[stock_code]
 
         data = self._get(
             "/info/f10/finance/more",
@@ -191,12 +202,14 @@ class QTSource:
         if not data or data.get("responseCode") != 0:
             logger.info(f"[QTSource] get_financial_report({stock_code}) failed: "
                         f"{data.get('responseDesc', 'no data')}")
-            self._fin_cache[stock_code] = {}
+            with self._lock:
+                self._fin_cache[stock_code] = {}
             return {}
 
         rows = data.get("keyIndicatorList") or []
         if not rows:
-            self._fin_cache[stock_code] = {}
+            with self._lock:
+                self._fin_cache[stock_code] = {}
             return {}
 
         latest = rows[0]
@@ -208,7 +221,8 @@ class QTSource:
                     result[local_key] = float(val)
                 except (ValueError, TypeError):
                     pass
-        self._fin_cache[stock_code] = result
+        with self._lock:
+            self._fin_cache[stock_code] = result
         return result
 
     def get_financial_reports_batch(self, stock_codes: list) -> dict:
@@ -262,22 +276,25 @@ class QTSource:
         """获取股票在所属行业中的指标排名（内存缓存 + 当日磁盘缓存跨进程复用）"""
         stock_code = stock_code.replace(".SH", "").replace(".SZ", "").zfill(6)
         cache_key = f"{stock_code}_{metric}"
-        if cache_key in self._rank_cache:
-            return self._rank_cache[cache_key]
+        with self._lock:  # 双检锁: 避免并发重复请求
+            if cache_key in self._rank_cache:
+                return self._rank_cache[cache_key]
 
         # P0性能: 蜻蜓API单次~10s, 52标×3指标=26min → 当日磁盘缓存跨进程复用
         today = date.today().isoformat() if not hasattr(self, "_today") else self._today
         disk_path = _QT_CACHE_DIR / f"rank_{today}.json"
-        disk_cache: dict = {}
-        try:
-            if disk_path.exists():
-                with open(disk_path) as f:
-                    disk_cache = json.load(f)
-                if cache_key in disk_cache:
-                    self._rank_cache[cache_key] = disk_cache[cache_key]
-                    return disk_cache[cache_key]
-        except (OSError, json.JSONDecodeError):
-            disk_cache = {}
+        with self._disk_lock:  # 磁盘缓存读改写锁: 防止多线程并发丢写
+            disk_cache: dict = {}
+            try:
+                if disk_path.exists():
+                    with open(disk_path) as f:
+                        disk_cache = json.load(f)
+                    if cache_key in disk_cache:
+                        with self._lock:
+                            self._rank_cache[cache_key] = disk_cache[cache_key]
+                        return disk_cache[cache_key]
+            except (OSError, json.JSONDecodeError):
+                disk_cache = {}
 
         data = self._get(
             "/info/f10/finance/industryRank",
@@ -291,14 +308,23 @@ class QTSource:
                 "industryAvg": data.get("industryAvg"),
                 "industryList": data.get("industryList") or [],
             }
-            self._rank_cache[cache_key] = result
+            with self._lock:
+                self._rank_cache[cache_key] = result
             # 写当日磁盘缓存
             try:
-                disk_cache[cache_key] = result
-                tmp_path = disk_path.with_suffix(".tmp")
-                with open(tmp_path, "w") as f:
-                    json.dump(disk_cache, f, ensure_ascii=False, default=str)
-                os.replace(tmp_path, disk_path)
+                with self._disk_lock:
+                    disk_cache = {}
+                    if disk_path.exists():
+                        try:
+                            with open(disk_path) as f:
+                                disk_cache = json.load(f)
+                        except (OSError, json.JSONDecodeError):
+                            disk_cache = {}
+                    disk_cache[cache_key] = result
+                    tmp_path = disk_path.with_suffix(".tmp")
+                    with open(tmp_path, "w") as f:
+                        json.dump(disk_cache, f, ensure_ascii=False, default=str)
+                    os.replace(tmp_path, disk_path)
             except (OSError, TypeError):
                 pass
             return result
