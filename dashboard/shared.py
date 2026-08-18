@@ -232,7 +232,7 @@ def _clean_signals(signals, context="signal"):
 
 
 def _aggregate_strategy_portfolios():
-    """从策略状态文件聚合真实持仓和交易历史"""
+    """从策略状态文件聚合真实持仓和交易历史（同名合并/动态capital/补name）"""
     st_path = ROOT / "data" / "strategy_states.json"
     if not st_path.exists():
         return None
@@ -240,16 +240,19 @@ def _aggregate_strategy_portfolios():
         states = json.load(f)
 
     total_cash = 0
+    capital_total = 0
     all_positions = {}
     all_history = []
 
     for sname, state in states.items():
-        total_cash += state.get("cash", 0)
+        capital_total += state.get("capital", 1000000) or 1000000
+        total_cash += state.get("cash", 0) or 0
         for h in state.get("history", []):
             entry = {
                 "time": h.get("date", ""),
                 "symbol": h.get("symbol", ""),
-                "action": "买入" if h.get("action") == "买入" else "卖出",
+                "name": get_name(h.get("symbol", "")),
+                "action": "买入" if h.get("action", "").startswith("买") else "卖出",
                 "price": h.get("price", 0),
                 "quantity": h.get("quantity", 0),
                 "cost": h.get("cost", 0),
@@ -259,22 +262,51 @@ def _aggregate_strategy_portfolios():
             }
             all_history.append(entry)
         for sym, pos in state.get("positions", {}).items():
+            qty = pos.get("quantity", 0) or 0
+            entry_p = pos.get("entry_price", 0) or 0
+            cost = pos.get("cost", 0) or (entry_p * qty)
             if sym not in all_positions:
                 all_positions[sym] = {
                     "symbol": sym,
-                    "entry_price": pos.get("entry_price", 0),
-                    "quantity": pos.get("quantity", 0),
+                    "entry_price": entry_p,
+                    "quantity": qty,
                     "entry_date": pos.get("entry_date", ""),
-                    "current_price": pos.get("current_price", pos.get("entry_price", 0)),
-                    "name": get_name(sym),
+                    "current_price": pos.get("current_price", entry_p),
+                    "name": pos.get("name") or get_name(sym),
+                    "entry_score": pos.get("entry_score"),
+                    "cost": cost,
                 }
+            else:
+                # 同名多策略合并: 数量累加, 成本加权
+                cur = all_positions[sym]
+                old_qty = cur.get("quantity", 0) or 0
+                new_qty = qty
+                if new_qty <= 0:
+                    continue
+                old_cost = cur.get("cost", 0) or (cur.get("entry_price", 0) * old_qty)
+                new_cost = cost
+                total_qty = old_qty + new_qty
+                cur["quantity"] = total_qty
+                cur["cost"] = old_cost + new_cost
+                if total_qty > 0:
+                    cur["entry_price"] = (old_cost + new_cost) / total_qty
+                new_cur = pos.get("current_price", 0) or 0
+                if new_cur > cur.get("current_price", 0):
+                    cur["current_price"] = new_cur
+                if not cur.get("entry_score") and pos.get("entry_score"):
+                    cur["entry_score"] = pos.get("entry_score")
+                if not cur.get("name") or cur["name"] == sym:
+                    cur["name"] = pos.get("name") or get_name(sym)
 
-    total_invested = sum(p["entry_price"] * p["quantity"] for p in all_positions.values())
+    total_invested = sum(p.get("cost", 0) or (p["entry_price"] * p["quantity"])
+                         for p in all_positions.values())
+    realized = sum(h.get("pnl", 0) or 0 for h in all_history
+                   if h.get("action") == "卖出" and h.get("pnl") is not None)
     return {
-        "capital": 3000000,  # 三策略各 ¥1,000,000 初始资本
+        "capital": capital_total or 3000000,  # 动态: 每策略初始资金之和
         "cash": total_cash,
         "positions": all_positions,
         "history": sorted(all_history, key=lambda x: x.get("time", ""), reverse=True),
         "created_at": "2026-06-24",
-        "realized_pnl": sum(h.get("pnl", 0) for h in all_history if h.get("pnl")),
+        "realized_pnl": round(realized, 2),
     }

@@ -6,12 +6,58 @@ CSC (China Securities / 中信建投) Skill Hub API Wrapper.
 数据更新频率：财报数据 T+2~3h，行业排名日频
 覆盖范围：A 股全量 ~5000 只
 鉴权方式：X-API-Key + X-Calling-Skill-Id
+
+P0 加固 (2026-08-18):
+  - 蜻蜓 API 偶发 TCP 连接挂死 (urllib3 create_connection 卡住, timeout=15 兜不住)
+    → run_trading cron 卡死在批量评分, 模拟盘数据停滞
+  - 修复: ①显式 (connect, read) 双超时 ②SIGALRM 进程级硬超时包住整个请求
+    ③行业排名/财务磁盘缓存跨进程复用 (蜻蜓日频数据, 当日缓存有效)
 """
-import os, json, time, logging
+import os, json, time, logging, signal
 from typing import Optional
+from pathlib import Path
+from datetime import date
 import requests
 
 logger = logging.getLogger(__name__)
+
+# ── P0 超时防护 ──
+QT_CONNECT_TIMEOUT = 5     # TCP 建连超时
+QT_READ_TIMEOUT = 15       # 读响应超时
+QT_HARD_TIMEOUT = 25       # 整个请求硬超时 (SIGALRM)
+_QT_CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache" / "qingting"
+_QT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class QTTimeoutError(TimeoutError):
+    """蜻蜓 API 请求挂死超时"""
+
+
+def _qt_hard_timeout_guard(seconds: float = QT_HARD_TIMEOUT):
+    """SIGALRM 进程级硬超时 — 包住 requests 全流程(含 DNS/TCP 建连挂死)。
+
+    urllib3 create_connection 在特定网络状态下可能无视 timeout 参数无限阻塞,
+    用 SIGALRM 强制打断 (已验证可打断 C 层 socket 操作)。
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _guard():
+        if seconds <= 0:
+            yield
+            return
+
+        def _handler(signum, frame):
+            raise QTTimeoutError(f"蜻蜓API请求超时(>{seconds:.0f}s)")
+
+        old = signal.signal(signal.SIGALRM, _handler)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old)
+    return _guard()
 
 # ── 默认配置 ──
 # 支持: CSC_API_KEY (推荐) 或 DRAGONFLY_API_KEY (遗留)
@@ -72,7 +118,7 @@ class QTSource:
         self._profile_cache: dict = {}
 
     def _get(self, path: str, params: dict = None, skill_id: str = None) -> dict:
-        """发送 GET 请求到蜻蜓 API（带连接重建重试, 防 Bad file descriptor）"""
+        """发送 GET 请求到蜻蜓 API（带连接重建重试 + P0超时防护）"""
         url = f"{self.base_url}{path}"
         headers = {}
         if skill_id:
@@ -80,9 +126,18 @@ class QTSource:
         last_err: Exception | None = None
         for attempt in range(3):  # 最多3次尝试
             try:
-                resp = self._session.get(url, params=params, headers=headers, timeout=15)
+                with _qt_hard_timeout_guard():
+                    resp = self._session.get(
+                        url, params=params, headers=headers,
+                        timeout=(QT_CONNECT_TIMEOUT, QT_READ_TIMEOUT),
+                    )
                 resp.raise_for_status()
                 return resp.json()
+            except QTTimeoutError as e:
+                # P0: SIGALRM 硬超时 — 服务器挂死(建连卡住/无响应)
+                logger.warning(f"[QTSource] GET {path} 硬超时 (attempt {attempt+1}): {e} — 重建连接")
+                last_err = e
+                self._reconnect()
             except requests.exceptions.ConnectionError as e:
                 # 连接重建: errno 9 (Bad file descriptor) / stale keep-alive
                 logger.warning(f"[QTSource] GET {path} conn err (attempt {attempt+1}): {e} — 重建连接")
@@ -204,11 +259,26 @@ class QTSource:
         return history
 
     def get_industry_rank(self, stock_code: str, metric: str = "jzcsyl") -> dict:
-        """获取股票在所属行业中的指标排名"""
+        """获取股票在所属行业中的指标排名（内存缓存 + 当日磁盘缓存跨进程复用）"""
         stock_code = stock_code.replace(".SH", "").replace(".SZ", "").zfill(6)
         cache_key = f"{stock_code}_{metric}"
         if cache_key in self._rank_cache:
             return self._rank_cache[cache_key]
+
+        # P0性能: 蜻蜓API单次~10s, 52标×3指标=26min → 当日磁盘缓存跨进程复用
+        today = date.today().isoformat() if not hasattr(self, "_today") else self._today
+        disk_path = _QT_CACHE_DIR / f"rank_{today}.json"
+        disk_cache: dict = {}
+        try:
+            if disk_path.exists():
+                with open(disk_path) as f:
+                    disk_cache = json.load(f)
+                if cache_key in disk_cache:
+                    self._rank_cache[cache_key] = disk_cache[cache_key]
+                    return disk_cache[cache_key]
+        except (OSError, json.JSONDecodeError):
+            disk_cache = {}
+
         data = self._get(
             "/info/f10/finance/industryRank",
             params={"stockCode": stock_code, "metric": metric},
@@ -222,6 +292,15 @@ class QTSource:
                 "industryList": data.get("industryList") or [],
             }
             self._rank_cache[cache_key] = result
+            # 写当日磁盘缓存
+            try:
+                disk_cache[cache_key] = result
+                tmp_path = disk_path.with_suffix(".tmp")
+                with open(tmp_path, "w") as f:
+                    json.dump(disk_cache, f, ensure_ascii=False, default=str)
+                os.replace(tmp_path, disk_path)
+            except (OSError, TypeError):
+                pass
             return result
         return {}
 

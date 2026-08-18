@@ -10,8 +10,9 @@ import numpy as np
 import time
 import logging
 import requests
-import sys, os
-from datetime import datetime, timedelta
+import sys, os, json
+from datetime import datetime, timedelta, date
+from pathlib import Path
 
 # Path setup: allow both standalone and package imports
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -297,6 +298,39 @@ def _get_financial_em(symbol: str) -> dict:
 _FIN_CACHE = {}
 _QT_SOURCE = None
 
+# P0性能: 蜻蜓API财务单次~12s, 52标=10min → 当日磁盘缓存跨进程复用
+_FIN_DISK_DIR = Path(__file__).parent.parent / "data" / "cache" / "fin"
+_FIN_DISK_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _fin_disk_path() -> Path:
+    return _FIN_DISK_DIR / f"fin_{date.today().isoformat()}.json"
+
+
+def _fin_disk_load() -> dict:
+    try:
+        p = _fin_disk_path()
+        if p.exists():
+            with open(p) as f:
+                return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _fin_disk_save(symbol: str, result: dict):
+    try:
+        p = _fin_disk_path()
+        cache = _fin_disk_load()
+        cache[symbol] = result
+        tmp = p.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(cache, f, ensure_ascii=False, default=str)
+        os.replace(tmp, p)
+    except (OSError, TypeError):
+        pass
+
+
 def _get_qt_source():
     """延迟初始化的蜻蜓数据源单例"""
     global _QT_SOURCE
@@ -306,9 +340,14 @@ def _get_qt_source():
     return _QT_SOURCE
 
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。蜻蜓CSC→东方财富→baostock。同进程内缓存。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。蜻蜓CSC→东方财富→baostock。同进程内缓存 + 当日磁盘缓存。"""
     if symbol in _FIN_CACHE:
         return _FIN_CACHE[symbol]
+    # 当日磁盘缓存 (跨进程复用, 蜻蜓日频数据当日有效)
+    disk_cache = _fin_disk_load()
+    if symbol in disk_cache:
+        _FIN_CACHE[symbol] = disk_cache[symbol]
+        return disk_cache[symbol]
     # ① 蜻蜓 CSC Skill 广场（专业券商API，A股全量，T+2~3h）
     if not symbol.endswith(".HK"):  # 蜻蜓仅覆盖A股
         try:
@@ -318,6 +357,7 @@ def get_financial_report(symbol: str) -> dict:
                 if result:
                     logger.info(f"[data] 蜻蜓CSC → {symbol}: {len(result)} 个字段")
                     _FIN_CACHE[symbol] = result
+                    _fin_disk_save(symbol, result)
                     return result
         except Exception:
             logger.warning(f"[data] 蜻蜓CSC({symbol}) fallback: EM")
@@ -326,6 +366,7 @@ def get_financial_report(symbol: str) -> dict:
         result = _get_financial_em(symbol)
         if result:
             _FIN_CACHE[symbol] = result
+            _fin_disk_save(symbol, result)
             return result
     except Exception:
         pass
@@ -392,6 +433,7 @@ def get_financial_report(symbol: str) -> dict:
                     continue
 
     _FIN_CACHE[symbol] = result
+    _fin_disk_save(symbol, result)
     return result
 
 
