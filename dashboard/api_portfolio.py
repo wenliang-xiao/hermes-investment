@@ -29,8 +29,9 @@ def _load_scan_score_map() -> dict:
         return {}
 
 
-def _annotate_signals(all_signals, final_signals, trade_history, today_str):
-    """给原始信号打状态: executed(今日已执行) / filtered(冲突或周频过滤) / pending"""
+def _annotate_signals(all_signals, final_signals, trade_history, today_str, scan_map=None):
+    """给原始信号打状态: executed(今日已执行) / filtered(冲突或周频过滤) / pending
+    并富集因子数据 (scores/factor_breakdown) 供信号弹窗深度分析"""
     def norm(a):
         a = str(a or "")
         if a.upper().startswith("BUY") or a.startswith("买"):
@@ -46,6 +47,7 @@ def _annotate_signals(all_signals, final_signals, trade_history, today_str):
                 executed.add((sname, t.get("symbol"), norm(t.get("action"))))
     final_keys = {(s.get("strategy"), s.get("symbol"), norm(s.get("action")))
                   for s in final_signals}
+    scan_map = scan_map or {}
     for s in all_signals:
         k = (s.get("strategy"), s.get("symbol"), norm(s.get("action")))
         if k in executed:
@@ -54,6 +56,13 @@ def _annotate_signals(all_signals, final_signals, trade_history, today_str):
             s["status"] = "filtered"
         else:
             s["status"] = "pending"
+        # 因子富集
+        fs = scan_map.get(s.get("symbol"), {})
+        if fs:
+            if not s.get("factor_scores"):
+                s["factor_scores"] = fs.get("scores")
+            if not s.get("factor_breakdown"):
+                s["factor_breakdown"] = fs.get("factor_breakdown")
     return all_signals
 
 
@@ -369,7 +378,7 @@ def api_v2_portfolio_detail():
 
     final_sigs = _clean_signals(raw_signals, "v2_detail")[0]
     all_sigs = data.get("all_signals", [])
-    _annotate_signals(all_sigs, final_sigs, trade_history, data.get("date", ""))
+    _annotate_signals(all_sigs, final_sigs, trade_history, data.get("date", ""), scan_map)
 
     # ── 富集交易历史: 股票名/买入行浮盈亏+持有天数/因子分解(供弹窗深度解析) ──
     enriched_th = {}

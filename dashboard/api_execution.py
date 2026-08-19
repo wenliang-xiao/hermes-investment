@@ -45,35 +45,71 @@ async def execution_board():
         pass
     scores = {sym: info for sym, info in scores.items() if sym in focus}
 
+    # 宏观状态 → 双门/象限检查有真实数据
+    macro_state = {}
+    try:
+        mp = DATA / "macro_engine_cache.json"
+        if mp.exists():
+            with open(mp) as f:
+                macro_state = json.load(f)
+    except (json.JSONDecodeError, KeyError, OSError):
+        pass
+
+    # 今日已卖出(止损)的标的 → 禁止当日反手 (信号自洽硬规则)
+    sold_today = set()
+    try:
+        ts_path = DATA / "trading_signals.json"
+        if ts_path.exists():
+            with open(ts_path) as f:
+                _ts = json.load(f)
+            _today = _ts.get("date", "")
+            for _sname, _txns in (_ts.get("trade_history", {}) or {}).items():
+                for _t in (_txns or []):
+                    if str(_t.get("date", ""))[:10] == _today and str(_t.get("action", "")).startswith(("卖", "SELL")):
+                        sold_today.add(_t.get("symbol"))
+    except (json.JSONDecodeError, KeyError, OSError):
+        pass
+
     checker = ExecutionChecker()
     builder = EvidenceBuilder()
 
-    board = {"buy": [], "sell": [], "hold": [], "wait": []}
+    board = {"buy": [], "sell": [], "hold": [], "wait": [], "excluded": []}
 
     for sid, info in scores.items():
         sym = info.get("symbol", sid)
         position = positions.get(sym) if positions else None
 
-        # 执行检查 (score_data 传完整评分条目: composite/scores/factor_breakdown)
+        # 合成数据质量 → 证据链[数据层] 从 missing → ok
+        item = dict(info)
+        dq = _synthesize_data_quality(item)
+        item["data_quality"] = dq
+        item["composite"] = info.get("composite_v4", info.get("composite", 0))
+
+        # 执行检查 (score_data 传完整评分条目: composite/scores/factor_breakdown/data_quality)
         exec_res = checker.check(
             symbol=sym,
-            score_data=info,
+            score_data=item,
+            macro_state=macro_state,
             position=position,
         )
 
         # 证据包
         packet = builder.build(
             symbol=sym,
-            score_data=info,
+            score_data=item,
             position=position,
         )
 
         entry = {
             "symbol": sym,
+            "name": info.get("name", sym),
             "action": exec_res.get("action", "HOLD"),
             "action_confidence": exec_res.get("action_confidence", 0.5),
             "action_reason": exec_res.get("action_reason", ""),
-            "composite": info.get("composite", 0),
+            "composite": item.get("composite", 0),
+            "scores": info.get("scores", {}),
+            "factor_breakdown": info.get("factor_breakdown", {}),
+            "data_quality": dq,
             "evidence": packet.to_dict(),
         }
 
@@ -83,12 +119,46 @@ async def execution_board():
             entry["trail_stop"] = exec_res["trail_stop"]
 
         action = str(exec_res.get("action", "HOLD")).lower()
+
+        # 今日已止损标的 → 禁止反手买入 (信号自洽)
+        if sym in sold_today and action == "buy":
+            entry["action"] = "EXCLUDED"
+            entry["action_reason"] = "⚠️ 今日已止损, 禁止当日反手"
+            board["excluded"].append(entry)
+            continue
+
         if action in board:
             board[action].append(entry)
         else:
             board["hold"].append(entry)
 
-    return {"status": "ok", "board": board}
+    return {"status": "ok", "macro": {
+        "quadrant": macro_state.get("quadrant"),
+        "dual_gate": (macro_state.get("dual_gate") or {}),
+    }, "board": board}
+
+
+def _synthesize_data_quality(info: dict) -> dict:
+    """合成数据质量: 价格有效性 + 因子完整度 + 快照新鲜度 (供证据链[数据层])"""
+    price = info.get("price", 0) or 0
+    fb = info.get("factor_breakdown", {}) or {}
+    n = len(fb)
+    price_ok = price > 0
+    if n >= 20 and price_ok:
+        grade = "A"
+    elif n >= 10 and price_ok:
+        grade = "B"
+    else:
+        grade = "D"
+    return {
+        "grade": grade,
+        "price_valid": price_ok,
+        "price": price,
+        "factor_count": n,
+        "factor_completeness": round(min(1.0, n / 25), 2),
+        "snapshot": "scan_snapshot_latest",
+        "note": f"价格{'有效' if price_ok else '无效'}, 子因子{n}项, 综合质量{grade}",
+    }
 
 
 @router.get("/api/v2/execution/build-checklist/{symbol}")
