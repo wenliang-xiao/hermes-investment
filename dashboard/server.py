@@ -36,6 +36,7 @@ from dashboard.api_layers import router as layers_router
 from dashboard.api_chain import router as chain_router
 from dashboard.api_gurus import router as gurus_router
 from dashboard.api_insights import router as insights_router
+from dashboard.api_consistency import router as consistency_router
 
 app.include_router(portfolio_router)
 app.include_router(pool_router)
@@ -51,6 +52,7 @@ app.include_router(layers_router)
 app.include_router(chain_router)
 app.include_router(gurus_router)
 app.include_router(insights_router)
+app.include_router(consistency_router)
 
 # ─── HTML 模板 ─────────────────────────────────────
 
@@ -60,7 +62,11 @@ from dashboard.templates.dashboard_main import UNIFIED_DASHBOARD_HTML
 @app.get("/")
 @app.get("/dashboard")
 def dashboard():
-    return responses.HTMLResponse(UNIFIED_DASHBOARD_HTML)
+    # no-store: 页面内联 JS 每次强制拉最新, 避免浏览器启发式缓存旧版(导致"一直加载/无数据")
+    return responses.HTMLResponse(
+        UNIFIED_DASHBOARD_HTML,
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.get("/score_explanation")

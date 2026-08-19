@@ -124,6 +124,7 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <h1>面基 · 三源融合模拟盘</h1>
   <div class="subtitle" id="runInfo">加载中...</div>
+  <div id="consistency-bar" class="text-xs mt-1"></div>
 
   <!-- ======== 模拟盘 V2 ======== -->
   <div id="tab-dashboard" class="space-y-6">
@@ -147,8 +148,13 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
         </div>
         
         <!-- Signal Log -->
-        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col h-[330px]">
-            <h3 class="text-gray-100 font-semibold mb-4">⚡ 策略信号日志</h3>
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col h-[360px]">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-gray-100 font-semibold">⚡ 策略信号日志</h3>
+                <select id="v2-signal-date" class="bg-gray-700 text-gray-200 rounded-lg px-2 py-1 text-xs border border-gray-600" onchange="loadSignalHistory(this.value)">
+                    <option value="">今日信号</option>
+                </select>
+            </div>
             <div id="v2-signal-stats" class="text-xs text-gray-400 mb-2"></div>
             <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <table class="w-full text-xs text-left" style="border:none">
@@ -163,7 +169,15 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     </div>
 
     <div>
-        <h3 class="text-gray-100 font-semibold mb-4">💼 当前持仓</h3>
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-gray-100 font-semibold">💼 当前持仓</h3>
+            <div class="flex gap-2" id="v2-position-tabs">
+                <button class="pos-tab px-3 py-1 rounded-lg text-xs border border-gray-600 text-gray-300 hover:border-gray-400" data-strat="all" onclick="setPosTab('all')">全部</button>
+                <button class="pos-tab px-3 py-1 rounded-lg text-xs border border-gray-600 text-gray-300 hover:border-gray-400" data-strat="faceji" onclick="setPosTab('faceji')">面基</button>
+                <button class="pos-tab px-3 py-1 rounded-lg text-xs border border-gray-600 text-gray-300 hover:border-gray-400" data-strat="silverquant" onclick="setPosTab('silverquant')">SilverQuant</button>
+                <button class="pos-tab px-3 py-1 rounded-lg text-xs border border-gray-600 text-gray-300 hover:border-gray-400" data-strat="tradingagents" onclick="setPosTab('tradingagents')">TradingAgents</button>
+            </div>
+        </div>
         <div id="v2-positions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     </div>
 
@@ -390,6 +404,334 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 let netValueChartInstance = null;
 function fmt(v) { return Math.round(v).toLocaleString(); }
 
+// ═══════════ 全局状态 ═══════════
+let posTab = 'all';                 // 持仓 tab 过滤
+let _v2Detail = null;               // 最近一次 detail 数据 (供 tab/弹窗复用)
+const stratBg = { 'faceji': 'bg-blue-500/10', 'silverquant': 'bg-green-500/10', 'tradingagents': 'bg-purple-500/10' };
+const stratColors = { 'faceji': 'border-blue-500', 'silverquant': 'border-green-500', 'tradingagents': 'border-purple-500' };
+const FACTOR_LABELS = { 'quality': '质量', 'value': '价值', 'growth': '成长', 'momentum': '动量', 'low_vol': '低波', 'sentiment': '情绪', 'industry': '行业', 'dividend': '分红', 'risk': '风险' };
+const STRAT_RULES = {
+  faceji: { buy: '评分≥5.0 + MA20>MA60(趋势ok, 评分≥5.5可豁免) + 半Kelly仓位(上限8%)', sell: '硬止损-8% / 峰值回落-12% / 评分<4.5 / MA死叉+评分<5' },
+  silverquant: { buy: '评分≥5.0 槽位建仓, 固定¥30K/槽, 纯因子无MA过滤', sell: '硬止损-8% / 峰值回落-12% / MA死叉(亏损≥5%豁免) / 评分<4.5' },
+  tradingagents: { buy: '辩论分≥5.5 (Bull/Bear均值) + Kelly(上限12%)', sell: '辩论分<4强卖 / <5弱卖 / 硬止损-8%' },
+};
+
+// ═══════════ 持仓渲染 (tab 过滤) ═══════════
+function setPosTab(s) {
+  posTab = s;
+  document.querySelectorAll('.pos-tab').forEach(btn => {
+    const active = btn.dataset.strat === s;
+    btn.className = 'pos-tab px-3 py-1 rounded-lg text-xs border ' +
+      (active ? 'bg-blue-600/30 border-blue-500 text-blue-200' : 'border-gray-600 text-gray-300 hover:border-gray-400');
+  });
+  if (_v2Detail) renderPositionsGrid(_v2Detail);
+}
+
+function renderPositionsGrid(detailRes) {
+  let posHtml = '';
+  let canvasIndex = 0;
+  const radarDataList = [];
+  for (const [sname, positions] of Object.entries(detailRes.positions || {})) {
+    if (posTab !== 'all' && sname !== posTab) continue;
+    for (const [sym, pos] of Object.entries(positions)) {
+      const isPos = pos.pnl_pct >= 0;
+      const color = isPos ? 'text-green-500' : 'text-red-500';
+      const stopLoss = pos.stop_loss || pos.entry_price * 0.92;
+      const nearStop = pos.current_price <= stopLoss * 1.05;
+      let scoreArrow = '';
+      if (pos.current_score && pos.entry_score) {
+        if (pos.current_score > pos.entry_score) scoreArrow = '<span class="text-green-500">↑</span>';
+        else if (pos.current_score < pos.entry_score) scoreArrow = '<span class="text-red-500">↓</span>';
+      }
+      const cid = `radar-${canvasIndex++}`;
+      if (pos.factor_scores) radarDataList.push({ id: cid, scores: pos.factor_scores });
+      posHtml += `
+      <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col hover:border-gray-500 transition-colors cursor-pointer" onclick="showPositionModal('${sname}','${sym}')">
+          <div class="flex justify-between items-start mb-3">
+              <div>
+                  <div class="flex items-center gap-2">
+                      <span class="font-bold text-gray-100 text-lg">${sym}</span>
+                      <span class="text-sm text-gray-400">${pos.name || sym}</span>
+                  </div>
+                  <div class="text-xs px-2 py-0.5 rounded mt-1 inline-block ${stratBg[sname] || 'bg-gray-700'} text-gray-300">${sname}</div>
+              </div>
+              <div class="text-right">
+                  <div class="text-lg font-bold font-mono ${color}">${isPos?'+':''}${pos.pnl_pct.toFixed(2)}%</div>
+                  <div class="text-xs ${color} font-mono">${isPos?'+':''}¥${Math.round(pos.pnl).toLocaleString()}</div>
+              </div>
+          </div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mb-3">
+              <div class="flex justify-between"><span class="text-gray-400">买入/现价</span><span class="font-mono">${pos.entry_price.toFixed(2)} / ${pos.current_price.toFixed(2)}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">持有天数</span><span class="font-mono">${pos.hold_days} 天</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">回撤(峰值/买入)</span><span class="font-mono text-red-400">${pos.drawdown_from_peak?.toFixed(2)||0}% / ${pos.drawdown_from_entry?.toFixed(2)||0}%</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">仓位占比</span><span class="font-mono">${pos.pct?.toFixed(1)||0}%</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">止损线</span><span class="font-mono ${nearStop?'text-red-500 font-bold':''}">${stopLoss.toFixed(2)}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">评分变化</span><span class="font-mono">${pos.entry_score?.toFixed(2)||'-'} ${scoreArrow} ${pos.current_score?.toFixed(2)||'-'}</span></div>
+          </div>
+          <div class="text-xs text-gray-400 bg-gray-900 rounded p-2 mb-3 line-clamp-2" title="${pos.reason||''}">${pos.reason||'无理由'}</div>
+          <div class="h-32 w-full mt-auto relative pt-2">
+              ${pos.factor_scores ? `<canvas id="${cid}"></canvas>` : '<div class="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">无因子数据</div>'}
+          </div>
+      </div>`;
+    }
+  }
+  document.getElementById('v2-positions-grid').innerHTML = posHtml || '<div class="text-gray-400 col-span-full py-4 text-center">空仓</div>';
+  radarDataList.forEach(item => renderRadarChart(item.id, item.scores));
+}
+
+// ═══════════ 交易历史渲染 ═══════════
+function renderTradeHistory(detailRes) {
+  let allTrades = [];
+  for (const [sname, trades] of Object.entries(detailRes.trade_history || {})) {
+    trades.forEach(t => allTrades.push({...t, sname}));
+  }
+  allTrades.sort((a,b) => ((b.date||b.time||'') > (a.date||a.time||'') ? 1 : -1));
+  allTrades = allTrades.slice(0, 50);
+
+  let tradeHtml = '';
+  allTrades.forEach(tx => {
+    const isBuy = tx.action === '买入' || tx.action === 'BUY';
+    // 买入行优先显示未实现盈亏; 卖出行显示已实现盈亏
+    const pnlVal = tx.unrealized_pnl != null ? tx.unrealized_pnl : tx.pnl;
+    const pnlStr = pnlVal != null ? (pnlVal>0?'+':'') + '¥'+Math.round(pnlVal).toLocaleString() : '—';
+    const pnlCls = pnlVal > 0 ? 'text-green-500 font-medium' : (pnlVal < 0 ? 'text-red-500' : 'text-gray-400');
+    const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
+    const rowBg = isBuy ? 'bg-green-900/10 hover:bg-green-900/20' : 'bg-red-900/10 hover:bg-red-900/20';
+    const rowFont = pnlVal > 0 ? 'font-bold text-white' : 'text-gray-300';
+    const holdTxt = tx.hold_days != null ? tx.hold_days + '天' : '—';
+    tradeHtml += `
+    <tr class="${rowBg} ${rowFont} transition-colors border-b border-gray-800 cursor-pointer" onclick="showTradeModal('${tx.sname}','${tx.symbol}','${(tx.date||tx.time||'').substring(0,10)}')">
+        <td class="px-3 py-2 text-gray-400 border-0">${(tx.date||tx.time||'').substring(0,10)}</td>
+        <td class="px-3 py-2 border-0"><span class="font-bold text-gray-200">${tx.symbol}</span> <span class="text-[10px] text-gray-500 ml-1">${tx.name||''}</span> <span class="text-[10px] ${stratBg[tx.sname]||'bg-gray-700'} px-1 rounded text-gray-300 ml-1">${tx.sname}</span></td>
+        <td class="px-3 py-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${tx.action}</span></td>
+        <td class="px-3 py-2 font-mono border-0">¥${(tx.price||0).toFixed(2)}</td>
+        <td class="px-3 py-2 font-mono border-0">${(tx.quantity||0).toLocaleString()}</td>
+        <td class="px-3 py-2 font-mono border-0 ${pnlCls}">${pnlStr}</td>
+        <td class="px-3 py-2 font-mono text-gray-400 border-0">${holdTxt}</td>
+        <td class="px-3 py-2 text-gray-400 truncate max-w-[200px] border-0" title="${tx.reason||''}">${tx.reason||''}</td>
+    </tr>`;
+  });
+  document.getElementById('v2-trade-history').innerHTML = tradeHtml || '<tr><td colspan="8" class="text-center py-4 text-gray-500 border-0">暂无交易历史</td></tr>';
+}
+
+// ═══════════ 信号日志渲染 + 历史查看 ═══════════
+let _sigList = [];   // 当前信号列表 (今日或所选历史日, 供弹窗取数)
+function renderSignalLog(detailRes, dateLabel) {
+  _sigList = detailRes.all_signals || [];
+  document.getElementById('v2-signal-stats').innerHTML =
+    dateLabel ? dateLabel : 
+    `原始信号: <span class="text-gray-200">${detailRes.total_raw_signals}</span> → 冲突解决: <span class="text-gray-200">${detailRes.after_conflict_resolution}</span> → 周频过滤: <span class="text-gray-200">${detailRes.after_weekly_filter}</span> → 执行: <span class="text-gray-200">${detailRes.simulated_trades}</span>`;
+
+  let sigHtml = '';
+  (detailRes.all_signals || []).forEach(s => {
+    const isBuy = s.action === 'BUY' || s.action === '买入';
+    const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
+    let statusTag = '';
+    if (s.status === 'executed') statusTag = '<span class="text-[10px] bg-blue-900/40 text-blue-400 px-1 rounded ml-1">已执行</span>';
+    else if (s.status === 'filtered') statusTag = '<span class="text-[10px] bg-yellow-900/40 text-yellow-500 px-1 rounded ml-1">未执行(冲突/周频)</span>';
+    else if (s.status === 'pending') statusTag = '<span class="text-[10px] bg-green-900/40 text-green-400 px-1 rounded ml-1">待执行</span>';
+    sigHtml += `
+    <tr class="hover:bg-gray-700/50 transition-colors border-b border-gray-700/50 cursor-pointer" onclick="showSignalModal('${s.strategy||''}','${s.symbol}')">
+        <td class="py-2 pr-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${s.action}</span></td>
+        <td class="py-2 pr-2 font-mono text-gray-200 border-0">${s.symbol} <span class="text-[10px] text-gray-500">${s.name||''}</span></td>
+        <td class="py-2 pr-2 text-gray-400 border-0">${s.strategy||'—'}</td>
+        <td class="py-2 text-gray-400 text-[10px] truncate max-w-[150px] border-0" title="${s.reason||''}">${s.reason||''} ${statusTag}</td>
+    </tr>`;
+  });
+  document.getElementById('v2-signals-table').innerHTML = sigHtml || '<tr><td colspan="4" class="text-center py-4 text-gray-500 border-0">该日无信号</td></tr>';
+}
+
+async function loadSignalHistory(date) {
+  if (!date) { if (_v2Detail) renderSignalLog(_v2Detail, ''); return; }
+  try {
+    const res = await fetch(`/api/v2/signals/history?date=${date}`);
+    const d = await res.json();
+    const labeled = Object.assign({ all_signals: d.signals || [], total_raw_signals: d.count, after_conflict_resolution: 0, after_weekly_filter: 0, simulated_trades: 0 }, _v2Detail || {});
+    renderSignalLog(labeled, `📅 ${date} 信号 (${d.count} 条) — 点击行查看深度分析`);
+  } catch(e) { console.error(e); }
+}
+
+async function loadSignalDates() {
+  try {
+    const res = await fetch('/api/v2/signals/history');
+    const d = await res.json();
+    const sel = document.getElementById('v2-signal-date');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">今日信号</option>' +
+      (d.dates || []).slice().reverse().map(x => `<option value="${x}">${x}</option>`).join('');
+    if (cur) sel.value = cur;
+  } catch(e) {}
+}
+
+// ═══════════ 数据一致性校验 ═══════════
+async function loadDataConsistency() {
+  const el = document.getElementById('consistency-bar');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/v2/data-consistency');
+    const d = await res.json();
+    if (d.consistent) {
+      el.innerHTML = `<span class="text-green-500">🛡️ 数据一致 ✓ (${d.checks.length} 项校验全部通过)</span>`;
+    } else {
+      const bad = (d.checks || []).filter(c => !c.ok).map(c => `${c.name}: ${c.detail}`).join('; ');
+      el.innerHTML = `<span class="text-red-500 font-semibold">🚨 数据不一致: ${bad}</span>`;
+    }
+  } catch(e) {
+    el.innerHTML = '<span class="text-gray-500">数据一致性校验不可用</span>';
+  }
+}
+
+// ═══════════ 深度分析弹窗 ═══════════
+function openModal(html) {
+  document.getElementById('modal-content').innerHTML = html;
+  const ov = document.getElementById('modal-overlay');
+  ov.classList.remove('hidden');
+  ov.classList.add('flex');
+}
+function closeModal() {
+  const ov = document.getElementById('modal-overlay');
+  ov.classList.add('hidden');
+  ov.classList.remove('flex');
+}
+
+function factorBarsHtml(scores) {
+  if (!scores) return '<div class="text-gray-500 text-xs">无因子数据</div>';
+  let html = '<div class="space-y-1.5">';
+  for (const [k, v] of Object.entries(scores)) {
+    const label = FACTOR_LABELS[k] || k;
+    const pct = Math.max(0, Math.min(100, (v || 0) * 100));
+    const color = v >= 0.7 ? 'bg-green-500' : v >= 0.45 ? 'bg-yellow-500' : 'bg-red-500';
+    html += `<div class="flex items-center gap-2 text-xs">
+        <span class="w-8 text-gray-400">${label}</span>
+        <div class="flex-1 h-1.5 bg-gray-700 rounded"><div class="h-full ${color} rounded" style="width:${pct}%"></div></div>
+        <span class="w-12 text-right font-mono text-gray-300">${(v||0).toFixed(2)}</span>
+    </div>`;
+  }
+  return html + '</div>';
+}
+
+function factorTableHtml(fb) {
+  if (!fb) return '';
+  let rows = '';
+  for (const [k, v] of Object.entries(fb)) {
+    rows += `<tr class="border-b border-gray-800"><td class="py-1 text-gray-400">${k}</td><td class="py-1 font-mono text-right">${typeof v === 'number' ? v.toFixed(3) : v}</td></tr>`;
+  }
+  return `<div class="mt-3"><h4 class="text-xs text-gray-400 font-medium mb-1">📐 子因子明细</h4>
+    <table class="w-full text-xs"><tbody>${rows || '<tr><td class="text-gray-500">无</td></tr>'}</tbody></table></div>`;
+}
+
+function showTradeModal(sname, sym, date) {
+  const detail = _v2Detail || {};
+  let tx = null;
+  for (const [sn, trades] of Object.entries(detail.trade_history || {})) {
+    const hit = (trades || []).find(t => t.sname === sname && t.symbol === sym && (t.date||t.time||'').substring(0,10) === date);
+    if (hit) { tx = {...hit, sname: sn}; break; }
+  }
+  if (!tx) { openModal('<div class="text-gray-300">未找到该交易记录</div>'); return; }
+  const isBuy = tx.action === '买入' || tx.action === 'BUY';
+  const pnlVal = tx.unrealized_pnl != null ? tx.unrealized_pnl : tx.pnl;
+  const rule = STRAT_RULES[sname] || {};
+  openModal(`
+    <div class="flex justify-between items-start mb-4">
+      <div>
+        <div class="text-lg font-bold text-gray-100">${sym} ${tx.name||''} <span class="text-sm font-normal text-gray-400">${sname}</span></div>
+        <div class="text-xs text-gray-500 mt-1">${(tx.date||'').substring(0,10)} · ${tx.action} @ ¥${(tx.price||0).toFixed(2)} × ${(tx.quantity||0).toLocaleString()}</div>
+      </div>
+      <div class="text-right">
+        <div class="text-sm font-mono ${pnlVal>0?'text-green-500':pnlVal<0?'text-red-500':'text-gray-400'}">${pnlVal!=null ? (pnlVal>0?'+':'')+'¥'+Math.round(pnlVal).toLocaleString() : '—'}</div>
+        ${tx.unrealized_pnl_pct!=null ? `<div class="text-xs font-mono ${tx.unrealized_pnl_pct>=0?'text-green-500':'text-red-500'}">${tx.unrealized_pnl_pct>=0?'+':''}${tx.unrealized_pnl_pct.toFixed(2)}%</div>` : ''}
+        <div class="text-xs text-gray-500 mt-1">${tx.hold_days!=null ? '持有 '+tx.hold_days+' 天' : ''}</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">🎯 ${isBuy ? '买入逻辑' : '卖出逻辑'}</div>
+        <div class="text-sm text-gray-200 leading-relaxed">${tx.reason || '—'}</div>
+        <div class="text-xs text-gray-500 mt-2 leading-relaxed">${isBuy ? '建仓规则: ' + (rule.buy || '—') : '清仓规则: ' + (rule.sell || '—')}</div>
+        ${tx.score ? `<div class="text-xs text-gray-400 mt-2">信号评分: <span class="font-mono text-gray-200">${tx.score}</span></div>` : ''}
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">📊 因子视角 (当前扫描)</div>
+        ${factorBarsHtml(tx.factor_scores)}
+      </div>
+    </div>
+    ${factorTableHtml(tx.factor_breakdown)}
+    <div class="mt-4 text-right"><button onclick="closeModal()" class="px-4 py-1.5 rounded-lg text-xs bg-gray-700 hover:bg-gray-600 text-gray-200">关闭</button></div>
+  `);
+}
+
+function showPositionModal(sname, sym) {
+  const detail = _v2Detail || {};
+  const pos = (detail.positions || {})[sname]?.[sym];
+  if (!pos) return;
+  const rule = STRAT_RULES[sname] || {};
+  openModal(`
+    <div class="flex justify-between items-start mb-4">
+      <div>
+        <div class="text-lg font-bold text-gray-100">${sym} ${pos.name||''} <span class="text-sm font-normal text-gray-400">${sname}</span></div>
+        <div class="text-xs text-gray-500 mt-1">${pos.entry_date} 买入 · ${pos.hold_days} 天 · 仓位 ${pos.pct}%</div>
+      </div>
+      <div class="text-right">
+        <div class="text-lg font-bold font-mono ${pos.pnl>=0?'text-green-500':'text-red-500'}">${pos.pnl>=0?'+':''}${pos.pnl_pct.toFixed(2)}%</div>
+        <div class="text-xs font-mono ${pos.pnl>=0?'text-green-500':'text-red-500'}">${pos.pnl>=0?'+':''}¥${Math.round(pos.pnl).toLocaleString()}</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">🎯 持有逻辑</div>
+        <div class="text-sm text-gray-200 leading-relaxed">${pos.reason || '—'}</div>
+        <div class="text-xs text-gray-500 mt-2 leading-relaxed">清仓规则: ${rule.sell || '—'}</div>
+        <div class="grid grid-cols-2 gap-2 text-xs mt-3">
+          <div><span class="text-gray-500">买入价</span><br><span class="font-mono">¥${pos.entry_price.toFixed(2)}</span></div>
+          <div><span class="text-gray-500">现价</span><br><span class="font-mono">¥${pos.current_price.toFixed(2)}</span></div>
+          <div><span class="text-gray-500">止损线</span><br><span class="font-mono">¥${(pos.stop_loss||0).toFixed(2)}</span></div>
+          <div><span class="text-gray-500">评分 ${pos.entry_score?.toFixed(2)||'-'}→${pos.current_score?.toFixed(2)||'-'}</span><br><span class="font-mono text-gray-300">回撤 ${pos.drawdown_from_entry?.toFixed(2)||0}%</span></div>
+        </div>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">📊 因子视角</div>
+        ${factorBarsHtml(pos.factor_scores)}
+      </div>
+    </div>
+    <div class="mt-4 text-right"><button onclick="closeModal()" class="px-4 py-1.5 rounded-lg text-xs bg-gray-700 hover:bg-gray-600 text-gray-200">关闭</button></div>
+  `);
+}
+
+function showSignalModal(strategy, sym) {
+  const sig = _sigList.find(s => s.strategy === strategy && s.symbol === sym);
+  if (!sig) { openModal('<div class="text-gray-300">未找到信号详情</div>'); return; }
+  const rule = STRAT_RULES[strategy] || {};
+  const isBuy = sig.action === 'BUY' || sig.action === '买入';
+  const statusMap = { executed: '✅ 已执行', filtered: '⛔ 未执行(冲突/周频过滤)', pending: '⏳ 待执行' };
+  openModal(`
+    <div class="flex justify-between items-start mb-4">
+      <div>
+        <div class="text-lg font-bold text-gray-100">${sym} ${sig.name||''} <span class="text-sm font-normal text-gray-400">${strategy}</span></div>
+        <div class="text-xs text-gray-500 mt-1">信号价 ¥${(sig.price||0).toFixed(2)} · ${statusMap[sig.status] || sig.status || ''} · 优先级 ${sig.priority||'—'}</div>
+      </div>
+      <div class="text-right">
+        <div class="text-lg font-bold ${isBuy?'text-green-500':'text-red-500'}">${isBuy ? 'BUY' : 'SELL'}</div>
+        <div class="text-xs text-gray-400">评分 <span class="font-mono">${sig.score!=null?sig.score:'—'}</span></div>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">🎯 信号逻辑</div>
+        <div class="text-sm text-gray-200 leading-relaxed">${sig.reason || '—'}</div>
+        <div class="text-xs text-gray-500 mt-2 leading-relaxed">${isBuy ? '建仓规则: ' + (rule.buy || '—') : '清仓规则: ' + (rule.sell || '—')}</div>
+        <div class="text-xs text-gray-400 mt-2">建议仓位: <span class="font-mono text-gray-200">${sig.size_pct!=null ? sig.size_pct + '%' : '—'}</span></div>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">📊 因子视角 (当日扫描)</div>
+        ${factorBarsHtml(sig.factor_scores || (detail.positions||{})[strategy]?.[sym]?.factor_scores)}
+      </div>
+    </div>
+    ${factorTableHtml(sig.factor_breakdown)}
+    <div class="mt-4 text-right"><button onclick="closeModal()" class="px-4 py-1.5 rounded-lg text-xs bg-gray-700 hover:bg-gray-600 text-gray-200">关闭</button></div>
+  `);
+}
+
 async function loadDashboardV2() {
   try {
     const [detailRes, nvRes] = await Promise.all([
@@ -401,6 +743,7 @@ async function loadDashboardV2() {
       document.getElementById('tab-dashboard').innerHTML = `<div class="bg-gray-800 p-4 rounded text-red-400">❌ ${detailRes.error}</div>`;
       return;
     }
+    _v2Detail = detailRes;
 
     document.getElementById('runInfo').textContent = 
       `${detailRes.date} | ${detailRes.generated_at} | 模拟交易 ${detailRes.simulated_trades} 笔`;
@@ -432,119 +775,15 @@ async function loadDashboardV2() {
     }
     document.getElementById('v2-portfolio-overview').innerHTML = overviewHtml || '<div class="text-gray-400">暂无策略数据</div>';
 
-    // Positions Grid
-    let posHtml = '';
-    let canvasIndex = 0;
-    const radarDataList = [];
-    
-    for (const [sname, positions] of Object.entries(detailRes.positions || {})) {
-      for (const [sym, pos] of Object.entries(positions)) {
-        const isPos = pos.pnl_pct >= 0;
-        const color = isPos ? 'text-green-500' : 'text-red-500';
-        const stopLoss = pos.stop_loss || pos.entry_price * 0.92;
-        const nearStop = pos.current_price <= stopLoss * 1.05;
-        
-        let scoreArrow = '';
-        if (pos.current_score && pos.entry_score) {
-           if (pos.current_score > pos.entry_score) scoreArrow = '<span class="text-green-500">↑</span>';
-           else if (pos.current_score < pos.entry_score) scoreArrow = '<span class="text-red-500">↓</span>';
-        }
+    // Positions Grid (tab 过滤) + Radars
+    renderPositionsGrid(detailRes);
 
-        const cid = `radar-${canvasIndex++}`;
-        if (pos.factor_scores) radarDataList.push({ id: cid, scores: pos.factor_scores });
+    // Trade History (点击行 → 深度分析弹窗)
+    renderTradeHistory(detailRes);
 
-        posHtml += `
-        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col hover:border-gray-500 transition-colors">
-            <div class="flex justify-between items-start mb-3">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-gray-100 text-lg">${sym}</span>
-                        <span class="text-sm text-gray-400">${pos.name || sym}</span>
-                    </div>
-                    <div class="text-xs px-2 py-0.5 rounded mt-1 inline-block ${stratBg[sname] || 'bg-gray-700'} text-gray-300">
-                        ${sname}
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="text-lg font-bold font-mono ${color}">${isPos?'+':''}${pos.pnl_pct.toFixed(2)}%</div>
-                    <div class="text-xs ${color} font-mono">${isPos?'+':''}¥${Math.round(pos.pnl).toLocaleString()}</div>
-                </div>
-            </div>
-            
-            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mb-3">
-                <div class="flex justify-between"><span class="text-gray-400">买入/现价</span><span class="font-mono">${pos.entry_price.toFixed(2)} / ${pos.current_price.toFixed(2)}</span></div>
-                <div class="flex justify-between"><span class="text-gray-400">持有天数</span><span class="font-mono">${pos.hold_days} 天</span></div>
-                <div class="flex justify-between"><span class="text-gray-400">回撤(峰值/买入)</span><span class="font-mono text-red-400">${pos.drawdown_from_peak?.toFixed(2)||0}% / ${pos.drawdown_from_entry?.toFixed(2)||0}%</span></div>
-                <div class="flex justify-between"><span class="text-gray-400">仓位占比</span><span class="font-mono">${pos.pct?.toFixed(1)||0}%</span></div>
-                <div class="flex justify-between"><span class="text-gray-400">止损线</span><span class="font-mono ${nearStop?'text-red-500 font-bold':''}">${stopLoss.toFixed(2)}</span></div>
-                <div class="flex justify-between"><span class="text-gray-400">评分变化</span><span class="font-mono">${pos.entry_score?.toFixed(2)||'-'} ${scoreArrow} ${pos.current_score?.toFixed(2)||'-'}</span></div>
-            </div>
-            
-            <div class="text-xs text-gray-400 bg-gray-900 rounded p-2 mb-3 line-clamp-2" title="${pos.reason||''}">${pos.reason||'无理由'}</div>
-            
-            <div class="h-32 w-full mt-auto relative pt-2">
-                ${pos.factor_scores ? `<canvas id="${cid}"></canvas>` : '<div class="absolute inset-0 flex items-center justify-center text-gray-600 text-xs">无因子数据</div>'}
-            </div>
-        </div>`;
-      }
-    }
-    document.getElementById('v2-positions-grid').innerHTML = posHtml || '<div class="text-gray-400 col-span-full py-4 text-center">空仓</div>';
-
-    // Radars
-    radarDataList.forEach(item => renderRadarChart(item.id, item.scores));
-
-    // Trade History
-    let allTrades = [];
-    for (const [sname, trades] of Object.entries(detailRes.trade_history || {})) {
-        trades.forEach(t => allTrades.push({...t, sname}));
-    }
-    allTrades.sort((a,b) => ((b.date||b.time||'') > (a.date||a.time||'') ? 1 : -1));
-    allTrades = allTrades.slice(0, 50);
-
-    let tradeHtml = '';
-    allTrades.forEach(tx => {
-        const isBuy = tx.action === '买入' || tx.action === 'BUY';
-        const pnlStr = tx.pnl != null ? (tx.pnl>0?'+':'') + '¥'+Math.round(tx.pnl).toLocaleString() : '—';
-        const pnlCls = tx.pnl > 0 ? 'text-green-500 font-medium' : (tx.pnl < 0 ? 'text-red-500' : 'text-gray-400');
-        const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
-        const rowBg = isBuy ? 'bg-green-900/10 hover:bg-green-900/20' : 'bg-red-900/10 hover:bg-red-900/20';
-        const rowFont = tx.pnl > 0 ? 'font-bold text-white' : 'text-gray-300';
-        tradeHtml += `
-        <tr class="${rowBg} ${rowFont} transition-colors border-b border-gray-800">
-            <td class="px-3 py-2 text-gray-400 border-0">${(tx.date||tx.time||'').substring(0,10)}</td>
-            <td class="px-3 py-2 border-0"><span class="font-bold text-gray-200">${tx.symbol}</span> <span class="text-[10px] ${stratBg[tx.sname]||'bg-gray-700'} px-1 rounded text-gray-300 ml-1">${tx.sname}</span></td>
-            <td class="px-3 py-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${tx.action}</span></td>
-            <td class="px-3 py-2 font-mono border-0">¥${(tx.price||0).toFixed(2)}</td>
-            <td class="px-3 py-2 font-mono border-0">${(tx.quantity||0).toLocaleString()}</td>
-            <td class="px-3 py-2 font-mono border-0 ${pnlCls}">${pnlStr}</td>
-            <td class="px-3 py-2 font-mono text-gray-400 border-0">${tx.hold_days!=null?tx.hold_days+'天':'—'}</td>
-            <td class="px-3 py-2 text-gray-400 truncate max-w-[200px] border-0" title="${tx.reason||''}">${tx.reason||''}</td>
-        </tr>`;
-    });
-    document.getElementById('v2-trade-history').innerHTML = tradeHtml || '<tr><td colspan="8" class="text-center py-4 text-gray-500 border-0">暂无交易历史</td></tr>';
-
-    // Signals
-    document.getElementById('v2-signal-stats').innerHTML = 
-        `原始信号: <span class="text-gray-200">${detailRes.total_raw_signals}</span> → 冲突解决: <span class="text-gray-200">${detailRes.after_conflict_resolution}</span> → 周频过滤: <span class="text-gray-200">${detailRes.after_weekly_filter}</span> → 执行: <span class="text-gray-200">${detailRes.simulated_trades}</span>`;
-
-    let sigHtml = '';
-    (detailRes.all_signals || []).forEach(s => {
-        const isBuy = s.action === 'BUY' || s.action === '买入';
-        const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
-        let statusTag = '';
-        if (s.status === 'executed') statusTag = '<span class="text-[10px] bg-blue-900/40 text-blue-400 px-1 rounded ml-1">已执行</span>';
-        else if (s.status === 'filtered') statusTag = '<span class="text-[10px] bg-yellow-900/40 text-yellow-500 px-1 rounded ml-1">未执行(冲突/周频)</span>';
-        else if (s.status === 'pending') statusTag = '<span class="text-[10px] bg-green-900/40 text-green-400 px-1 rounded ml-1">待执行</span>';
-        
-        sigHtml += `
-        <tr class="hover:bg-gray-700/50 transition-colors border-b border-gray-700/50">
-            <td class="py-2 pr-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${s.action}</span></td>
-            <td class="py-2 pr-2 font-mono text-gray-200 border-0">${s.symbol}</td>
-            <td class="py-2 pr-2 text-gray-400 border-0">${s.strategy||'—'}</td>
-            <td class="py-2 text-gray-400 text-[10px] truncate max-w-[150px] border-0" title="${s.reason||''}">${s.reason||''} ${statusTag}</td>
-        </tr>`;
-    });
-    document.getElementById('v2-signals-table').innerHTML = sigHtml || '<tr><td colspan="4" class="text-center py-4 text-gray-500 border-0">今日无信号</td></tr>';
+    // Signals (今日) + 历史日期下拉
+    renderSignalLog(detailRes, '');
+    loadSignalDates();
 
     // Chart
     if (!nvRes.error && nvRes.series && nvRes.series.length > 0) {
@@ -817,15 +1056,18 @@ async function loadExecutionBoard() {
   if (!boardEl) return;
   boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏳ 加载执行决策...</div>';
   
-  // 超时兜底：8 秒还没加载完就显示降级信息
+  // 超时兜底：8 秒还没加载完就显示降级信息 (AbortController 真正中断请求, 防止永久加载)
   let timedOut = false;
   const timeoutId = setTimeout(() => {
     timedOut = true;
     boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏱️ 执行决策加载超时—数据管线可能正在刷新，请2分钟后刷新查看</div><div class="text-xs text-gray-500 mt-1">提示：执行决策需要 run_trading.py 生成评分数据</div>';
     if (dqEl) dqEl.textContent = '数据质量: ⏳ 超时';
   }, 8000);
+  const ctrl = new AbortController();
+  const abortTimer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const res = await fetch('/api/v2/execution/board');
+    const res = await fetch('/api/v2/execution/board', { signal: ctrl.signal });
+    clearTimeout(abortTimer);
     if (!res.ok) { boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据</div>'; return; }
     const data = await res.json();
     if (data.status !== 'ok' || !data.board) {
@@ -931,8 +1173,8 @@ function toggleEvidence(symbol) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-window.onload = () => { loadLayerBar(); loadDashboardV2(); };
-setInterval(() => { loadLayerBar(); loadDashboardV2(); }, 120000);
+window.onload = () => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); };
+setInterval(() => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); }, 120000);
 
 async function loadEtf() {
   const el = document.getElementById('etfBody');
@@ -2104,6 +2346,13 @@ async function loadInsightsTab() {
 }
 
 </script>
+  <!-- ======== 深度分析弹窗 (通用) ======== -->
+  <div id="modal-overlay" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="closeModal()">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto custom-scrollbar p-5" onclick="event.stopPropagation()">
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
 </body>
 </html>
 """

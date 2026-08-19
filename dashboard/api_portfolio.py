@@ -94,6 +94,52 @@ def api_signals():
     return {"error": "no signals yet today", "signals": []}
 
 
+def _load_snapshot_by_date(date_str: str) -> dict:
+    """按日期加载扫描快照因子数据 → {symbol: result} (优先当日, 回退最新)"""
+    candidates = [
+        ROOT / "data" / f"scan_snapshot_{date_str}.json",
+        ROOT / "data" / "scan_snapshots" / f"scan_snapshot_{date_str}.json",
+        ROOT / "data" / "scan_snapshot_latest.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                with open(p) as f:
+                    d = json.load(f)
+                return {r.get("symbol", ""): r for r in d.get("results", []) if r.get("symbol")}
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return {}
+
+
+@router.get("/api/v2/signals/history")
+def api_v2_signals_history(date: str = ""):
+    """历史信号日志 — 按日期查看, 附因子分解 (signal_accuracy_history.json)"""
+    path = ROOT / "data" / "signal_accuracy_history.json"
+    if not path.exists():
+        return {"dates": [], "date": "", "signals": [], "count": 0}
+    with open(path) as f:
+        data = json.load(f)
+    history = data.get("history", [])
+    dates = sorted({str(h.get("date", "")) for h in history if h.get("date")})
+    if date:
+        sel = [h for h in history if str(h.get("date", "")) == date]
+        sigs = sel[0].get("signals", []) if sel else []
+        snap = _load_snapshot_by_date(date)
+        enriched = []
+        for s in sigs:
+            row = dict(s)
+            fb = snap.get(s.get("symbol", ""), {}).get("factor_breakdown") if snap else None
+            sc = snap.get(s.get("symbol", ""), {}).get("scores") if snap else None
+            if fb:
+                row["factor_breakdown"] = fb
+            if sc:
+                row["factor_scores"] = sc
+            enriched.append(row)
+        return {"dates": dates, "date": date, "signals": enriched, "count": len(enriched)}
+    return {"dates": dates, "date": "", "signals": [], "count": 0}
+
+
 @router.get("/api/behavior")
 def api_behavior():
     """行为诊断（四维度：处置效应/过度交易/追涨/锚定）"""
@@ -117,6 +163,15 @@ def api_simulated():
     portfolios = data.get("portfolios", {})
     positions = data.get("positions", {})
     signals, _dropped = _clean_signals(data.get("signals", []), "api_simulated")
+
+    # 模拟交易 = 今日 trade_history 真实成交笔数 (而非本次 run 内的 simulated_trades, 避免漏掉当日早盘已成交)
+    today_str = data.get("date", "")
+    trade_history = data.get("trade_history", {})
+    executed_today = sum(
+        1 for sname, txns in trade_history.items()
+        for t in (txns or [])
+        if str(t.get("date", ""))[:10] == today_str
+    )
 
     # 各策略汇总
     result = {}
@@ -190,7 +245,7 @@ def api_simulated():
     return {
         "date": data.get("date", ""),
         "generated_at": data.get("generated_at", ""),
-        "simulated_trades": data.get("simulated_trades", 0),
+        "simulated_trades": executed_today,
         "portfolios": result,
         "user_signals": signals,
     }
@@ -316,16 +371,53 @@ def api_v2_portfolio_detail():
     all_sigs = data.get("all_signals", [])
     _annotate_signals(all_sigs, final_sigs, trade_history, data.get("date", ""))
 
+    # ── 富集交易历史: 股票名/买入行浮盈亏+持有天数/因子分解(供弹窗深度解析) ──
+    enriched_th = {}
+    for sname, txns in trade_history.items():
+        rows = []
+        for t in (txns or []):
+            sym = t.get("symbol", "")
+            row = dict(t)
+            row["name"] = get_name(sym) or t.get("name", "")
+            pos = enriched_positions.get(sname, {}).get(sym)
+            if str(t.get("action", "")).startswith("买"):
+                # 买入行: 若仍在持仓 → 浮盈亏 + 持仓至今; 否则 — 
+                if pos:
+                    row["current_price"] = pos.get("current_price")
+                    row["hold_days"] = pos.get("hold_days")
+                    row["unrealized_pnl"] = pos.get("pnl")
+                    row["unrealized_pnl_pct"] = pos.get("pnl_pct")
+                else:
+                    row["unrealized_pnl"] = None
+                    row["unrealized_pnl_pct"] = None
+            # 深度数据: 因子分解 + 7维风格分 (供买入/卖出逻辑弹窗)
+            fs = scan_map.get(sym)
+            if fs:
+                row["factor_scores"] = fs.get("scores")
+                row["factor_breakdown"] = fs.get("factor_breakdown")
+                if not row.get("score") and fs.get("score"):
+                    row["score"] = fs.get("score")
+            rows.append(row)
+        enriched_th[sname] = rows
+
+    # 模拟交易 = 今日 trade_history 真实成交笔数 (本次 run 的 simulated_trades 只计本轮, 会漏早盘成交)
+    today_str = data.get("date", "")
+    executed_today = sum(
+        1 for sname, txns in trade_history.items()
+        for t in (txns or [])
+        if str(t.get("date", ""))[:10] == today_str
+    )
+
     result = {
         "date": data.get("date", ""),
         "generated_at": data.get("generated_at", ""),
         "total_raw_signals": data.get("total_raw_signals", 0),
         "after_conflict_resolution": data.get("after_conflict_resolution", 0),
         "after_weekly_filter": data.get("after_weekly_filter", 0),
-        "simulated_trades": data.get("simulated_trades", 0),
+        "simulated_trades": executed_today,
         "portfolios": enriched_portfolios,
         "positions": enriched_positions,
-        "trade_history": trade_history,
+        "trade_history": enriched_th,
         "final_signals": final_sigs,
         "all_signals": all_sigs,
     }
