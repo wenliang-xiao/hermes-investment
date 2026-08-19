@@ -76,11 +76,11 @@ def decide(
             ))
             continue
 
-        # 3. MASeller: MA死叉，亏损未达-5%豁免
+        # 3. MASeller: MA死叉(MA20<MA60 ⟺ ma20d>ma60d)，亏损未达-5%豁免
         tech = tech_map.get(sym, {})
         ma20d = tech.get("ma20_dev", 0) or 0
         ma60d = tech.get("ma60_dev", 0) or 0
-        if ma20d < ma60d and pnl_pct > cfg.ma_sell_pnl_exemption:
+        if ma20d > ma60d and pnl_pct > cfg.ma_sell_pnl_exemption:
             signals.append(Signal(
                 symbol=sym, action="SELL", price=price,
                 reason="MASeller(MA死叉)", priority="MED",

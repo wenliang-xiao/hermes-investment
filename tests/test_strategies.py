@@ -16,7 +16,8 @@ from engine.factor_engine import score_to_signal, convert_v3_to_v4, convert_v4_t
 # Helpers
 # ═══════════════════════════════════════════════
 
-def make_tech(ma20=5, ma60=2, rsi=50, macd="⚪中性", tech_score=5.0):
+def make_tech(ma20=1, ma60=5, rsi=50, macd="⚪中性", tech_score=5.0):
+    # 默认金叉: ma20d<ma60d ⟺ MA20>MA60 (健康上行结构)
     return {"ma20_dev": ma20, "ma60_dev": ma60, "rsi": rsi,
             "macd_signal": macd, "total_tech_score": tech_score}
 
@@ -86,10 +87,10 @@ class TestFacejiDecide:
         assert signals == []
 
     def test_no_positions_buy_candidate(self):
-        """评分≥5.0 + MA趋势ok → 买入信号"""
+        """评分≥5.5(免除MA过滤) + 金叉 → 买入信号"""
         signals = faceji.decide(
             {"000001": 6.0},
-            {"000001": make_tech(ma20=5, ma60=2)},  # ma20 > ma60 ✓
+            {"000001": make_tech(ma20=1, ma60=5)},  # ma20d<ma60d ⟺ MA20>MA60 金叉
             {"000001": 10.0},
             {}, 100000
         )
@@ -109,15 +110,26 @@ class TestFacejiDecide:
         assert len(buy_signals) == 0
 
     def test_ma_trend_filter(self):
-        """ma60 > ma20 且评分<5.5 → 不建仓"""
+        """MA20<MA60(死叉, ma20d>ma60d) 且评分<5.5 → 不建仓"""
         signals = faceji.decide(
             {"000001": 5.2},
-            {"000001": make_tech(ma20=1, ma60=5)},  # ma60 > ma20 → 趋势向下
+            {"000001": make_tech(ma20=5, ma60=1)},  # ma20d>ma60d ⟺ MA20<MA60 死叉
             {"000001": 10.0},
             {}, 100000
         )
         buy_signals = [s for s in signals if s.action == "BUY"]
         assert len(buy_signals) == 0
+
+    def test_ma_trend_golden_cross_allows_entry(self):
+        """MA20>MA60(金叉, ma20d<ma60d) 且评分<5.5 → 允许建仓"""
+        signals = faceji.decide(
+            {"000001": 5.2},
+            {"000001": make_tech(ma20=1, ma60=5)},  # 金叉
+            {"000001": 10.0},
+            {}, 100000
+        )
+        buy_signals = [s for s in signals if s.action == "BUY"]
+        assert len(buy_signals) == 1
 
     def test_hard_stop_loss(self):
         """持仓亏损≤-8% → 硬止损"""
@@ -149,6 +161,29 @@ class TestFacejiDecide:
         )
         sells = [s for s in signals if s.action == "SELL"]
         assert len(sells) >= 1
+
+    def test_ma_seller_dead_cross(self):
+        """评分4.5~5.0 + MA死叉(ma20d>ma60d) → MA死叉卖出"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=100)}
+        signals = faceji.decide(
+            {"000001": 4.8},
+            {"000001": make_tech(ma20=5, ma60=1)},  # 死叉
+            {"000001": 100},
+            pos, 100000
+        )
+        sells = [s for s in signals if s.action == "SELL"]
+        assert any("MA死叉" in s.reason for s in sells)
+
+    def test_ma_seller_golden_cross_no_sell(self):
+        """评分4.5~5.0 + 金叉(ma20d<ma60d) → 不得触发MA死叉卖出"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=100)}
+        signals = faceji.decide(
+            {"000001": 4.8},
+            {"000001": make_tech(ma20=1, ma60=5)},  # 金叉
+            {"000001": 100},
+            pos, 100000
+        )
+        assert not any("MA死叉" in s.reason for s in signals)
 
     def test_kelly_sizing(self):
         """Kelly仓位不超过单笔上限"""
@@ -208,15 +243,38 @@ class TestSilverQuantDecide:
         assert any("FallSeller" in s.reason for s in sells)
 
     def test_ma_seller(self):
+        """MA20<MA60(死叉, ma20d>ma60d) → MASeller 卖出"""
         pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=100)}
         signals = silverquant.decide(
             {"000001": 5.0},
-            {"000001": make_tech(ma20=1, ma60=5)},  # 死叉
+            {"000001": make_tech(ma20=5, ma60=1)},  # 死叉
             {"000001": 100},
             pos, 100000
         )
         sells = [s for s in signals if s.action == "SELL"]
         assert any("MASeller" in s.reason for s in sells)
+
+    def test_ma_seller_golden_cross_no_sell(self):
+        """MA20>MA60(金叉, ma20d<ma60d) → 不得触发 MASeller (600900 08-19 回归)"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=100)}
+        signals = silverquant.decide(
+            {"000001": 5.0},
+            {"000001": make_tech(ma20=1, ma60=5)},  # 金叉 — 旧代码误卖, 现不得卖
+            {"000001": 100},
+            pos, 100000
+        )
+        assert not any("MASeller" in s.reason for s in signals)
+
+    def test_ma_seller_600900_real_values(self):
+        """600900 真实值回归: ma20d=-1.207, ma60d=+2.775 (金叉) → 不卖"""
+        pos = {"600900": PositionData("600900", entry_price=28.14, quantity=900, peak=28.14)}
+        signals = silverquant.decide(
+            {"600900": 8.9},
+            {"600900": make_tech(ma20=-1.207, ma60=2.775)},
+            {"600900": 28.12},
+            pos, 100000
+        )
+        assert not any("MASeller" in s.reason for s in signals)
 
     def test_score_drop(self):
         pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=100)}

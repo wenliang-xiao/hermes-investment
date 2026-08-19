@@ -767,7 +767,8 @@ try:
                         _ma20d = _t.get("ma20_dev", 0) or 0
                         _ma60d = _t.get("ma60_dev", 0) or 0
                         _macd = _t.get("macd_signal", "")
-                        if _ma20d < _ma60d or _macd == "🔴死叉":
+                        # 死叉: MA20<MA60 ⟺ ma20d>ma60d
+                        if _ma20d > _ma60d or _macd == "🔴死叉":
                             if _ep:
                                 _sa_exit(_sy, _ep, f"MA死叉评分{_score:.1f}→清仓")
                                 log(f"🔻 Shadow EXIT {_pname}({_sy}): trend dead, score={_score:.1f}")

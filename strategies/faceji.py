@@ -118,12 +118,12 @@ def decide(
             ))
             continue
 
-        # 4. MASeller
+        # 4. MASeller: MA死叉(MA20<MA60 ⟺ ma20d>ma60d)
         if score < 5.0:
             tech = tech_map.get(sym, {})
             ma20d = tech.get("ma20_dev", 0) or 0
             ma60d = tech.get("ma60_dev", 0) or 0
-            if ma20d < ma60d and pnl_pct > -5:
+            if ma20d > ma60d and pnl_pct > -5:
                 signals.append(Signal(
                     symbol=sym, action="SELL", price=price,
                     reason="MA死叉+评分<5",
