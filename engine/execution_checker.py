@@ -80,6 +80,8 @@ class ExecutionChecker:
             result["action_confidence"] = 0.3 + 0.5 * (passed / total) if total > 0 else 0.3
             if passed < 4:
                 result["action_reason"] = f"建仓检查 {passed}/{total} 通过"
+            elif result["action"] == "BUY":
+                result["action_reason"] = f"建仓检查 {passed}/{total} 通过, 评分{composite:.2f}"
         # 2. TrailStop（持仓）
         else:
             trail = self._calc_trail_stop(position, self.trail_params)

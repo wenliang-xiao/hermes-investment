@@ -2,6 +2,7 @@
 六层指标 API — /api/v2/layers/status, layers/macro, layers/allocation
 """
 import json, os
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter
 from pathlib import Path
 
@@ -85,24 +86,78 @@ def _load_all_positions() -> list:
 
 
 def _load_pool() -> dict:
-    path = DATA / "pool" / "deep_layer.json"
-    if not path.exists():
-        return {}
-    try:
-        with open(path) as f:
-            candidates = json.load(f)
-        return {"candidates": candidates, "new_today": 0, "active_chains": []}
-    except (json.JSONDecodeError, KeyError):
-        return {}
+    """读取三层票池 (watch/monitor/deep) — 候选=发现+盯住层, 链=按标的目标签去重"""
+    from dashboard.shared import _guess_chain
+
+    score_map = _load_score_map()
+    today_str = date.today().strftime("%Y-%m-%d")
+    items_all = []
+    candidates = []
+    for tier in ("watch", "monitor", "deep"):
+        path = DATA / "pool" / f"{tier}.json"
+        if not path.exists():
+            continue
+        try:
+            with open(path) as f:
+                raw = f.read().strip()
+                items = json.loads(raw) if raw else []
+        except (json.JSONDecodeError, OSError):
+            continue
+        if tier in ("watch", "monitor"):
+            candidates.extend(items)
+        items_all.extend(items)
+
+    new_today = sum(
+        1 for it in items_all
+        if str(it.get("date_added", ""))[:10] == today_str
+    )
+    chains = sorted({
+        _guess_chain(it.get("symbol", ""), score_map)
+        for it in items_all if it.get("symbol")
+    } - {"其他"})
+    return {"candidates": candidates, "new_today": new_today, "active_chains": chains}
 
 
-def _load_trades() -> list:
-    path = DATA / "trading_signals.json"
+def _load_score_map() -> dict:
+    """从 scan_snapshot_latest.json 构建 symbol → 评分条目 (供链条推断)"""
+    path = DATA / "scan_snapshot_latest.json"
     if not path.exists():
-        return []
+        return {}
     try:
         with open(path) as f:
             data = json.load(f)
-        return data.get("trade_history", [])
+        return {r.get("symbol", ""): r for r in data.get("results", []) if r.get("symbol")}
     except (json.JSONDecodeError, KeyError):
-        return []
+        return {}
+
+
+def _load_trades() -> dict:
+    """读取本周交易 → {strategy: count} (按 ISO 周划分, 从 trade_history 拍平)"""
+    path = DATA / "trading_signals.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+    # 本周一 (ISO 周起点)
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+
+    counts: dict = {}
+    th = data.get("trade_history", {})
+    if isinstance(th, dict):
+        for sname, txns in th.items():
+            for t in (txns or []):
+                tdate = str(t.get("date", ""))[:10]
+                if not tdate:
+                    continue
+                try:
+                    d = datetime.strptime(tdate, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                if d >= monday:
+                    counts[sname] = counts.get(sname, 0) + 1
+    return counts

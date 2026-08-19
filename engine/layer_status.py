@@ -29,9 +29,12 @@ class LayerStatus:
 
     def _l1_macro(self, macro_state=None) -> dict:
         m = macro_state or {}
-        dg = m.get("dual_gate", {})
+        dg = m.get("dual_gate", {}) or {}
+        # 兼容两种键名: 缓存用 macro_gate/trend_gate, 旧格式用 macro/trend
+        macro = dg.get("macro_gate") or dg.get("macro") or (dg.get("combo", "").split("+")[0] if dg.get("combo") else None) or "?"
+        trend = dg.get("trend_gate") or dg.get("trend") or (dg.get("combo", "").split("+")[1] if dg.get("combo") and "+" in dg.get("combo", "") else None) or "?"
         return {
-            "dual_gate": {"macro": dg.get("macro", "?"), "trend": dg.get("trend", "?")},
+            "dual_gate": {"macro": macro, "trend": trend},
             "quadrant": m.get("quadrant", "未知"),
             "trend_temp": m.get("trend_temp", "平"),
             "strategy_switch": m.get("strategy_switch", "off"),
@@ -81,11 +84,27 @@ class LayerStatus:
         return {"status": status, "triggered_stops": triggered, "max_drawdown": dd}
 
     def _l6_discipline(self, trades_this_week=None) -> dict:
-        trades = trades_this_week or []
+        """trades_this_week: list[dict] (含 strategy 字段) 或 {strategy: count}
+
+        返回 per-strategy 周频计数 + 是否任一策略超限。
+        """
+        if trades_this_week is None:
+            trades_this_week = []
+        if isinstance(trades_this_week, dict):
+            per_strategy = dict(trades_this_week)
+        else:
+            per_strategy = {}
+            for t in trades_this_week:
+                s = t.get("strategy", "?") if isinstance(t, dict) else "?"
+                per_strategy[s] = per_strategy.get(s, 0) + 1
+        total = sum(per_strategy.values())
+        over = {s: c for s, c in per_strategy.items() if c > self.weekly_trade_limit}
         return {
-            "weekly_trades": len(trades),
+            "weekly_trades": total,
             "weekly_limit": self.weekly_trade_limit,
-            "over_limit": len(trades) > self.weekly_trade_limit,
+            "per_strategy": per_strategy,
+            "over_limit": len(over) > 0,
+            "over_detail": over,
         }
 
     @staticmethod

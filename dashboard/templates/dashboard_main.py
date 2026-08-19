@@ -532,8 +532,9 @@ async function loadDashboardV2() {
         const isBuy = s.action === 'BUY' || s.action === '买入';
         const actCls = isBuy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400';
         let statusTag = '';
-        if (s.filtered_by_weekly) statusTag = '<span class="text-[10px] bg-yellow-900/40 text-yellow-500 px-1 rounded ml-1">周频过滤</span>';
-        else if (s.executed) statusTag = '<span class="text-[10px] bg-blue-900/40 text-blue-400 px-1 rounded ml-1">已执行</span>';
+        if (s.status === 'executed') statusTag = '<span class="text-[10px] bg-blue-900/40 text-blue-400 px-1 rounded ml-1">已执行</span>';
+        else if (s.status === 'filtered') statusTag = '<span class="text-[10px] bg-yellow-900/40 text-yellow-500 px-1 rounded ml-1">未执行(冲突/周频)</span>';
+        else if (s.status === 'pending') statusTag = '<span class="text-[10px] bg-green-900/40 text-green-400 px-1 rounded ml-1">待执行</span>';
         
         sigHtml += `
         <tr class="hover:bg-gray-700/50 transition-colors border-b border-gray-700/50">
@@ -765,15 +766,17 @@ async function loadLayerBar() {
     // L2: 配置
     const l2 = layers.l2_allocation || {};
     const a = l2.actual || {};
+    const fmtPct = (v) => (v != null ? v + '%' : '?');
     document.getElementById('l2-content').textContent = 
-      `A股${a['A股']||'?'}% · ETF${a['ETF']||'?'}% · 债券${a['债券']||'?'}% · 黄金${a['黄金']||'?'}%`;
+      `A股${fmtPct(a['A股'])} · ETF${fmtPct(a['ETF'])} · 债券${fmtPct(a['债券'])} · 黄金${fmtPct(a['黄金'])}`;
     const devs = Object.entries(l2.deviations || {}).filter(([k,v]) => Math.abs(v) > 5);
     document.getElementById('l2-status').textContent = devs.length > 0 ? `⚠️${devs.length}` : '✅';
     
     // L3-L4: 选股
     const l34 = layers.l3_l4_stock_picking || {};
+    const chainTxt = l34.active_chains != null ? `${l34.active_chains.length}条` : '?';
     document.getElementById('l3-content').textContent = 
-      `候选${l34.total_candidates||0}只 · 链${(l34.active_chains||[]).length||'?'}条活跃`;
+      `候选${l34.total_candidates||0}只 · 链${chainTxt}活跃`;
     document.getElementById('l3-status').textContent = (l34.new_today||0) > 0 ? `🆕+${l34.new_today}` : `${l34.total_candidates||0}只`;
     
     // L5: 风控
@@ -784,10 +787,17 @@ async function loadLayerBar() {
     const statusIcon = l5status === 'critical' ? '🔴' : l5status === 'warning' ? '🟡' : '🟢';
     document.getElementById('l5-status').textContent = `${statusIcon} ${l5status}`;
     
-    // L6: 纪律
+    // L6: 纪律 (按策略周频, 避免把"策略数"当"交易数")
     const l6 = layers.l6_discipline || {};
-    document.getElementById('l6-content').textContent = 
-      `本周${l6.weekly_trades||0}/${l6.weekly_limit||3}次`;
+    const lim = l6.weekly_limit || 3;
+    const per = l6.per_strategy || {};
+    const labelMap = { faceji: '面基', silverquant: 'SQ', tradingagents: 'TA' };
+    const parts = Object.entries(per).map(([s, c]) => {
+      const over = c > lim;
+      return `${labelMap[s]||s}${c}/${lim}${over ? '⚠️' : ''}`;
+    });
+    const l6txt = parts.length > 0 ? `本周${parts.join(' · ')}次` : `本周0/${lim}次`;
+    document.getElementById('l6-content').textContent = l6txt;
     document.getElementById('l6-status').textContent = l6.over_limit ? '🔴超限' : '✅';
   } catch(e) {
     console.error('LayerBar error:', e);
@@ -823,12 +833,17 @@ async function loadExecutionBoard() {
       return;
     }
     
-    // 数据质量
+    // 数据质量 (带6s超时, 失败/超时给出可视反馈而非永久"—")
     try {
-      const dqRes = await fetch('/api/v2/evidence/data-quality');
+      const dqRes = await Promise.race([
+        fetch('/api/v2/evidence/data-quality'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('dq-timeout')), 6000))
+      ]);
       const dqData = await dqRes.json();
       if (dqEl) dqEl.textContent = `数据质量: ${dqData.grade || '?'} (${(dqData.overall_score || 0).toFixed(2)})`;
-    } catch(e) {}
+    } catch(e) {
+      if (dqEl) dqEl.textContent = '数据质量: ⏳ 暂无';
+    }
     
     const board = data.board;
     let html = '';

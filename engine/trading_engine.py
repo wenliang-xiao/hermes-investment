@@ -639,7 +639,9 @@ class TradingEngine:
         total_return = total_pnl / strategy.capital * 100 if strategy.capital else 0
         win_trades = [h for h in strategy.history if h.get("action") == "卖出" and h.get("pnl", 0) > 0]
         lose_trades = [h for h in strategy.history if h.get("action") == "卖出" and h.get("pnl", 0) <= 0]
-        win_rate = len(win_trades) / max(1, len(win_trades) + len(lose_trades)) * 100
+        # 无可平仓交易 → 胜率 None (前端显示 —), 不再显示误导性的 0.0%
+        win_rate = round(len(win_trades) / (len(win_trades) + len(lose_trades)) * 100, 1) \
+            if (len(win_trades) + len(lose_trades)) > 0 else None
         return {
             "label": strategy.name,
             "cash": round(strategy.cash, 2),
@@ -652,7 +654,7 @@ class TradingEngine:
             "history_count": len(strategy.history),
             "cash_pct": round((strategy.cash / total_value) * 100, 2) if total_value else 0,
             "invested_pct": round((total_invested / total_value) * 100, 2) if total_value else 0,
-            "win_rate": round(win_rate, 1),
+            "win_rate": win_rate,
             "win_trades": len(win_trades),
             "lose_trades": len(lose_trades),
         }

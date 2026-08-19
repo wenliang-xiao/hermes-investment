@@ -31,6 +31,20 @@ async def execution_board():
     # 加载持仓
     positions = _load_positions()
 
+    # 执行决策只关心: 今日有信号的标的 + 当前持仓 (避免全评分池刷屏)
+    focus = set(positions.keys())
+    try:
+        sig_path = DATA / "trading_signals.json"
+        if sig_path.exists():
+            with open(sig_path) as f:
+                ts = json.load(f)
+            for s in ts.get("all_signals", []):
+                if s.get("symbol"):
+                    focus.add(s["symbol"])
+    except (json.JSONDecodeError, KeyError, OSError):
+        pass
+    scores = {sym: info for sym, info in scores.items() if sym in focus}
+
     checker = ExecutionChecker()
     builder = EvidenceBuilder()
 
@@ -40,17 +54,17 @@ async def execution_board():
         sym = info.get("symbol", sid)
         position = positions.get(sym) if positions else None
 
-        # 执行检查
+        # 执行检查 (score_data 传完整评分条目: composite/scores/factor_breakdown)
         exec_res = checker.check(
             symbol=sym,
-            score_data=info.get("scores", {}),
+            score_data=info,
             position=position,
         )
 
         # 证据包
         packet = builder.build(
             symbol=sym,
-            score_data=info.get("scores", {}),
+            score_data=info,
             position=position,
         )
 
@@ -59,7 +73,7 @@ async def execution_board():
             "action": exec_res.get("action", "HOLD"),
             "action_confidence": exec_res.get("action_confidence", 0.5),
             "action_reason": exec_res.get("action_reason", ""),
-            "composite": info.get("scores", {}).get("composite", 0),
+            "composite": info.get("composite", 0),
             "evidence": packet.to_dict(),
         }
 
@@ -68,7 +82,7 @@ async def execution_board():
         if exec_res.get("trail_stop"):
             entry["trail_stop"] = exec_res["trail_stop"]
 
-        action = exec_res.get("action", "HOLD")
+        action = str(exec_res.get("action", "HOLD")).lower()
         if action in board:
             board[action].append(entry)
         else:
@@ -84,8 +98,7 @@ async def build_checklist(symbol: str):
     checker = ExecutionChecker()
     scores = _load_trading_signals()
     item = scores.get(symbol, {})
-    score_data = item.get("scores", {})
-    result = checker.check(symbol, score_data=score_data)
+    result = checker.check(symbol, score_data=item)
     return {"symbol": symbol, "build_checklist": result.get("build_checklist", {})}
 
 
@@ -103,15 +116,28 @@ async def trail_stop(symbol: str):
 
 
 def _load_trading_signals() -> dict:
-    path = DATA / "trading_signals.json"
+    """构建 symbol → 评分条目 映射 (供执行决策区按标的检查)
+
+    来源: scan_snapshot_latest.json.results — 每个标的含 composite_v4/scores/factor_breakdown
+    (trading_signals.json.portfolios 是策略组合摘要, 无标的评分, 不能当评分源)
+    """
+    path = DATA / "scan_snapshot_latest.json"
     if not path.exists():
         return {}
     try:
         with open(path) as f:
             data = json.load(f)
-        return data.get("portfolios", {})
     except (json.JSONDecodeError, KeyError):
         return {}
+    score_map = {}
+    for r in data.get("results", []):
+        sym = r.get("symbol", "")
+        if not sym:
+            continue
+        item = dict(r)
+        item["composite"] = r.get("composite_v4", r.get("composite", 0))
+        score_map[sym] = item
+    return score_map
 
 
 def _load_positions() -> dict:
@@ -124,9 +150,11 @@ def _load_positions() -> dict:
         pos = {}
         for sname, sinfo in data.items():
             if isinstance(sinfo, dict):
-                for ps in sinfo.get("positions", {}).values():
-                    if isinstance(ps, dict) and ps.get("symbol"):
-                        pos[ps["symbol"]] = ps
+                for sym, ps in sinfo.get("positions", {}).items():
+                    if isinstance(ps, dict) and ps.get("current_price", 0) > 0:
+                        item = dict(ps)
+                        item["symbol"] = item.get("symbol", sym)
+                        pos[sym] = item
         return pos
     except (json.JSONDecodeError, KeyError):
         return {}

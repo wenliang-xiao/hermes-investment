@@ -16,6 +16,47 @@ _checker = ExecutionChecker()
 _builder = EvidenceBuilder()
 
 
+def _load_scan_score_map() -> dict:
+    """scan_snapshot_latest.json → {symbol: score_item} (含 7 维风格分, 供持仓因子雷达)"""
+    path = ROOT / "data" / "scan_snapshot_latest.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return {r.get("symbol", ""): r for r in data.get("results", []) if r.get("symbol")}
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+
+def _annotate_signals(all_signals, final_signals, trade_history, today_str):
+    """给原始信号打状态: executed(今日已执行) / filtered(冲突或周频过滤) / pending"""
+    def norm(a):
+        a = str(a or "")
+        if a.upper().startswith("BUY") or a.startswith("买"):
+            return "BUY"
+        if a.upper().startswith("SELL") or a.startswith("卖"):
+            return "SELL"
+        return a.upper()
+
+    executed = set()
+    for sname, txns in trade_history.items():
+        for t in (txns or []):
+            if str(t.get("date", ""))[:10] == today_str:
+                executed.add((sname, t.get("symbol"), norm(t.get("action"))))
+    final_keys = {(s.get("strategy"), s.get("symbol"), norm(s.get("action")))
+                  for s in final_signals}
+    for s in all_signals:
+        k = (s.get("strategy"), s.get("symbol"), norm(s.get("action")))
+        if k in executed:
+            s["status"] = "executed"
+        elif k not in final_keys:
+            s["status"] = "filtered"
+        else:
+            s["status"] = "pending"
+    return all_signals
+
+
 @router.get("/api/portfolio")
 def api_portfolio():
     book = load_shadow()
@@ -93,7 +134,13 @@ def api_simulated():
 
         cash = pf.get("cash", 1000000)
         invested = pf.get("total_invested", 0)
-        total_value = cash + invested
+        # 总资产 = 现金 + 持仓市值 (优先用生成方算好的 total_value, 兜底用市值重算)
+        total_value = pf.get("total_value")
+        if total_value is None:
+            total_value = cash + sum(
+                (pd.get("current_price") or 0) * (pd.get("quantity") or 0)
+                for pd in pos.values()
+            )
         total_pnl = total_value - 1000000
         total_return = total_pnl / 1000000 * 100
 
@@ -163,6 +210,7 @@ def api_v2_portfolio_detail():
     raw_positions = data.get("positions", {})
     raw_signals = data.get("signals", [])
     trade_history = data.get("trade_history", {})
+    scan_map = _load_scan_score_map()
 
     # ── 补充统计字段 (匹配 JS loadDashboardV2 的期望) ──
     strategy_labels = {
@@ -177,14 +225,24 @@ def api_v2_portfolio_detail():
         pf = raw_portfolios.get(sname, {})
         cash = pf.get("cash", CAPITAL)
         invested = pf.get("total_invested", 0)
-        total_value = cash + invested
+        # 总资产 = 现金 + 持仓市值 (优先用生成方算好的 total_value, 兜底用市值重算)
+        total_value = pf.get("total_value")
+        if total_value is None:
+            syms = raw_positions.get(sname, {})
+            total_value = cash + sum(
+                (p.get("current_price") or 0) * (p.get("quantity") or 0)
+                for p in syms.values()
+            )
         total_pnl = total_value - CAPITAL
         total_return = total_pnl / CAPITAL * 100 if CAPITAL else 0
 
-        # 胜率
+        # 胜率: 只统计已平仓(卖出)且有盈亏记录的交易; 无平仓 → None(前端显示 —)
         txns = trade_history.get(sname, [])
-        wins = sum(1 for t in txns if t.get("pnl", 0) > 0)
-        win_rate = round(wins / len(txns) * 100, 1) if txns else None
+        closed = [t for t in txns
+                  if str(t.get("action", "")).startswith(("卖", "SELL", "sell"))
+                  and t.get("pnl") is not None]
+        wins = sum(1 for t in closed if t.get("pnl", 0) > 0)
+        win_rate = round(wins / len(closed) * 100, 1) if closed else None
 
         label = strategy_labels.get(sname, {})
         enriched_portfolios[sname] = {
@@ -246,11 +304,17 @@ def api_v2_portfolio_detail():
                 "drawdown_from_entry": pos.get("drawdown_from_entry", 0),
                 "entry_score": pos.get("entry_score"),
                 "current_score": pos.get("current_score"),
-                "factor_scores": pos.get("factor_scores"),
+                # 无持仓因子数据时, 从当日扫描快照富集 7 维风格分 (修复"无因子数据")
+                "factor_scores": pos.get("factor_scores")
+                                  or scan_map.get(sym, {}).get("scores"),
                 "is_delisted": not current or current <= 0,
                 "evidence": _build_position_evidence(sym, current, qty, entry, pnl, pos, sname),
             }
         enriched_positions[sname] = pos_list
+
+    final_sigs = _clean_signals(raw_signals, "v2_detail")[0]
+    all_sigs = data.get("all_signals", [])
+    _annotate_signals(all_sigs, final_sigs, trade_history, data.get("date", ""))
 
     result = {
         "date": data.get("date", ""),
@@ -262,8 +326,8 @@ def api_v2_portfolio_detail():
         "portfolios": enriched_portfolios,
         "positions": enriched_positions,
         "trade_history": trade_history,
-        "final_signals": _clean_signals(raw_signals, "v2_detail")[0],
-        "all_signals": data.get("all_signals", []),
+        "final_signals": final_sigs,
+        "all_signals": all_sigs,
     }
 
     return result
