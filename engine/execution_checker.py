@@ -126,17 +126,18 @@ class ExecutionChecker:
         checklist = {}
 
         # 1. 双门开启
-        dg = (macro_state or {}).get("dual_gate", {})
-        macro_gate = dg.get("macro", "")
-        trend_gate = dg.get("trend", "")
+        dg = (macro_state or {}).get("dual_gate", {}) or {}
+        # 兼容两种键名: 缓存用 macro_gate/trend_gate, 旧格式用 macro/trend
+        macro_gate = dg.get("macro_gate") or dg.get("macro") or ""
+        trend_gate = dg.get("trend_gate") or dg.get("trend") or ""
         dg_open = macro_gate in ("绿灯", "绿") or trend_gate in ("绿灯", "绿")
         checklist["dual_gate_open"] = {
             "status": dg_open,
-            "detail": f"双门:宏观{macro_gate}/趋势{trend_gate}",
+            "detail": f"双门:宏观{macro_gate or '?'}/趋势{trend_gate or '?'}",
         }
 
-        # 2. 宏观象限
-        quadrant = (macro_state or {}).get("quadrant", "未知")
+        # 2. 宏观象限 (regime 复苏/扩张/过热/衰退; 兼容旧 quadrant)
+        quadrant = (macro_state or {}).get("regime") or (macro_state or {}).get("quadrant") or "未知"
         q_ok = quadrant in ("扩张期", "复苏期")
         checklist["macro_ok"] = {
             "status": q_ok,
