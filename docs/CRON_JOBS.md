@@ -66,13 +66,20 @@
 `strategy_comparison` 回测使用（**需要 60+ 天真实数据**）。
 
 - **Schedule:** 工作日 09:30
-- **执行入口:** `scripts/daily_factor_scan.py`（**单入口编排器**，2026-08-13 新增）
-- **Skills:** `devops/cross-cron-batch-scan`, `devops/v10-trading-system-maintenance`
+- **模式:** `no_agent=True`（**确定性脚本，无 LLM 依赖**）——2026-08-13 从 agent-mode 改，根治 LLM 网关 502 致命化问题
+- **执行:** `~/.hermes/scripts/factor_daily_scan.sh` → `scripts/daily_factor_scan.py`（单入口编排器）
 - **完整命令:**
   ```bash
   cd /home/admin/.hermes/investment_system && \
     /home/admin/.hermes/hermes-agent/venv/bin/python scripts/daily_factor_scan.py
   ```
+
+**为何改为 no_agent（2026-08-13 关键修复）:**
+- 原 agent-mode 的 cron 依赖 LLM 网关 `https://api.spanagent.xyz`（Cloudflare 前端）。
+  该网关频繁瞬时 502/timeout，一旦在 agent 首次响应阶段失败（`msgs=2 tokens=~6k`），
+  **整个因子扫描一行都没执行**就整批失败。数据源自身（蜻蜓/baostock/yfinance）的 502 都
+  已被吞掉或自动重试，**两者混淆导致误判成数据源故障**。
+- no_agent 直接用脚本，扫描成功与否完全取决于数据源健康度，与 LLM 网关彻底解耦。
 
 **`daily_factor_scan.py` 做什么（按序）:**
 1. 清理跨天残留的批文件 `data/factor_daily_batch{N}.json`（昨天的 → 删掉）
@@ -115,8 +122,9 @@ ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 
 | 症状 | 根因 | 处置 |
 |---|---|---|
+| cron 报 `Script timed out after 120s` | **Hermes cron 调度器对 no_agent 脚本的默认硬超时只有 120s**（`scheduler.py` `_DEFAULT_SCRIPT_TIMEOUT`），而 `daily_factor_scan.py` 内部预算是 1200s；120s 到点脚本被整杀，batch3/4/5 + merge + 快照全没做 | 已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800`（配置文件按 mtime 缓存，改完即生效，无需重启）。再犯时先 `grep script_timeout_seconds ~/.hermes/config.yaml` 确认还在 |
 | cron 报 `ModuleNotFoundError: numpy` | cron 用了裸 `python3` = Py3.6.8 | 改用 venv 绝对路径 |
-| cron 报 `HTTP 502 Bad gateway (Cloudflare)` | yfinance origin 瞬时错误 | **已自动重试**；单次 502 不是致命错误，重跑即可 |
+| cron 报 `RuntimeError: HTTP 502 (Cloudflare)` 且 `tokens=~6k` | **LLM 网关 `api.spanagent.xyz` 瞬时 502**（agent 首次响应即死，扫描未执行） | **不是数据源故障。** 已改为 no_agent 脚本免疫；老日志出现则重跑 `daily_factor_scan.py` |
 | 扫描卡住无评分输出 8min+ | baostock/CSC 挂起 | `rm -f data/scanner_progress.json` + 重跑；连败2次→报陈旧数据 |
 | `faceji-factor-daily-scan` 部分完成" | 时间预算/批失败 | 重跑同一命令续扫；快照用最大日期 |
 | 日报推送空消息"今日无新信号" | push 脚本副本滞后 | 参考 `v10-trading-system-maintenance` skill §推送到飞书群 |
@@ -150,6 +158,7 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-24 | **P0 修复**: Hermes cron 默认 120s 硬超时会杀掉仍在跑的 no_agent 脚本, 导致因子扫描连续 8 个交易日缺快照。已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800` | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/cron_watchdog.py` 看门狗 + cron job `factor-snapshot-watchdog`（主动故障检测） | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/daily_factor_scan.py` 单入口编排器，修复 `faceji-factor-daily-scan` 的陈旧/错误 prompt | 502 故障 + cron 规范化 |
 | 2026-08-13 | `data/sources/yahoo_source.py` 增加 502/429/5xx 指数退避自动重试 | 502 故障修复 |
