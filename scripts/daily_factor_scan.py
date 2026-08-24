@@ -171,6 +171,16 @@ def main() -> int:
         except Exception as e:
             logger.error(f"[scan] ❌ Batch#{bi} failed: {e}")
             ok_all = False
+        # 内存释放 (2026-08-24 OOM 修复): 本机 1.8GB 无 swap, 每批的 engine 缓存
+        # (250天日线 DataFrame + 财报) 不显式释放会跨批累积 → OOM kill。
+        finally:
+            try:
+                engine.clear_cache()
+            except Exception:
+                pass
+            del engine
+            import gc
+            gc.collect()
         # 批次间 3s 间隔避免限频
         if bi < A_BATCHES:
             time.sleep(3)
@@ -207,6 +217,14 @@ def main() -> int:
                     logger.info(f"[scan] ✅ HK/US: {len(scored)} scored")
                 except Exception as e:
                     logger.error(f"[scan] ❌ HK/US failed: {e}")
+                finally:
+                    try:
+                        engine.clear_cache()
+                    except Exception:
+                        pass
+                    del engine
+                    import gc
+                    gc.collect()
         else:
             logger.info("[scan] 🌏 HK/US 已有今日产物, 跳过")
     else:

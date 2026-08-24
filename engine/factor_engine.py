@@ -1179,10 +1179,12 @@ class FactorEngine:
         # P0性能 (2026-08-18): 52标串行采集 15+min 跑不完 cron →
         # ThreadPoolExecutor 并发采集 (蜻蜓网络 IO 是瓶颈, 并发大幅提速)。
         # 线程安全: 数据源层已加锁 (baostock 全局锁 / QTSource session+缓存锁)。
+        # 内存约束 (2026-08-24): 本机 1.8GB 无 swap, 6 并发 × 250天日线 DataFrame
+        # 峰值 ~760MB 触发 OOM kill。降到 3 并发, 同时每批后显式 clear_cache+gc。
         def _collect_one(sym: str) -> dict[str, float | None]:
             return {sk: self._get_sub_value(sk, sym) for sk in SUB_FACTOR_DEFS}
 
-        _BATCH_WORKERS = 6
+        _BATCH_WORKERS = 3
         from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=_BATCH_WORKERS) as pool:
             futures = {pool.submit(_collect_one, sym): sym for sym in symbols}
