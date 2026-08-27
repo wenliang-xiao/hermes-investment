@@ -4,7 +4,10 @@ Shadow Account（Vibe-Trading概念）
 """
 import json, os
 from datetime import datetime, timedelta
-from investment_system import config
+try:
+    from investment_system import config  # 已 pip install 的包形态
+except ImportError:
+    import config as config              # 本地源码形态(无安装投资包时兜底)
 
 SHADOW_FILE = config.DATA_DIR / "shadow_account.json"
 
