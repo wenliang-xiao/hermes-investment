@@ -1,0 +1,13 @@
+{
+  "updated": "2026-08-27",
+  "note": "手工维护的未来事件日历（降级基底）。date=事件日期, type∈{earnings,ipo,rate_sanction,central_bank}, risk_level∈{high,med,low}。下方为示例事件，请替换为真实未来事件并同步更新 updated。",
+  "events": [
+    {
+      "date": "2026-08-28",
+      "symbol": "NVDA",
+      "type": "earnings",
+      "title": "英伟达财报（示例占位，请替换为真实未来事件）",
+      "risk_level": "high"
+    }
+  ]
+}
