@@ -200,7 +200,7 @@ def get_market_moves() -> dict:
 
 
 def load_latest_event_risk(path=None) -> dict | None:
-    """读 shadow_event_history.json 最新一条影子记录，无记录返回 None。"""
+    """读 shadow_event_history.json 最新一条影子记录，无记录或非当天返回 None。"""
     import json
     import os
     from pathlib import Path
@@ -208,15 +208,21 @@ def load_latest_event_risk(path=None) -> dict | None:
     if path is None:
         path = Path(__file__).parent.parent / "data" / "shadow_event_history.json"
     if not os.path.exists(path):
+        logger.warning("[event_risk] 影子记录不存在: %s（run_event_shadow.py 未运行，事件拦截不生效）", path)
         return None
     try:
         with open(path) as f:
             history = json.load(f)
     except (json.JSONDecodeError, OSError):
+        logger.warning("[event_risk] 影子记录读取失败: %s", path)
         return None
     if not history or not isinstance(history, list):
         return None
-    return history[-1]
+    latest = history[-1]
+    if latest.get("date") != datetime.now().strftime("%Y-%m-%d"):
+        logger.warning("[event_risk] 影子记录非当天(%s)，事件拦截不生效", latest.get("date"))
+        return None
+    return latest
 
 
 def event_blocks_buy(event_risk: dict | None) -> bool:

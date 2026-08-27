@@ -284,9 +284,18 @@ class TestLoadLatestEventRisk:
     def test_returns_latest(self, tmp_path):
         import json
 
+        today = datetime.now().strftime("%Y-%m-%d")
         p = tmp_path / "history.json"
-        p.write_text(json.dumps([{"date": "a"}, {"date": "b"}]))
-        assert ere.load_latest_event_risk(str(p)) == {"date": "b"}
+        p.write_text(json.dumps([{"date": today, "level": "high"}]))
+        assert ere.load_latest_event_risk(str(p))["level"] == "high"
+
+    def test_stale_record_returns_none(self, tmp_path):
+        import json
+
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        p = tmp_path / "history.json"
+        p.write_text(json.dumps([{"date": yesterday, "level": "high"}]))
+        assert ere.load_latest_event_risk(str(p)) is None
 
     def test_missing_file_returns_none(self, tmp_path):
         assert ere.load_latest_event_risk(str(tmp_path / "none.json")) is None

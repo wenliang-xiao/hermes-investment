@@ -23,7 +23,7 @@
 
 ## 1. 任务总览
 
-共 **5 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
+共 **6 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
 
 | Job ID | 名称 | Schedule | 频率 | 推送目标 | 工作目录 |
 |---|---|---|---|---|---|
@@ -32,6 +32,7 @@
 | `aa3d2e888cc7` | 面基周报 | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
 | `1f704ff45437` | faceji-factor-daily-scan | `30 9 * * 1-5` | 工作日 09:30 | origin（本对话） | investment_system |
 | `64b330ed994e` | factor-snapshot-watchdog | `0 17 * * 1-5` | 工作日 17:00 | origin（本对话） | investment_system |
+| `TBD` | event-risk-shadow | `0 8 * * 1-5` | 工作日 08:00 | 无（静默写文件） | investment_system |
 
 > **推送目标说明:**
 > - 日报×2 + 周报 → 飞书群 `oc_4c9d6445fab7f3a2ada0c410f3aa7043`（知行合一）
@@ -105,6 +106,26 @@
 **为什么用 no_agent:** 无 LLM 参与，确定性执行；看门狗模式天然只在该报错时报错，
 不会产生噪音消息。
 
+### 2.6 event-risk-shadow (`TBD`) 🛡️ 事件风险影子运行
+
+**用途:** 每日生成 `data/shadow_event_history.json`（事件避险脉冲 + 建议 + 持仓快照），
+供 `run_daily` / `trading_engine` 的事件拦截使用 + 累积影子证据（判断何时上实盘）。
+
+- **Schedule:** 工作日 08:00（早于盘前日报 08:30，保证日报能读到当天影子记录）
+- **模式:** `no_agent=True`（确定性脚本，无 LLM 依赖）
+- **执行:** `scripts/run_event_shadow.py`
+- **完整命令:**
+  ```bash
+  cd /home/admin/.hermes/investment_system && \
+    /home/admin/.hermes/hermes-agent/venv/bin/python scripts/run_event_shadow.py
+  ```
+
+**为何必须接 cron（2026-08-27 补齐）:**
+- `run_daily` 的 dual_closed 叠加事件避险、`trading_engine` 的 BUY 拦截都依赖
+  `shadow_event_history.json`（读最新一条，日期校验非当天返回 None）。
+- 若影子脚本不跑，该文件不存在 → `event_blocks_buy` 返回 False → 事件拦截静默失效。
+- 详见 `docs/plans/event-risk-switch-pre-launch-checklist.md`。
+
 ---
 
 ## 3. 数据管线健康度
@@ -158,6 +179,7 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-27 | 新增 `scripts/run_event_shadow.py` + cron job `event-risk-shadow`（事件风险影子运行，事件拦截的前置数据源） | 事件风险开关 |
 | 2026-08-24 | **P0 修复**: Hermes cron 默认 120s 硬超时会杀掉仍在跑的 no_agent 脚本, 导致因子扫描连续 8 个交易日缺快照。已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800` | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/cron_watchdog.py` 看门狗 + cron job `factor-snapshot-watchdog`（主动故障检测） | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/daily_factor_scan.py` 单入口编排器，修复 `faceji-factor-daily-scan` 的陈旧/错误 prompt | 502 故障 + cron 规范化 |
