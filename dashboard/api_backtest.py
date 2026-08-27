@@ -136,6 +136,7 @@ def _backtest_result_to_frontend(br, strategy_label: str = "") -> dict:
         "calmar_ratio": br.calmar_ratio,
         "daily_values": br.equity_curve,
         "trades": br.trades,
+        "extra": getattr(br, "extra", {}) or {},
     }
 
 
@@ -163,13 +164,17 @@ def _persist_backtest_result(br, strategy: str, symbols) -> None:
 
 
 def _run_single_backtest(strategy: str, start_date: str, end_date: str,
-                          symbols: list[str], capital: float, days: int) -> dict:
+                          symbols: list[str], capital: float, days: int,
+                          walk_forward: bool = False, cycles: int = 3,
+                          train_days: int = 252, test_days: int = 63) -> dict:
     """运行单个策略回测，返回前端格式的 dict"""
     from engine.evaluator_fixed import evaluate_strategy
     from engine.backtest_types import BacktestResult
 
     sym_list = symbols if symbols else None
-    result = evaluate_strategy(strategy_name=strategy, custom_symbols=sym_list)
+    result = evaluate_strategy(strategy_name=strategy, custom_symbols=sym_list,
+                               walk_forward=walk_forward, cycles=cycles,
+                               train_days=train_days, test_days=test_days)
     if isinstance(result, dict) and "error" in result:
         return {"error": result["error"], "name": strategy, "daily_values": [], "trades": []}
     if isinstance(result, BacktestResult):
@@ -233,11 +238,15 @@ def api_v2_backtest_custom(
     symbols: str = "",
     capital: float = 1000000,
     days: int = 60,
+    walk_forward: bool = False,
+    cycles: int = 3,
+    test_days: int = 63,
 ):
     """自定义回测 — 指定策略/时间范围/股票池
 
     当提供了自定义参数（策略/日期/标的）时，使用 evaluator_fixed 引擎进行
     真实数据回测；无自定义参数时回退到 scan_snapshot 对比引擎。
+    walk_forward=True 启动样本外滚动评估(训练→测试窗口逐期前移)。
 
     参数:
         strategy: faceji / silverquant / tradingagents / all
@@ -246,6 +255,9 @@ def api_v2_backtest_custom(
         symbols: 逗号分隔的标的代码（空=默认 FIXED_UNIVERSE）
         capital: 初始资金
         days: 回测天数（无日期时使用）
+        walk_forward: 是否走 Walk-Forward 样本外评估
+        cycles: WF 滚动次数
+        test_days: WF 每个测试窗口天数
     """
     has_custom_params = bool(start_date) or bool(end_date) or bool(symbols)
 
@@ -264,7 +276,9 @@ def api_v2_backtest_custom(
         result = {}
         for s_name in strategies_to_run:
             output = _run_single_backtest(s_name, start_date, end_date,
-                                          sym_list, capital, days)
+                                          sym_list, capital, days,
+                                          walk_forward=walk_forward,
+                                          cycles=cycles, test_days=test_days)
             result[s_name] = output
 
         result["run_date"] = _dt.now().strftime("%Y-%m-%d %H:%M")
@@ -290,6 +304,8 @@ def api_v2_backtest_custom(
             "symbols": symbols,
             "capital": capital,
             "days": days,
+            "walk_forward": walk_forward,
+            "cycles": cycles,
         }
         return result
 

@@ -263,6 +263,17 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
           <label class="block text-xs text-gray-400 mb-1">股票池(逗号分隔,空=默认)</label>
           <input type="text" id="btSymbols" placeholder="如: 000001,600519,0700.HK" class="bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-600 w-64" />
         </div>
+        <div class="flex items-center gap-2 pb-1">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="btWF" class="w-4 h-4 accent-blue-500" />
+            <span class="text-xs text-gray-300" title="Walk-Forward 样本外滚动评估: 训练窗口前移, 逐期测试 out-of-sample">🧪 Walk-Forward 样本外</span>
+          </label>
+          <select id="btWFCycles" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
+            <option value="3">3 周期</option>
+            <option value="5">5 周期</option>
+            <option value="2">2 周期</option>
+          </select>
+        </div>
         <button onclick="runCustomBacktest()" class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">▶ 运行回测</button>
       </div>
       <div id="comparisonContent"></div>
@@ -1486,6 +1497,8 @@ async function runCustomBacktest() {
   const startDate = document.getElementById('btStartDate')?.value || '';
   const endDate = document.getElementById('btEndDate')?.value || '';
   const symbols = document.getElementById('btSymbols')?.value || '';
+  const wf = document.getElementById('btWF')?.checked || false;
+  const wfCycles = parseInt(document.getElementById('btWFCycles')?.value || '3', 10) || 3;
 
   let days = 60;
   if (startDate && endDate) {
@@ -1541,6 +1554,7 @@ async function runCustomBacktest() {
     if (startDate) url += `&start_date=${startDate}`;
     if (endDate) url += `&end_date=${endDate}`;
     if (symbols) url += `&symbols=${encodeURIComponent(symbols)}`;
+    if (wf) url += `&walk_forward=true&cycles=${wfCycles}`;
 
     const r = await fetch(url);
     clearInterval(progressInterval);
@@ -1573,7 +1587,42 @@ async function runCustomBacktest() {
       ${params.end_date ? `<span>到 <strong class="text-gray-200">${params.end_date}</strong></span>` : ''}
       ${params.symbols ? `<span>标的: <strong class="text-gray-200">${params.symbols}</strong></span>` : ''}
       <span>更新: <strong class="text-gray-200">${data.run_date || ''}</strong></span>
+      ${params.walk_forward ? `<span class="bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded text-[10px]">🧪 Walk-Forward 样本外评估 (${params.cycles||3}周期)</span>` : ''}
     </div>`;
+
+    // ── Walk-Forward 周期明细表 ──
+    if (params.walk_forward) {
+      html += `<div class="bg-gray-800 rounded-xl p-4 mb-6">
+        <h4 class="text-sm font-semibold text-gray-300 mb-3">🧪 Walk-Forward 逐期样本外结果 <span class="text-gray-500 text-[10px] font-normal">(训练窗口前移, 每周期只用样本外做测试)</span></h4>`;
+      strategies.forEach(s => {
+        const details = ((s.extra||{}).cycle_details) || [];
+        if (!details.length) return;
+        const c = colors[s.name] || { line: '#fff' };
+        html += `<div class="mb-3">
+          <div class="text-xs font-medium mb-1.5" style="color:${c.line}">● ${s.name} <span class="text-gray-500">— 平均收益 ${(s.total_return_pct||0)>=0?'+':''}${(s.total_return_pct||0)}% · 平均夏普 ${((s.sharpe_ratio)||0).toFixed(2)} · 平均回撤 -${(s.max_drawdown_pct||0)}%</span></div>
+          <div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead class="text-gray-400 border-b border-gray-700"><tr>
+              <th class="py-1.5 pr-2 text-left">周期</th><th class="pr-2 text-right">样本外天数</th>
+              <th class="pr-2 text-right">收益率</th><th class="pr-2 text-right">夏普</th>
+              <th class="pr-2 text-right">索提诺</th><th class="pr-2 text-right">最大回撤</th>
+              <th class="text-right">交易/胜</th>
+            </tr></thead><tbody>`;
+        details.forEach(cd => {
+          const retCls = cd.return_pct >= 0 ? 'text-green-400' : 'text-red-400';
+          html += `<tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+            <td class="py-1.5 pr-2 text-gray-300">W${cd.cycle}</td>
+            <td class="pr-2 text-right font-mono text-gray-400">${cd.test_days||'-'}</td>
+            <td class="pr-2 text-right font-mono ${retCls}">${cd.return_pct>=0?'+':''}${cd.return_pct}%</td>
+            <td class="pr-2 text-right font-mono text-gray-200">${cd.sharpe!=null?cd.sharpe.toFixed(2):'-'}</td>
+            <td class="pr-2 text-right font-mono text-gray-200">${cd.sortino!=null?cd.sortino.toFixed(2):'-'}</td>
+            <td class="pr-2 text-right font-mono text-red-400">-${cd.max_drawdown_pct||0}%</td>
+            <td class="text-right font-mono text-gray-400">${cd.trade_count||0}/${cd.win_count||0}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div></div>';
+      });
+      html += '</div>';
+    }
 
     // ── 策略指标卡片 ──
     if (strategies.length > 0 && !strategies[0].note) {
