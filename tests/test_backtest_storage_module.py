@@ -65,8 +65,9 @@ class TestBacktestStorage:
         assert delete_result("wf_faceji_del") is True
         assert load_result("wf_faceji_del") is None
 
-    def test_auto_id_generation(self):
-        """不传 run_id 时自动生成"""
+    def test_auto_id_generation(self, monkeypatch, tmp_path):
+        """不传 run_id 时自动生成（临时目录，不污染真实 data/backtest/）"""
+        monkeypatch.setattr("engine.backtest_storage.BACKTEST_DIR", str(tmp_path))
         result = {"meta": {"strategy": "faceji", "symbols": [], "date_range": {},
                   "days": 0}, "cycles": [], "aggregate": {}, "cost_model": {}}
         path = save_result("faceji", result)
