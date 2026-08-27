@@ -16,6 +16,9 @@ GOLD_5D_THRESHOLD = 5.0
 NASDAQ_1D_THRESHOLD = -3.0
 A_CHAIN_1D_THRESHOLD = -2.0
 
+# 光模块龙头，NVDA 算力链 A股映射代表（跨市场共振的 A股侧标的）
+_A_CHAIN_SYMBOL = "300308"
+
 _LEVEL_TO_ADJUST = {"none": 0.0, "moderate": 0.3, "high": 0.6, "extreme": 1.0}
 
 
@@ -117,6 +120,10 @@ def build_event_advice(event_risk: dict) -> dict:
 def build_shadow_entry(date_str: str, event_risk: dict, advice: dict, actual_snapshot: dict) -> dict:
     """组装一条影子运行记录条目（每日记录脉冲 + 建议 + 实际持仓快照）。
 
+    hedged_pnl = actual_realized_pnl × position_adjust，为线性简化假设
+    （假设盈亏随仓位比例缩减，避险资产损益未计入），供累积后对比
+    「避险版 vs 实际」损益。
+
     Args:
         date_str: 日期字符串 "YYYY-MM-DD"。
         event_risk: calc_event_risk() 的返回 dict。
@@ -126,16 +133,19 @@ def build_shadow_entry(date_str: str, event_risk: dict, advice: dict, actual_sna
     Returns:
         影子记录条目 dict。
     """
+    actual_pnl = actual_snapshot.get("realized_pnl", 0)
+    position_adjust = advice.get("position_adjust", 1.0)
     return {
         "date": date_str,
         "level": event_risk.get("level"),
         "triggered_by": event_risk.get("triggered_by", []),
         "action": advice.get("action"),
-        "position_adjust": advice.get("position_adjust"),
+        "position_adjust": position_adjust,
         "havens": advice.get("havens", []),
         "actual_total_value": actual_snapshot.get("total_value"),
         "actual_position_count": actual_snapshot.get("position_count", 0),
-        "actual_realized_pnl": actual_snapshot.get("realized_pnl", 0),
+        "actual_realized_pnl": actual_pnl,
+        "hedged_pnl": round(actual_pnl * position_adjust, 2),
     }
 
 
@@ -151,7 +161,7 @@ def _pct_change(closes: list, lookback: int) -> float | None:
 
 
 def get_market_moves() -> dict:
-    """获取避险异动（黄金单日/5日、纳指单日涨跌幅%）。限频/失败静默降级为空 dict。"""
+    """获取避险异动（黄金单日/5日、纳指单日、A股映射链单日涨跌幅%）。限频/失败静默降级为空 dict。"""
     import yfinance as yf
 
     moves: dict = {}
@@ -177,4 +187,40 @@ def get_market_moves() -> dict:
     except Exception as exc:  # noqa: BLE001 - 限频降级
         logger.warning("[event_risk] 纳指异动获取失败: %s", exc)
 
+    try:
+        from data.sources.akshare_source import get_rt_em
+
+        rt = get_rt_em(_A_CHAIN_SYMBOL)
+        if rt and rt.get("change_pct") is not None:
+            moves["a_chain_1d_pct"] = round(rt["change_pct"], 2)
+    except Exception as exc:  # noqa: BLE001 - 行情源降级
+        logger.warning("[event_risk] A股映射链异动获取失败: %s", exc)
+
     return moves
+
+
+def load_latest_event_risk(path=None) -> dict | None:
+    """读 shadow_event_history.json 最新一条影子记录，无记录返回 None。"""
+    import json
+    import os
+    from pathlib import Path
+
+    if path is None:
+        path = Path(__file__).parent.parent / "data" / "shadow_event_history.json"
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not history or not isinstance(history, list):
+        return None
+    return history[-1]
+
+
+def event_blocks_buy(event_risk: dict | None) -> bool:
+    """事件风险是否禁用 BUY（level ≥ high）。"""
+    if not event_risk:
+        return False
+    return event_risk.get("level") in ("high", "extreme")

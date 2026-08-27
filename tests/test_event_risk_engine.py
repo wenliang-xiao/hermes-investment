@@ -157,7 +157,8 @@ class TestBuildShadowEntry:
             {"action": "降仓建议", "position_adjust": 0.3, "havens": ["黄金ETF"]},
             {"total_value": 1000000, "position_count": 5, "realized_pnl": 1200})
         for key in ("date", "level", "triggered_by", "action", "position_adjust",
-                    "havens", "actual_total_value", "actual_position_count", "actual_realized_pnl"):
+                    "havens", "actual_total_value", "actual_position_count", "actual_realized_pnl",
+                    "hedged_pnl"):
             assert key in entry, f"缺少字段 {key}"
 
     def test_fields_passthrough(self):
@@ -188,6 +189,27 @@ class TestBuildShadowEntry:
         assert isinstance(entry["havens"], list)
         assert isinstance(entry["triggered_by"], list)
 
+    def test_hedged_pnl_scaled_by_position_adjust(self):
+        entry = ere.build_shadow_entry(
+            "2026-08-27", {"level": "high", "triggered_by": []},
+            {"action": "降仓建议", "position_adjust": 0.3, "havens": []},
+            {"total_value": 1, "position_count": 0, "realized_pnl": -500})
+        assert entry["hedged_pnl"] == -150.0
+
+    def test_hedged_pnl_equals_actual_when_none(self):
+        entry = ere.build_shadow_entry(
+            "2026-08-27", {"level": "none", "triggered_by": []},
+            {"action": "维持", "position_adjust": 1.0, "havens": []},
+            {"total_value": 1, "position_count": 0, "realized_pnl": -500})
+        assert entry["hedged_pnl"] == -500.0
+
+    def test_hedged_pnl_zero_when_extreme(self):
+        entry = ere.build_shadow_entry(
+            "2026-08-27", {"level": "extreme", "triggered_by": []},
+            {"action": "清仓建议", "position_adjust": 0.0, "havens": []},
+            {"total_value": 1, "position_count": 0, "realized_pnl": -500})
+        assert entry["hedged_pnl"] == 0.0
+
 
 class TestPctChange:
     def test_1d(self):
@@ -204,7 +226,9 @@ class TestPctChange:
 
 
 class TestGetMarketMoves:
-    def test_returns_moves(self, monkeypatch):
+    @pytest.fixture
+    def mock_sources(self, monkeypatch):
+        """mock yfinance（黄金/纳指）与腾讯行情（A股映射链），隔离网络。"""
         import yfinance as yf
         import pandas as pd
 
@@ -217,16 +241,59 @@ class TestGetMarketMoves:
                                     index=pd.date_range("2026-08-20", periods=6))
 
         monkeypatch.setattr(yf, "Ticker", FakeTicker)
+        import data.sources.akshare_source as aks
+        monkeypatch.setattr(aks, "get_rt_em", lambda sym: {"symbol": sym, "change_pct": -2.5})
+
+    def test_returns_all_moves(self, mock_sources):
         moves = ere.get_market_moves()
         assert moves["gold_5d_pct"] == 10.0
         assert "gold_1d_pct" in moves
         assert "nasdaq_1d_pct" in moves
+        assert moves["a_chain_1d_pct"] == -2.5
 
     def test_failure_returns_empty(self, monkeypatch):
         import yfinance as yf
+        import data.sources.akshare_source as aks
 
         def boom(sym):
             raise RuntimeError("rate limited")
 
         monkeypatch.setattr(yf, "Ticker", boom)
+        monkeypatch.setattr(aks, "get_rt_em", boom)
         assert ere.get_market_moves() == {}
+
+
+class TestEventBlocksBuy:
+    def test_high_blocks(self):
+        assert ere.event_blocks_buy({"level": "high"}) is True
+
+    def test_extreme_blocks(self):
+        assert ere.event_blocks_buy({"level": "extreme"}) is True
+
+    def test_moderate_not_block(self):
+        assert ere.event_blocks_buy({"level": "moderate"}) is False
+
+    def test_none_not_block(self):
+        assert ere.event_blocks_buy({"level": "none"}) is False
+
+    def test_missing_not_block(self):
+        assert ere.event_blocks_buy(None) is False
+
+
+class TestLoadLatestEventRisk:
+    def test_returns_latest(self, tmp_path):
+        import json
+
+        p = tmp_path / "history.json"
+        p.write_text(json.dumps([{"date": "a"}, {"date": "b"}]))
+        assert ere.load_latest_event_risk(str(p)) == {"date": "b"}
+
+    def test_missing_file_returns_none(self, tmp_path):
+        assert ere.load_latest_event_risk(str(tmp_path / "none.json")) is None
+
+    def test_empty_list_returns_none(self, tmp_path):
+        import json
+
+        p = tmp_path / "history.json"
+        p.write_text(json.dumps([]))
+        assert ere.load_latest_event_risk(str(p)) is None
