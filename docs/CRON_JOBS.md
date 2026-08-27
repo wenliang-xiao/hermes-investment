@@ -32,7 +32,7 @@
 | `aa3d2e888cc7` | 面基周报 | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
 | `1f704ff45437` | faceji-factor-daily-scan | `30 9 * * 1-5` | 工作日 09:30 | origin（本对话） | investment_system |
 | `64b330ed994e` | factor-snapshot-watchdog | `0 17 * * 1-5` | 工作日 17:00 | origin（本对话） | investment_system |
-| `TBD` | event-risk-shadow | `0 8 * * 1-5` | 工作日 08:00 | 无（静默写文件） | investment_system |
+| `cbda6228d443` | event-risk-shadow | `0 8 * * 1-5` | 工作日 08:00 | 无（静默写文件） | investment_system |
 
 > **推送目标说明:**
 > - 日报×2 + 周报 → 飞书群 `oc_4c9d6445fab7f3a2ada0c410f3aa7043`（知行合一）
@@ -106,7 +106,7 @@
 **为什么用 no_agent:** 无 LLM 参与，确定性执行；看门狗模式天然只在该报错时报错，
 不会产生噪音消息。
 
-### 2.6 event-risk-shadow (`TBD`) 🛡️ 事件风险影子运行
+### 2.6 event-risk-shadow (`cbda6228d443`) 🛡️ 事件风险影子运行
 
 **用途:** 每日生成 `data/shadow_event_history.json`（事件避险脉冲 + 建议 + 持仓快照），
 供 `run_daily` / `trading_engine` 的事件拦截使用 + 累积影子证据（判断何时上实盘）。
