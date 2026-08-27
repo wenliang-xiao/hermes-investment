@@ -82,7 +82,11 @@
 - [x] WF 对比开关（前端 checkbox + 周期数下拉, 后端 walk_forward/cycles/test_days 透传）
 - [x] 参数(周期/标的)可调后对比（周期数 2/3/5 可选, 标的/日期已可调）
 
-### WS5 自测 + 端点验证 + 提交
+### WS5 自测 + 端点验证 + 提交 ✅
+- [x] 全量测试 233 passed 无回归
+- [x] 端点验证: strategies / custom(silverquant,all) 全 200
+- [x] 崩溃修复 + 数据不足状态已验
+- [x] 全部 WS 已推送 main (c01c1df→52dd1b4)
 
 ## 验收标准
 - 点「运行回测」不再报错，任意脏数据/缺失均显示明确状态
