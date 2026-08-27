@@ -25,11 +25,14 @@ class TestExecuteSellPriceGuard:
                       price=price, reason="买入", size_pct=5)
 
     def test_normal_sell_works(self):
-        """正常价格卖出成功"""
+        """正常价格卖出成功（含交易成本）"""
+        from engine.cost_model import calc_adjusted_price
+        _adj, _cd = calc_adjusted_price(100, 100, "sell", "000001")
         sig = self._sell_sig(price=100)
         assert self.s.execute_sell(sig) is True
         assert "000001" not in self.s.positions
-        assert self.s.cash == 100000 + 100*100  # 加了现金
+        # 卖出后现金 = 本金 + 调整后成交额（含滑点+印花税成本，非全额 10000）
+        assert self.s.cash == 100000 + round(_adj * 100, 2)
 
     def test_sell_with_zero_price_skipped(self):
         """price=0 的卖出信号被跳过, 持仓不变"""
