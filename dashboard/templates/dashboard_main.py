@@ -1101,6 +1101,36 @@ async function loadExecutionBoard() {
     } catch(e) {
       if (dqEl) dqEl.textContent = '数据质量: ⏳ 暂无';
     }
+
+    // 事件风险 (带6s超时)
+    let eventRiskHtml = '<span class="px-2.5 py-1 rounded-lg bg-gray-800 text-gray-500 border border-gray-700">事件风险: 暂无</span>';
+    try {
+      const erRes = await Promise.race([
+        fetch('/api/v2/execution/event-risk'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('er-timeout')), 6000))
+      ]);
+      if (erRes.ok) {
+        const erData = await erRes.json();
+        if (erData.status === 'ok' && erData.event_risk) {
+          const er = erData.event_risk;
+          const level = er.level;
+          const triggeredBy = (er.triggered_by || []).join('; ');
+          const hoverText = triggeredBy ? ` title="触发原因: ${triggeredBy}"` : '';
+          
+          if (level === 'none') {
+            eventRiskHtml = `<span class="px-2.5 py-1 rounded-lg bg-gray-800 text-green-400 border border-gray-700 cursor-help"${hoverText}>🟢 事件风险: 无</span>`;
+          } else if (level === 'moderate') {
+            eventRiskHtml = `<span class="px-2.5 py-1 rounded-lg bg-yellow-900/40 text-yellow-400 border border-yellow-700/50 cursor-help"${hoverText}>🟡 事件风险: 控制仓位</span>`;
+          } else if (level === 'high') {
+            eventRiskHtml = `<span class="px-2.5 py-1 rounded-lg bg-orange-900/40 text-orange-400 border border-orange-700/50 cursor-help"${hoverText}>🟠 事件风险: 降仓建议</span>`;
+          } else if (level === 'extreme') {
+            eventRiskHtml = `<span class="px-2.5 py-1 rounded-lg bg-red-900/40 text-red-400 border border-red-700/50 cursor-help"${hoverText}>🔴 事件风险: 清仓建议</span>`;
+          }
+        }
+      }
+    } catch(e) {
+      // 保持暂无
+    }
     
     const board = data.board;
     window._boardData = data;   // 供弹窗深钻
@@ -1118,6 +1148,7 @@ async function loadExecutionBoard() {
       <span class="px-2.5 py-1 rounded-lg bg-gray-700 text-gray-300">◻️ 等待 ${counts.wait}</span>
       ${counts.excluded ? `<span class="px-2.5 py-1 rounded-lg bg-gray-800 text-gray-500 border border-gray-700">⛔ 禁反手 ${counts.excluded}</span>` : ''}
       <span class="px-2.5 py-1 rounded-lg bg-gray-800 text-gray-400 border border-gray-700">🌐 ${m.quadrant||'?'} · 双门 ${dg.macro_gate||dg.macro||'?'}/${dg.trend_gate||dg.trend||'?'}</span>
+      ${eventRiskHtml}
       ${total === 0 ? '<span class="text-gray-500 self-center">今日无待处理信号</span>' : ''}
     </div>`;
 
