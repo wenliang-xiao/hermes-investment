@@ -501,11 +501,22 @@ class TradingEngine:
                 print(f"  📋 周频过滤: [{sig.strategy}] {sig.action} {sig.symbol} - {msg}", flush=True)
         return filtered
 
+    def _event_blocks_buy(self) -> bool:
+        try:
+            from engine.event_risk_engine import load_latest_event_risk, event_blocks_buy
+            return event_blocks_buy(load_latest_event_risk())
+        except Exception:  # noqa: BLE001 - 影子记录缺失时不拦截
+            return False
+
     def run_daily(self, date_str, score_map, tech_map, price_map, save=True):
         """每日运行全部策略"""
         print(f"\n{'='*50}", flush=True)
         print(f"🏃 TradingEngine 运行: {date_str}", flush=True)
         print(f"{'='*50}", flush=True)
+
+        event_blocked = self._event_blocks_buy()
+        if event_blocked:
+            print("  🛡️事件避险: level≥high，禁用BUY", flush=True)
 
         all_signals = []
         for name, strategy in self.strategies.items():
@@ -522,6 +533,9 @@ class TradingEngine:
             strategy_sigs = [s for s in all_signals if s.strategy == name]
             for sig in strategy_sigs:
                 if sig.action == "BUY":
+                    if event_blocked:
+                        print(f"  🛡️事件避险拦截: [{sig.strategy}] BUY {sig.symbol}", flush=True)
+                        continue
                     # 周频检查: BUY信号受每周交易次数限制
                     ok, msg = self.calendar.can_trade(sig.strategy, sig.symbol)
                     if not ok:
@@ -547,6 +561,8 @@ class TradingEngine:
 
         # 周频过滤（仅用于给用户的建议信号）
         final = self._filter_by_weekly_rule(resolved)
+        if event_blocked:
+            final = [s for s in final if s.action != "BUY"]
         print(f"\n  📋 周频过滤后: {len(final)} 个最终建议", flush=True)
 
         output = {

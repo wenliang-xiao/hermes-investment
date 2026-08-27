@@ -30,6 +30,29 @@ def _backtest_result_to_frontend(br, strategy_label: str = "") -> dict:
     }
 
 
+def _persist_backtest_result(br, strategy: str, symbols) -> None:
+    """把 BacktestResult 落盘到 data/backtest/，供历史列表读取。失败静默（不影响回测返回）。"""
+    try:
+        from engine.backtest_storage import save_result
+
+        result = {
+            "meta": {
+                "run_id": f"{strategy}_{_dt.now().strftime('%Y%m%d_%H%M%S')}",
+                "strategy": strategy,
+                "date_range": {"start": br.start_date, "end": br.end_date},
+                "symbols": symbols or [],
+            },
+            "aggregate": {
+                "avg_sortino": br.sortino_ratio,
+                "avg_return_pct": br.total_return_pct,
+                "total_trades": br.trade_count,
+            },
+        }
+        save_result(strategy, result)
+    except Exception:  # noqa: BLE001 - 落盘失败不影响回测返回
+        pass
+
+
 def _run_single_backtest(strategy: str, start_date: str, end_date: str,
                           symbols: list[str], capital: float, days: int) -> dict:
     """运行单个策略回测，返回前端格式的 dict"""
@@ -41,6 +64,7 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
     if isinstance(result, dict) and "error" in result:
         return {"error": result["error"], "name": strategy, "daily_values": [], "trades": []}
     if isinstance(result, BacktestResult):
+        _persist_backtest_result(result, strategy, sym_list)
         label_map = {
             "faceji": "faceji (面基)",
             "silverquant": "silverquant (组件化)",

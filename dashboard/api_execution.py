@@ -228,3 +228,23 @@ def _load_positions() -> dict:
         return pos
     except (json.JSONDecodeError, KeyError):
         return {}
+
+
+@router.get("/api/v2/execution/event-risk")
+async def event_risk():
+    """事件风险指示灯数据 — 读 shadow_event_history.json 最新一条影子记录。
+
+    不实时计算（避免每次刷新触发 yfinance 网络调用），只读 WS4 影子脚本
+    每日累积的最新记录。无数据时明确报缺失而非假全零。
+    """
+    path = DATA / "shadow_event_history.json"
+    if not path.exists():
+        return {"status": "missing", "message": "无影子记录，请运行 run_event_shadow.py"}
+    try:
+        with open(path) as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {"status": "missing", "message": "影子记录读取失败"}
+    if not history or not isinstance(history, list):
+        return {"status": "empty", "message": "影子记录为空"}
+    return {"status": "ok", "event_risk": history[-1]}

@@ -166,6 +166,14 @@ try:
     trend_icon = "🔴" if trend_gate in ("红灯","黄灯") else "🟢"
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
+    # 事件避险叠加: 事件脉冲 level≥high 也关闭（只研究不开仓）
+    try:
+        from engine.event_risk_engine import load_latest_event_risk, event_blocks_buy
+        if event_blocks_buy(load_latest_event_risk()):
+            dual_closed = True
+    except Exception:  # noqa: BLE001 - 影子记录缺失时不拦截
+        pass
+
     # ═══════════════════════════════════════════════
     #  面基·LDS·桥水 三源融合量化投研日报 v7
     # ═══════════════════════════════════════════════
