@@ -10,7 +10,7 @@ data/data_router.py — 统一数据路由
 路由规则:
     .HK 结尾       → yfinance (港股)
     ^ 开头          → yfinance (指数/美债收益率)
-    CL=/GC=/HG=    → AKShare (期货)
+    =F/=X 结尾     → yfinance (外盘期货 COMEX/NYMEX/ICE + 外汇)
     全数字(6位)    → baostock (A股+ETF，含51/15/16/159开头)
     已知短代码     → yfinance (美股/美ETF)
     其他           → yfinance (默认)
@@ -84,9 +84,11 @@ def _detect_source(symbol: str) -> str:
     if symbol.startswith("^") or symbol in ("DXY",):
         return "yfinance"
 
-    # 期货 (AKShare) — 但排除 FX 汇率
-    if "=" in symbol and "CNY" not in symbol and "USD" not in symbol:
-        return "akshare_futures"
+    # 外盘期货 (=F: COMEX/NYMEX/ICE，如 GC=F/SI=F/HG=F/CL=F) 与外汇 (=X) 均走 yfinance。
+    # 注: 内盘期货代码(如 AU0/AG0，字母+数字、不含 '=')当前 WATCHLIST 无使用，
+    #     且 AKShare 内盘接口 futures_hist_em 不接受 '=F' 外盘代码，故含 '=' 一律走 yfinance。
+    if "=" in symbol:
+        return "yfinance"
 
     # A股 (6位数字，含ETF — baostock 统一获取 A股+ETF)
     if symbol.isdigit() and len(symbol) == 6:
