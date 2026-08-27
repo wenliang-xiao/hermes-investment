@@ -20,7 +20,14 @@ from strategies import tradingagents as _tradingagents_pure
 
 # ─── 公共数据层 ───
 def load_score_history(days=7):
-    """加载最近N天的扫描结果快照"""
+    """加载最近N天的扫描结果快照（仅保留 results 为 list 的合法快照）。
+
+    dict形态快照（无 results 字段，旧格式）会被跳过并记 warning —— 否则下游
+    遍历 dict 的字符串 key 会触发 .get() 崩溃（曾导致运行回测报
+    'str' object has no attribute 'get'）。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
     snapshots = []
     for d in range(days, 0, -1):
         date = (datetime.now() - timedelta(days=d)).strftime("%Y-%m-%d")
@@ -29,8 +36,18 @@ def load_score_history(days=7):
             try:
                 with open(path) as f:
                     data = json.load(f)
-                snapshots.append({"date": date, "results": data.get("results", data)})
-            except:
+                results = data.get("results", None)
+                # 只接受 list-of-dict；dict形态/无results 记为脏数据跳过（避免下游崩溃）
+                if not isinstance(results, list):
+                    logger.warning("[strategy_comparison] 快照 %s results 非list(%s)，跳过",
+                                   date, type(results).__name__)
+                    continue
+                # 额外过滤 list 内的非 dict 元素（防御性）
+                results = [r for r in results if isinstance(r, dict)]
+                if not results:
+                    continue
+                snapshots.append({"date": date, "results": results})
+            except Exception:
                 pass
     return snapshots
 
