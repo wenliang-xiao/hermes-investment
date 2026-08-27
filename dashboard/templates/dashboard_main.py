@@ -1462,6 +1462,7 @@ function buildEtfTableV2(symbols) {
 }
 
 let comparisonChartInstance = null;
+let underwaterChartInstance = null;
 
 function applyQuickDays(days) {
   const end = new Date();
@@ -1559,6 +1560,8 @@ async function runCustomBacktest() {
     };
     const params = data.params || {};
     const hasEquityCurve = strategies.some(s => s.daily_values && s.daily_values.length > 0);
+    const bm = data.benchmark && (data.benchmark.values||[]).length ? data.benchmark : null;
+    const bmPct = bm && bm.pct_change != null ? bm.pct_change : null;
 
     let html = '';
 
@@ -1607,6 +1610,13 @@ async function runCustomBacktest() {
               <div class="text-gray-400">胜率/交易</div>
               <div class="font-mono text-gray-200">${(s.win_rate||0).toFixed(0)}% / ${s.total_trades||0}笔</div>
             </div>
+            <div class="bg-gray-700/50 rounded p-2 col-span-2 ${bmPct==null?'opacity-50':''}">
+              <div class="text-gray-400">超额α (${bm?bm.name:'沪深300'})</div>
+              <div class="font-mono ${bmPct==null?'text-gray-500':(s.total_return_pct - bmPct >= 0 ? 'text-green-400' : 'text-red-400')}">
+                ${bmPct==null ? '— 无基准' : (s.total_return_pct - bmPct >= 0 ? '+' : '') + (s.total_return_pct - bmPct).toFixed(2) + '%'}
+                ${bmPct!=null ? `<span class="text-gray-500 text-[10px]">(基准 ${bmPct>=0?'+':''}${bmPct}%)</span>` : ''}
+              </div>
+            </div>
           </div>
         </div>`;
       });
@@ -1615,15 +1625,24 @@ async function runCustomBacktest() {
       html += `<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg mb-4">⚠️ ${strategies[0].note}</div>`;
     }
 
-    // ── 净值曲线 ──
+    // ── 净值曲线 + 基准 + 水下图 ──
     if (hasEquityCurve) {
+      const bmBadge = bm ? `<span class="ml-2 px-1.5 py-0.5 rounded bg-gray-700 text-gray-300 text-[10px]">${bm.name} ${bmPct>=0?'+':''}${bmPct}%</span>` : '';
       html += `
       <div class="bg-gray-800 rounded-xl p-4 mb-6">
         <div class="flex items-center justify-between mb-3">
-          <h4 class="text-sm font-semibold text-gray-300">📉 策略净值曲线</h4>
-          <div class="text-xs text-gray-500">初始资金: ¥1,000,000</div>
+          <h4 class="text-sm font-semibold text-gray-300">📉 策略净值曲线 <span class="text-gray-500 text-[10px] font-normal">(归一化: 首日=1.0)</span></h4>
+          <div class="text-xs text-gray-400">基准: 沪深300${bmBadge}</div>
         </div>
-        <div style="height:320px"><canvas id="comparisonChart"></canvas></div>
+        <div style="height:300px"><canvas id="comparisonChart"></canvas></div>
+        ${!bm ? `<div class="text-yellow-500 text-xs mt-2">⚠️ 基准线数据不可用(数据源未响应)，仅展示策略净值。超额α按无基准处理。</div>` : ''}
+      </div>
+      <div class="bg-gray-800 rounded-xl p-4 mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h4 class="text-sm font-semibold text-gray-300">🌊 回撤水下图</h4>
+          <div class="text-xs text-gray-500">各策略自峰值回撤 (%, 下探为亏损)</div>
+        </div>
+        <div style="height:200px"><canvas id="underwaterChart"></canvas></div>
       </div>`;
     }
 
@@ -1663,48 +1682,110 @@ async function runCustomBacktest() {
 
     el.innerHTML = html;
 
-    // ── 渲染净���曲线图 ──
+    // ── 渲染净值曲线图(叠加基准) + 回撤水下图 ──
     if (hasEquityCurve) {
       setTimeout(() => {
-        const ctx = document.getElementById('comparisonChart');
-        if (!ctx) return;
-        if (comparisonChartInstance) comparisonChartInstance.destroy();
-        const datasets = strategies.filter(s => s.daily_values && s.daily_values.length > 0).map(s => ({
-          label: `${s.name} (${(s.total_return_pct||0)>=0?'+':''}${(s.total_return_pct||0).toFixed(1)}%)`,
-          data: s.daily_values.map(d => ({x: d.date, y: d.value})),
-          borderColor: (colors[s.name] || {line:'#7ee787'}).line,
-          backgroundColor: (colors[s.name] || {line:'#7ee787'}).line + '15',
-          borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.2, fill: false,
-        }));
-        comparisonChartInstance = new Chart(ctx, {
-          type: 'line',
-          data: { datasets },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-              legend: { position: 'top', labels: { color: '#c9d1d9', font: { size: 11 }, usePointStyle: true } },
-              tooltip: {
-                backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                titleColor: '#fff', bodyColor: '#fff',
-                borderColor: 'rgba(75, 85, 99, 1)', borderWidth: 1,
-                callbacks: {
-                  label: function(ctx) {
-                    return ctx.dataset.label.split(' (')[0] + ': ¥' + Math.round(ctx.raw.y).toLocaleString();
+        const bmColor = '#e3b341';
+        // 归一化策略净值到首日=1.0, 与基准同座标可叠加
+        const normSeries = strategies
+          .filter(s => s.daily_values && s.daily_values.length > 1)
+          .map(s => {
+            const base = s.daily_values[0].value;
+            const norm = s.daily_values.map(d => ({ date: d.date, y: base > 0 ? +(d.value / base) : d.value }));
+            return { s, norm };
+          });
+        const seriesForChart = normSeries.length ? normSeries :
+          strategies.filter(s => s.daily_values && s.daily_values.length).map(s => ({ s, norm: (s.daily_values||[]).map(d => ({x: d.date, y: 1.0})) }));
+
+        const cmpCtx = document.getElementById('comparisonChart');
+        if (cmpCtx) {
+          if (comparisonChartInstance) comparisonChartInstance.destroy();
+          const datasets = seriesForChart.map(({s, norm}) => ({
+            label: `${s.name} (${(s.total_return_pct||0)>=0?'+':''}${(s.total_return_pct||0).toFixed(1)}%)`,
+            data: norm.map(d => ({x: d.x, y: d.y})),
+            borderColor: (colors[s.name] || {line:'#7ee787'}).line,
+            backgroundColor: (colors[s.name] || {line:'#7ee787'}).line + '15',
+            borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.2, fill: false,
+          }));
+          // 基准线叠加(虚线)
+          if (bm) {
+            const bmData = bm.dates.map((d, i) => ({x: d, y: bm.values[i]}));
+            datasets.push({
+              label: `${bm.name} 基准 (${bmPct>=0?'+':''}${bmPct}%)`,
+              data: bmData, borderColor: bmColor, borderDash: [6,4],
+              backgroundColor: bmColor + '15', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.2, fill: false,
+            });
+          }
+          comparisonChartInstance = new Chart(cmpCtx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { position: 'top', labels: { color: '#c9d1d9', font: { size: 10 }, usePointStyle: true } },
+                tooltip: {
+                  backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                  titleColor: '#fff', bodyColor: '#fff',
+                  borderColor: 'rgba(75, 85, 99, 1)', borderWidth: 1,
+                  callbacks: {
+                    label: function(ctx) {
+                      const v = ctx.raw.y;
+                      return (ctx.dataset.label||'').split(' (')[0] + ': ' + (v>=1?'+':'') + ((v-1)*100).toFixed(2) + '%';
+                    }
                   }
                 }
+              },
+              scales: {
+                x: { type: 'time', time: { unit: 'day', tooltipFormat: 'yyyy-MM-dd', displayFormats: { day: 'MM-dd' } },
+                     ticks: { color: '#8b949e', font: { size: 10 }, maxTicksLimit: 15 },
+                     grid: { color: '#21262d' } },
+                y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => (v>=1?'+':'') + ((v-1)*100).toFixed(1) + '%' },
+                     grid: { color: '#21262d' }, beginAtZero: false }
               }
-            },
-            scales: {
-              x: { type: 'time', time: { unit: 'day', tooltipFormat: 'yyyy-MM-dd', displayFormats: { day: 'MM-dd' } },
-                   ticks: { color: '#8b949e', font: { size: 10 }, maxTicksLimit: 15 },
-                   grid: { color: '#21262d' } },
-              y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => '¥' + (v/10000).toFixed(0) + 'w' },
-                   grid: { color: '#21262d' },
-                   beginAtZero: false }
             }
-          }
-        });
+          });
+        }
+
+        // ── 回撤水下图: 每策略自峰值回撤% ──
+        const uwCtx = document.getElementById('underwaterChart');
+        if (uwCtx) {
+          if (underwaterChartInstance) underwaterChartInstance.destroy();
+          const uwDatasets = seriesForChart.map(({s, norm}) => {
+            let peak = -Infinity;
+            const dd = norm.map(d => {
+              peak = Math.max(peak, d.y);
+              const pct = peak > 0 ? (d.y / peak - 1) * 100 : 0;
+              return {x: d.x, y: +(pct.toFixed(2))};
+            });
+            return {
+              label: s.name,
+              data: dd, borderColor: (colors[s.name] || {line:'#7ee787'}).line,
+              backgroundColor: (colors[s.name] || {line:'#7ee787'}).line + '22',
+              borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.2, fill: true,
+            };
+          });
+          underwaterChartInstance = new Chart(uwCtx, {
+            type: 'line',
+            data: { datasets: uwDatasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { position: 'top', labels: { color: '#c9d1d9', font: { size: 10 }, usePointStyle: true } },
+                tooltip: { backgroundColor: 'rgba(17,24,39,0.95)', titleColor: '#fff', bodyColor: '#fff',
+                           borderColor: 'rgba(75,85,99,1)', borderWidth: 1,
+                           callbacks: { label: c => `${c.dataset.label}: ${c.raw.y}%` } }
+              },
+              scales: {
+                x: { type: 'time', time: { unit: 'day', tooltipFormat: 'yyyy-MM-dd', displayFormats: { day: 'MM-dd' } },
+                     ticks: { color: '#8b949e', font: { size: 9 }, maxTicksLimit: 12 }, grid: { color: '#21262d' } },
+                y: { ticks: { color: '#8b949e', font: { size: 9 }, callback: v => v + '%' },
+                     grid: { color: '#21262d' } }
+              }
+            }
+          });
+        }
       }, 100);
     }
 

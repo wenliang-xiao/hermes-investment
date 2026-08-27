@@ -1,11 +1,33 @@
 """回测 API — 三方策略对比、自定义回测"""
 
 import json
-from datetime import datetime as _dt
+from datetime import datetime as _dt, date as _date
 from fastapi import APIRouter
 from dashboard.shared import ROOT, _clean_signals
 
 router = APIRouter()
+
+
+def _benchmark_window_days(daily_values: list, default_days: int = 60) -> int:
+    """从策略净值曲线首末日期推算基准线应拉取的日历天数, 保证两线日期范围对齐.
+
+    引擎跑 FIXED_DAYS=120 交易日(约5个多月), 若基准只用 UI 的 days(如60) 拉取,
+    两线日期范围错位导致叠加失真。此函数用曲线实际跨度 + 20 天缓冲。
+    无可解析日期时降级到 default_days(保底 30)。
+    """
+    dates = []
+    for e in daily_values or []:
+        ds = (e or {}).get("date", "")
+        if not ds:
+            continue
+        try:
+            dates.append(_date.fromisoformat(str(ds)[:10]))
+        except (ValueError, TypeError):
+            continue
+    if len(dates) >= 2:
+        span = (max(dates) - min(dates)).days + 20
+        return max(span, 30)
+    return max(default_days, 30)
 
 
 def _normalize_benchmark(closes: list) -> list:
@@ -253,8 +275,14 @@ def api_v2_backtest_custom(
             if dv:
                 days_analyzed = max(days_analyzed, len(dv))
         result["days_analyzed"] = days_analyzed
-        # 基准线(沪深300)归一化净值 — 供前端叠加对比
-        result["benchmark"] = _fetch_benchmark_curve(days=max(days, 30))
+        # 基准线(沪深300)归一化净值 — 供前端叠加对比。
+        # 窗口对齐到策略净值曲线的实际跨度, 避免基准只覆盖曲线末尾一段。
+        bm_days = _benchmark_window_days(
+            [e for s_name in strategies_to_run
+             for e in result.get(s_name, {}).get("daily_values", [])],
+            default_days=max(days, 30),
+        )
+        result["benchmark"] = _fetch_benchmark_curve(days=bm_days)
         result["params"] = {
             "strategy": strategy,
             "start_date": start_date,

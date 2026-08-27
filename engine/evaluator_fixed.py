@@ -296,6 +296,7 @@ def run_backtest(
     equity_curve: list[float] = []
     all_trades: list[dict] = []
     trade_count = 0
+    closed_count = 0
     win_count = 0
 
     # 找出最短的时间序列
@@ -360,6 +361,7 @@ def run_backtest(
                 if pnl > 0:
                     win_count += 1
                 trade_count += 1
+                closed_count += 1
                 all_trades.append({
                     "symbol": sig.symbol, "action": "SELL",
                     "price": round(exec_price, 2), "quantity": pos.quantity,
@@ -433,7 +435,8 @@ def run_backtest(
 
     # 计算指标
     metrics = _compute_metrics(equity_curve, all_trades, trade_count, win_count,
-                               strategy_name, score_map, price_data, min_days)
+                               strategy_name, score_map, price_data, min_days,
+                               closed_count=closed_count)
 
     mdd = metrics.get("max_drawdown_pct", 0.0)
     annualized = metrics.get("annualized_return_pct", 0.0)
@@ -473,8 +476,14 @@ def _compute_metrics(
     score_map: dict,
     price_data: dict,
     total_days: int,
+    closed_count: int | None = None,
 ) -> dict:
-    """计算评估指标"""
+    """计算评估指标
+
+    closed_count: 平仓(卖出)交易数。胜率 = win_count / closed_count, 语义是
+    「盈利平仓占比」, 而非 win_count / trade_count(后者分子只统计盈利卖出、
+    分母却含买入, 会系统性低估胜率)。缺省时向后兼容用 trade_count。
+    """
     import numpy as np
     import pandas as pd
 
@@ -508,7 +517,10 @@ def _compute_metrics(
     drawdown = (equity - running_max) / running_max
     max_drawdown = float(-drawdown.min())
 
-    win_rate = win_count / trade_count if trade_count > 0 else 0.0
+    # 胜率: 盈利平仓占比。优先用 closed_count(卖出数), 缺省回退 trade_count(旧行为)
+    calc_closed_count = closed_count if closed_count is not None else trade_count
+    calc_win_count = win_count
+    win_rate = calc_win_count / calc_closed_count if calc_closed_count > 0 else 0.0
 
     result = {
         "strategy": strategy_name,
