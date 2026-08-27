@@ -610,7 +610,8 @@ def get_index_data(symbol="sh000001", days=120) -> pd.DataFrame:
     _bs_login()
 
     bs_index_map = {"sh000001": "sh.000001", "sz399001": "sz.399001",
-                    "sz399006": "sz.399006"}
+                    "sz399006": "sz.399006", "sh000300": "sh.000300",
+                    "sh000905": "sh.000905"}
     bs_code = bs_index_map.get(symbol, "sh.000001")
 
     end = datetime.now().strftime("%Y-%m-%d")

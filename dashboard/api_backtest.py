@@ -8,6 +8,93 @@ from dashboard.shared import ROOT, _clean_signals
 router = APIRouter()
 
 
+def _normalize_benchmark(closes: list) -> list:
+    """基准净值归一化到首日=1.0 (量化终端基准线的标准做法). 空输入返回[]."""
+    if not closes:
+        return []
+    base = float(closes[0])
+    if base == 0:
+        return []
+    return [round(float(c) / base, 4) for c in closes]
+
+
+def _fetch_benchmark_curve(days: int = 60, code: str = "sh000300") -> dict | None:
+    """拉取指数基准(默认沪深300)的净值曲线.
+
+    优先 baostock(完整历史); 在 FastAPI 非主线程中 baostock 的 signal 登录会失败,
+    故用子进程跑(子进程有自己的主线程, signal 正常)。若仍失败 fallback yfinance。
+    数据不可用返回 None (无基准时报缺失而非假全零, 符合验收标准).
+    """
+    r = _fetch_benchmark_baostock_subproc(days, code)
+    if r:
+        return r
+    return _fetch_benchmark_yf(days)
+
+
+def _benchmark_worker(days: int, code: str, q):
+    """子进程 worker — 在主线程拉 baostock 指数."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from data.data_layer import get_index_data
+        df = get_index_data(code, days)
+        if df is None or df.empty or "close" not in df.columns:
+            q.put(None)
+            return
+        closes = [float(c) for c in df["close"].tolist()]
+        dates = [str(d) for d in df["date"].tolist()]
+        values = [round(c / closes[0], 4) for c in closes] if closes and closes[0] else []
+        if not values:
+            q.put(None)
+            return
+        pct = round((closes[-1] / closes[0] - 1) * 100, 2) if closes[0] else 0
+        name = {"sh000300": "沪深300", "sh000001": "上证指数",
+                "sz399001": "深证成指"}.get(code, code)
+        q.put({"dates": dates, "values": values, "name": name, "pct_change": pct})
+    except Exception:
+        q.put(None)
+
+
+def _fetch_benchmark_baostock_subproc(days: int = 60, code: str = "sh000300") -> dict | None:
+    """用子进程跑 baostock(避开主线程 signal 限制), 返回归一化基准或 None."""
+    try:
+        import multiprocessing
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        p = ctx.Process(target=_benchmark_worker, args=(days, code, q))
+        p.start()
+        p.join(timeout=40)
+        if p.is_alive():
+            p.terminate()
+            return None
+        if q.empty():
+            return None
+        return q.get()
+    except Exception:
+        return None
+
+
+def _fetch_benchmark_yf(days: int = 60) -> dict | None:
+    """yfinance 沪深300基准源 — 线程安全, 作为 baostock 非主线程失败的兜底."""
+    try:
+        import yfinance as yf
+        df = yf.Ticker("000300.SS").history(period="6mo")
+        if df is None or df.empty:
+            return None
+        closes = [float(c) for c in df["Close"].tolist()]
+        # yf 延迟/数据短, 截取最近 days
+        closes = closes[-days:]
+        dates = [d.strftime("%Y-%m-%d") for d in df.index][-days:]
+        values = _normalize_benchmark(closes)
+        if not values:
+            return None
+        pct = round((closes[-1] / closes[0] - 1) * 100, 2) if closes[0] else 0
+        return {"dates": dates, "values": values, "name": "沪深300",
+                "pct_change": pct}
+    except Exception:
+        return None
+
+
 def _backtest_result_to_frontend(br, strategy_label: str = "") -> dict:
     """将 BacktestResult 转为前端期望的格式"""
     return {
@@ -143,41 +230,31 @@ def api_v2_backtest_custom(
     try:
         sym_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else []
 
-        if has_custom_params or strategy != "all":
-            # ─── 使用 evaluator_fixed 引擎进行真实数据回测 ───
-            strategies_to_run = (
-                ["faceji", "silverquant", "tradingagents"]
-                if strategy == "all"
-                else [strategy]
-            )
+        # ─── 使用 evaluator_fixed 引擎进行真实数据回测（含 strategy=all 三策略对比）
+        # 真实引擎有完整109天净值/回撤/夏普/交易明细(类似 xalpha/backtrader 专业框架),
+        # 优于旧的 scan_snapshot 对比引擎(仅2天有效且7-20脏快照曾崩溃)。
+        strategies_to_run = (
+            ["faceji", "silverquant", "tradingagents"]
+            if strategy == "all"
+            else [strategy]
+        )
 
-            result = {}
-            for s_name in strategies_to_run:
-                output = _run_single_backtest(s_name, start_date, end_date,
-                                               sym_list, capital, days)
-                result[s_name] = output
+        result = {}
+        for s_name in strategies_to_run:
+            output = _run_single_backtest(s_name, start_date, end_date,
+                                          sym_list, capital, days)
+            result[s_name] = output
 
-            result["run_date"] = _dt.now().strftime("%Y-%m-%d %H:%M")
-            days_analyzed = 0
-            for s_name in strategies_to_run:
-                cv = result.get(s_name, {})
-                dv = cv.get("daily_values", [])
-                if dv:
-                    days_analyzed = max(days_analyzed, len(dv))
-            result["days_analyzed"] = days_analyzed
-            result["params"] = {
-                "strategy": strategy,
-                "start_date": start_date,
-                "end_date": end_date,
-                "symbols": symbols,
-                "capital": capital,
-                "days": days,
-            }
-            return result
-
-        # ─── 默认参数：使用 scan_snapshot 对比引擎 ───
-        from engine.strategy_comparison import run_comparison
-        result = run_comparison(days=min(max(days, 7), 365))
+        result["run_date"] = _dt.now().strftime("%Y-%m-%d %H:%M")
+        days_analyzed = 0
+        for s_name in strategies_to_run:
+            cv = result.get(s_name, {})
+            dv = cv.get("daily_values", [])
+            if dv:
+                days_analyzed = max(days_analyzed, len(dv))
+        result["days_analyzed"] = days_analyzed
+        # 基准线(沪深300)归一化净值 — 供前端叠加对比
+        result["benchmark"] = _fetch_benchmark_curve(days=max(days, 30))
         result["params"] = {
             "strategy": strategy,
             "start_date": start_date,
