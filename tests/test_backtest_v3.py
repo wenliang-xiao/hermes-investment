@@ -105,6 +105,14 @@ class TestBuildStatus:
 
 
 class TestReports:
+    @pytest.fixture(autouse=True)
+    def _isolated_report_root(self, tmp_path, monkeypatch):
+        """隔离报告目录到 tmp — 防止 clear_reports() 清掉生产 data/backtest_v3_reports/ 的真实报告."""
+        isolated = tmp_path / "reports"
+        isolated.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("engine.backtest_v3.REPORT_ROOT", isolated)
+        yield
+
     def test_generate_report_creates_html_and_meta(self):
         """NAV → HTML + meta.json 落盘, metrics 含核心指标."""
         import numpy as np
