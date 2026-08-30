@@ -83,9 +83,14 @@ class TestBuildStatus:
             {"date": "2026-01-03", "symbol": "300502", "action": "SELL", "shares": 5000},
         ]
         st = build_status_from_decisions(decisions, price_map, capital=100000)
-        buys = st[st["amount"] > 0]["amount"].sum()
-        sells = abs(st[st["amount"] < 0]["amount"].sum())
-        assert abs(buys - 80000) < 1
+        # 契约: DataFrame[date, <code>], code 列名=第一条 decision 的 symbol
+        assert "date" in st.columns
+        assert "300502" in st.columns
+        assert "300750" not in st.columns  # 只保留首标的(单标的 status)
+        amt = st["300502"].tolist()
+        buys = sum(a for a in amt if a > 0)
+        sells = abs(sum(a for a in amt if a < 0))
+        assert abs(buys - 50000) < 1  # 首标的 300502 买入 5万(300750 是另一个标的, 不在本 status)
         assert sells == pytest.approx(5000 * 10.0, abs=1)
 
     def test_sell_without_shares_uses_price(self):
@@ -96,7 +101,7 @@ class TestBuildStatus:
             {"date": "2026-01-05", "symbol": "300502", "action": "SELL", "shares": 5000},
         ]
         st = build_status_from_decisions(decisions, {"300502": 10.5})
-        assert abs(st.iloc[-1]["amount"]) == pytest.approx(5000 * 10.5, abs=1)
+        assert abs(st["300502"].iloc[-1]) == pytest.approx(5000 * 10.5, abs=1)
 
 
 class TestReports:
