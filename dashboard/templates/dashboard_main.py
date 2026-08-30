@@ -276,6 +276,25 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
         </div>
         <button onclick="runCustomBacktest()" class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">▶ 运行回测</button>
       </div>
+      <!-- v3 专业报告 (xalpha + quantstats) -->
+      <div class="bg-gray-800/40 rounded-xl p-3 mb-4 border border-gray-700/50">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <span class="text-xs font-medium text-gray-300">📄 v3 专业报告 <span class="text-gray-500">(xalpha + quantstats: 月度热力图/滚动夏普/水下图/VaR)</span></span>
+          <div class="flex items-center gap-2">
+            <select id="v3Strategy" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
+              <option value="faceji">面基</option>
+              <option value="silverquant">SilverQuant</option>
+              <option value="tradingagents">TradingAgents</option>
+            </select>
+            <select id="v3Days" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
+              <option value="120" selected>120天</option>
+              <option value="250">250天</option>
+            </select>
+            <button id="v3RunBtn" onclick="runV3Backtest()" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors">⚡ 运行 v3 回测</button>
+          </div>
+        </div>
+        <div id="v3ReportList" class="space-y-1.5"></div>
+      </div>
       <div id="comparisonContent"></div>
     </div>
   </div>
@@ -1003,7 +1022,7 @@ function switchTab(ev, tab) {
   else if (tab === 'etf') loadEtf();
   else if (tab === 'news') loadNews();
   else if (tab === 'reports') loadReports();
-  else if (tab === 'comparison') loadComparison();
+  else if (tab === 'comparison') { loadComparison(); loadV3Reports(); }
   else if (tab === 'dragon_tiger') loadDragonTiger();
   else if (tab === 'evidence') loadEvidence();
   else if (tab === 'gurus') loadGurusTab();
@@ -1841,6 +1860,57 @@ async function runCustomBacktest() {
   } catch(e) {
     clearInterval(progressInterval);
     el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+// ── v3 专业报告 (xalpha + quantstats) ──
+const V3_LABELS = { faceji: '面基', silverquant: 'SilverQuant', tradingagents: 'TradingAgents' };
+
+async function loadV3Reports() {
+  const el = document.getElementById('v3ReportList');
+  if (!el) return;
+  try {
+    const d = await fetch('/api/v2/backtest/v3/list').then(r => r.json());
+    if (d.error) { el.innerHTML = `<div class="empty">${d.error}</div>`; return; }
+    if (!d.reports || !d.reports.length) {
+      el.innerHTML = '<div class="empty">暂无 v3 专业报告 — 点右上「⚡ 运行 v3 回测」生成</div>';
+      return;
+    }
+    const rows = d.reports.map(m => {
+      const mt = m.metrics || {};
+      const sharpe = mt.sharpe !== undefined ? mt.sharpe : '—';
+      const cagr = mt.cagr !== undefined ? mt.cagr.toFixed(2) + '%' : '—';
+      const mdd = mt.max_drawdown !== undefined ? mt.max_drawdown.toFixed(2) + '%' : '—';
+      const label = V3_LABELS[m.strategy] || m.strategy;
+      return `<div class="flex flex-wrap items-center justify-between gap-2 bg-gray-800/50 rounded-lg px-3 py-2 border border-gray-600/50">
+        <span class="text-xs"><b class="text-gray-200">${label}</b> <span class="text-gray-500">· ${m.run_date || ''} · ${m.n_days || 0}天 · ${m.n_trades || 0}笔</span></span>
+        <span class="text-xs text-gray-400">Sharpe <b class="text-blue-400">${sharpe}</b> · CAGR <b class="text-green-400">${cagr}</b> · MDD <b class="text-red-400">${mdd}</b></span>
+        <a href="/api/v2/backtest/v3/report/${m.run_id}" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs underline">打开完整报告 ↗</a>
+      </div>`;
+    }).join('');
+    el.innerHTML = rows;
+  } catch (e) {
+    el.innerHTML = `<div class="empty">加载失败: ${e.message || e}</div>`;
+  }
+}
+
+async function runV3Backtest() {
+  const btn = document.getElementById('v3RunBtn');
+  const strategy = document.getElementById('v3Strategy').value;
+  const days = document.getElementById('v3Days').value || '120';
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中(约10s)...'; }
+  try {
+    const d = await fetch(`/api/v2/backtest/v3/run?strategy=${strategy}&days=${days}`).then(r => r.json());
+    if (d.error) { alert('❌ 回测失败: ' + d.error); return; }
+    const mt = d.metrics || {};
+    loadV3Reports();
+    alert(`✅ v3 回测完成\n策略: ${V3_LABELS[strategy] || strategy}\nSharpe ${mt.sharpe} | CAGR ${mt.cagr}% | MDD ${mt.max_drawdown}% | 波动 ${mt.volatility}%\n${mt.n_days}天 · ${d.trades_count || 0}笔交易\n\n打开完整报告: ${location.origin}${d.report_url}`);
+    window.open(d.report_url, '_blank');
+  } catch (e) {
+    alert('❌ 错误: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || '⚡ 运行 v3 回测'; }
   }
 }
 

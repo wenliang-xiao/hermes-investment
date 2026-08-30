@@ -3,6 +3,7 @@
 import json
 from datetime import datetime as _dt, date as _date
 from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
 from dashboard.shared import ROOT, _clean_signals
 
 router = APIRouter()
@@ -311,6 +312,109 @@ def api_v2_backtest_custom(
 
     except Exception as e:
         return {"error": str(e)}
+
+
+# ──────────────────────────────────────────────
+# WS4: v3 端点 — xalpha + quantstats 专业回测报告
+# 路由均为多段路径(backtest/v3/...), 与 /backtest/{run_id} 单段不冲突。
+# 注意: 用模块引用 engine.backtest_v3(而非 from-import 绑定), 便于测试 monkeypatch。
+# ──────────────────────────────────────────────
+def _v3_nav_to_list(series) -> list[dict]:
+    """pd.Series(带日期索引) → [{date, value}] 可 JSON 序列化. 非序列直接返回空."""
+    if series is None:
+        return []
+    try:
+        idx = [str(d)[:10] for d in series.index]
+        vals = [round(float(v), 4) for v in series.values]
+        return [{"date": d, "value": v} for d, v in zip(idx, vals)]
+    except Exception:
+        return []
+
+
+@router.get("/api/v2/backtest/v3/list")
+def api_v2_backtest_v3_list():
+    """v3 专业回测报告列表 (按生成时间倒序)."""
+    from engine import backtest_v3
+
+    reports = backtest_v3.list_reports()
+    return {"count": len(reports), "reports": reports}
+
+
+@router.get("/api/v2/backtest/v3/run")
+def api_v2_backtest_v3_run(
+    strategy: str = "faceji",
+    days: int = 120,
+    capital: float = 1000000,
+    symbols: str = "",
+    benchmark: bool = True,
+    run_id: str = "",
+):
+    """运行 v3 专业回测 → quantstats 报告落盘, 返回指标 + 报告链接.
+
+    参数:
+        strategy: faceji / silverquant / tradingagents
+        days: 回测交易日数(用于基准线拉取跨度)
+        capital: 初始资金
+        symbols: 逗号分隔标的(空=策略默认 FIXED_UNIVERSE)
+        benchmark: 是否拉取沪深300基准
+        run_id: 指定报告 ID(空=自动 strategy_时间戳)
+    """
+    from engine import backtest_v3
+
+    try:
+        sym_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
+        result = backtest_v3.run_backtest_v3(
+            strategy=strategy,
+            days=days,
+            capital=capital,
+            custom_symbols=sym_list,
+            benchmark=benchmark,
+            run_id=run_id or None,
+        )
+        if "error" in result:
+            return {"error": result["error"], "strategy": strategy}
+        rid = result["run_id"]
+        out = {k: v for k, v in result.items() if k not in ("nav", "benchmark_nav")}
+        out["report_url"] = f"/api/v2/backtest/v3/report/{rid}"
+        out["nav"] = _v3_nav_to_list(result.get("nav"))
+        out["benchmark_nav"] = _v3_nav_to_list(result.get("benchmark_nav"))
+        return out
+    except Exception as e:
+        return {"error": str(e), "strategy": strategy}
+
+
+@router.get("/api/v2/backtest/v3/{run_id}")
+def api_v2_backtest_v3_detail(run_id: str):
+    """单个 v3 报告 meta + 报告链接."""
+    from engine import backtest_v3
+
+    meta = backtest_v3.get_report(run_id)
+    if meta is None:
+        return {"error": f"run_id '{run_id}' not found"}
+    meta["report_url"] = f"/api/v2/backtest/v3/report/{run_id}"
+    return meta
+
+
+@router.get("/api/v2/backtest/v3/report/{run_id}")
+def api_v2_backtest_v3_report(run_id: str):
+    """直接返回 quantstats HTML 报告全文 (可新窗口打开 / iframe 嵌入)."""
+    from engine import backtest_v3
+
+    out_dir = backtest_v3.REPORT_ROOT / run_id
+    report_file = out_dir / "report.html"
+    meta_file = out_dir / "meta.json"
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            report_file = out_dir / meta.get("report_file", "report.html")
+        except Exception:
+            pass
+    if not report_file.exists():
+        return HTMLResponse(
+            f"<html><body><h1>报告不存在</h1><p>run_id: {run_id}</p></body></html>",
+            status_code=404,
+        )
+    return HTMLResponse(report_file.read_text(encoding="utf-8"))
 
 
 @router.get("/api/v2/backtest/{run_id}")
