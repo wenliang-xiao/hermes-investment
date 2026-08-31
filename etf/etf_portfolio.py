@@ -255,7 +255,6 @@ class EtfPortfolioBuilder:
                 timing_out.append({
                     "etf_symbol": sym,
                     "name": _get_etf_name(sym),
-                    "action": "HOLD",  # 初版默认 HOLD, 后续可加持仓跟踪
                     "weight": round(target, 4),
                     "reason": reason,
                     "signal_type": "trend",
@@ -275,7 +274,6 @@ class EtfPortfolioBuilder:
                 rp_out.append({
                     "etf_symbol": sym,
                     "name": _get_etf_name(sym),
-                    "action": "HOLD",
                     "weight": round(target, 4),
                     "reason": reason,
                     "signal_type": "rp",
@@ -304,7 +302,7 @@ class EtfPortfolioBuilder:
             for sym in ALL_SYMBOLS:
                 current_weights[sym] = latest_prices.get(sym, 0) / total_price
 
-        for entry in combined:
+        for entry in timing_out + rp_out + combined:
             sym = entry["etf_symbol"]
             target = entry["weight"]
             current = current_weights.get(sym, 0.0)

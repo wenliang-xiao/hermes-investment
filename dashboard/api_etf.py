@@ -154,11 +154,38 @@ def api_v2_etf_detail(symbol: str):
 
 @router.get("/api/v2/etf/portfolio")
 def api_v2_etf_portfolio():
-    """ETF组合配置 — 择时+非择时"""
+    """ETF组合配置 — 择时+非择时 (ETF-专项 2026-08-31: 过期检测+自动重算)
+
+    旧实现优先读静态 etf_portfolio.json, 无过期判断 → 60天前的配置默默展示。
+    新实现: timestamp 超过 7 天自动调用 EtfPortfolioBuilder.build() 重算并回写;
+    重算失败回退旧文件但带 stale 标记。
+    """
+    from datetime import datetime, timedelta
     path = ROOT / "data" / "etf_portfolio.json"
     if path.exists():
-        with open(path) as f:
-            return json.load(f)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            stale = is_etf_config_stale(data, now=datetime.now())
+            if not stale:
+                return data
+            # 过期 → 自动重算
+            try:
+                from etf.etf_portfolio import EtfPortfolioBuilder
+                builder = EtfPortfolioBuilder()
+                result = builder.build()
+                if "error" not in result:
+                    builder.save_json()
+                    result["_refreshed"] = True
+                    return result
+            except Exception:
+                pass
+            # 重算失败 → 回退旧数据 + stale 标记
+            data["_stale"] = True
+            data["_stale_reason"] = f"配置过期(>7天)且自动重算失败, 展示截至 {data.get('timestamp','')} 的旧配置"
+            return data
+        except Exception:
+            pass
     try:
         from etf.etf_portfolio import EtfPortfolioBuilder
         builder = EtfPortfolioBuilder()
@@ -168,6 +195,31 @@ def api_v2_etf_portfolio():
         return result
     except Exception as e:
         return {"error": str(e)}
+
+
+def is_etf_config_stale(data: dict, now=None) -> bool:
+    """判断 ETF 配置是否过期 (timestamp 距今超过 7 天)。
+
+    Args:
+        data: etf_portfolio.json 的内容 dict
+        now: 当前时间 (可注入便于测试; 默认 datetime.now())
+
+    Returns:
+        True 表示需要重算 (过期或时间戳无法解析)
+    """
+    from datetime import datetime, timedelta
+    if now is None:
+        now = datetime.now()
+    ts = data.get("timestamp", "")
+    if not ts:
+        return True  # 无时间戳 → 需要重算
+    try:
+        ts_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if ts_dt.tzinfo:
+            ts_dt = ts_dt.replace(tzinfo=None)
+        return now - ts_dt > timedelta(days=7)
+    except Exception:
+        return True  # 时间戳解析失败视为需要重算
 
 
 @router.get("/api/v2/etf/discovery")

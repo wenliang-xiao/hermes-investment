@@ -1441,7 +1441,10 @@ async function loadEtfDetail(symbol) {
   try {
     const r = await fetch(`/api/v2/etf/detail/${symbol}`);
     const data = await r.json();
-    if (data.error) { alert(data.error); return; }
+    if (data.error) {
+      showToast(data.error);
+      return;
+    }
 
     const etf = data.etf || {};
     const price = data.price || {};
@@ -1486,8 +1489,22 @@ async function loadEtfDetail(symbol) {
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
   } catch(e) {
-    alert('加载失败: ' + e.message);
+    showToast('加载失败: ' + e.message);
   }
+}
+
+// 页内轻量提示 (替代原生 alert)
+function showToast(msg, color) {
+  const old = document.getElementById('appToast');
+  if (old) old.remove();
+  const t = document.createElement('div');
+  t.id = 'appToast';
+  t.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);' +
+    'background:' + (color || '#f85149') + ';color:#fff;padding:10px 18px;border-radius:8px;z-index:1000;' +
+    'font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:80%;';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
 }
 
 function buildEtfTableV2(symbols) {
@@ -2271,11 +2288,11 @@ async function loadResearchReport(symbol) {
   try {
     const r = await fetch(`/api/v2/research/report/${symbol}`);
     if (!r.ok) {
-      alert('暂无该标的的深度研报。请先运行 scripts/run_deep_research.py 生成研报。');
+      showToast('暂无该标的的深度研报。请先运行 scripts/run_deep_research.py 生成研报。');
       return;
     }
     const data = await r.json();
-    if (data.error) { alert(data.error); return; }
+    if (data.error) { showToast(data.error); return; }
 
     const signalColors = { STRONGBUY: 'text-green-400 bg-green-900/40', BUY: 'text-green-300 bg-green-900/30', HOLD: 'text-yellow-400 bg-yellow-900/30', SELL: 'text-red-400 bg-red-900/30' };
     const signalCls = signalColors[data.signal] || 'text-gray-400 bg-gray-700';
@@ -2316,7 +2333,7 @@ async function loadResearchReport(symbol) {
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
   } catch(e) {
-    alert('加载研报失败: ' + e.message);
+    showToast('加载研报失败: ' + e.message);
   }
 }
 
@@ -2535,7 +2552,7 @@ async function loadGurusTab() {
       const cnt = (g.holdings_count != null) ? g.holdings_count : (g.count || 0);
       rows +=
         '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
-          '<td class="py-2 pr-2 border-0 font-medium text-blue-400 cursor-pointer" onclick="loadGuruDetail(\'' + escHtml(slug) + '\')">' + escHtml(name) +
+          '<td class="py-2 pr-2 border-0 font-medium text-blue-400 cursor-pointer" data-slug="' + escHtml(slug) + '" onclick="loadGuruDetail(this.dataset.slug)">' + escHtml(name) +
             ' <span class="text-gray-500 text-xs">›</span></td>' +
           '<td class="py-2 pr-2 text-right font-mono text-gray-200 border-0">' + (cnt || 0) + '</td>' +
           '<td class="py-2 pr-2 text-right font-mono text-green-500 border-0">' + escHtml(g.total_usd_fmt || '—') + '</td>' +
