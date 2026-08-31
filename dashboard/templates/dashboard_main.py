@@ -22,6 +22,20 @@ h1 { font-size:22px; margin-bottom:4px; }
 .nav a:hover { background:var(--card2); }
 .nav a.active { background:var(--blue); color:#fff; border-color:var(--blue); }
 
+/* 导航分组下拉 (hover 展开) */
+.nav-group { position:relative; }
+.nav-btn { color:var(--blue); background:transparent; border:1px solid var(--border);
+           border-radius:6px; padding:4px 12px; font-size:13px; cursor:pointer; font-family:inherit; }
+.nav-btn:hover, .nav-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+.nav-dropdown { display:none; position:absolute; top:100%; left:0; z-index:50; margin-top:4px;
+                background:#161b22; border:1px solid var(--border); border-radius:8px;
+                min-width:150px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+.nav-group:hover .nav-dropdown { display:block; }
+.nav-dropdown a { display:block; padding:7px 10px; border-radius:6px; border:1px solid transparent;
+                  white-space:nowrap; }
+.nav-dropdown a:hover { background:var(--card2); border-color:var(--border); }
+.nav-dropdown a.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+
 /* Keep old styles for old tabs */
 .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
 .card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
@@ -71,16 +85,31 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 <body>
 <div class="container">
   <div class="nav">
-    <a href="#" class="active" onclick="return switchTab(event,'dashboard')">📊 模拟盘</a>
-    <a href="#" onclick="return switchTab(event,'comparison')">📈 回测对比</a>
-    <a href="#" onclick="return switchTab(event,'pool')">🎯 票池</a>
-    <a href="#" onclick="return switchTab(event,'etf')">📦 ETF</a>
-    <a href="#" onclick="return switchTab(event,'dragon_tiger')">🐉 龙虎榜</a>
-    <a href="#" onclick="return switchTab(event,'news')">📰 新闻</a>
-    <a href="#" onclick="return switchTab(event,'reports')">📋 日报</a>
-    <a href="#" onclick="return switchTab(event,'evidence')">🔬 证据</a>
-    <a href="#" onclick="return switchTab(event,'gurus')">🏆 大师持仓</a>
-    <a href="#" onclick="return switchTab(event,'insights')">💡 观点</a>
+    <div class="nav-group">
+      <button class="nav-btn" onclick="switchTab(event,'dashboard')">📊 决策 <span class="text-[10px] opacity-60">▾</span></button>
+      <div class="nav-dropdown">
+        <a href="#" onclick="return switchTab(event,'dashboard')">📊 今日概览</a>
+        <a href="#" onclick="return switchTab(event,'pool')">🎯 票池</a>
+      </div>
+    </div>
+    <div class="nav-group">
+      <button class="nav-btn" onclick="switchTab(event,'comparison')">🔬 研究 <span class="text-[10px] opacity-60">▾</span></button>
+      <div class="nav-dropdown">
+        <a href="#" onclick="return switchTab(event,'comparison')">📈 回测对比</a>
+        <a href="#" onclick="return switchTab(event,'evidence')">🔬 因子证据</a>
+      </div>
+    </div>
+    <div class="nav-group">
+      <button class="nav-btn" onclick="switchTab(event,'dragon_tiger')">📦 资讯 <span class="text-[10px] opacity-60">▾</span></button>
+      <div class="nav-dropdown">
+        <a href="#" onclick="return switchTab(event,'dragon_tiger')">🐉 龙虎榜</a>
+        <a href="#" onclick="return switchTab(event,'news')">📰 新闻</a>
+        <a href="#" onclick="return switchTab(event,'etf')">📦 ETF</a>
+        <a href="#" onclick="return switchTab(event,'reports')">📋 日报</a>
+        <a href="#" onclick="return switchTab(event,'gurus')">🏆 大师持仓</a>
+        <a href="#" onclick="return switchTab(event,'insights')">💡 观点</a>
+      </div>
+    </div>
   </div>
 
   <!-- ======== 六层横条 ======== -->
@@ -128,6 +157,13 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== 模拟盘 V2 ======== -->
   <div id="tab-dashboard" class="space-y-6">
+    <!-- ======== 今日决策结论条 (置顶, 一句话结论) ======== -->
+    <div id="conclusion-banner" class="bg-gradient-to-r from-blue-900/40 to-gray-800 border border-blue-700/50 rounded-xl p-4 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="text-sm" id="conclusion-text">加载中...</div>
+        <button onclick="document.getElementById('execution-board').scrollIntoView({behavior:'smooth'})" class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors shrink-0">📋 查看决策明细</button>
+      </div>
+    </div>
     <!-- ======== 执行决策区（置顶） ======== -->
     <div id="execution-board" class="bg-gray-800 border border-gray-700 rounded-xl p-4">
       <div class="flex justify-between items-center mb-4">
@@ -140,16 +176,18 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     </div>
     <div id="v2-portfolio-overview" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
     
-    <!-- ======== 策略信号日志 (执行决策下方, 全宽) ======== -->
+    <!-- ======== 策略信号日志 (默认折叠, 消除与执行决策区平铺冗余) ======== -->
     <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
         <div class="flex items-center justify-between mb-2">
-            <h3 class="text-gray-100 font-semibold">⚡ 策略信号日志</h3>
+            <button onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.sig-caret').classList.toggle('rotate-90')" class="flex items-center gap-2 text-gray-100 font-semibold hover:text-blue-300 transition-colors">
+                <span class="sig-caret inline-block transition-transform">▶</span> ⚡ 信号管道日志 <span class="text-[10px] text-gray-500 font-normal">(原始→冲突→周频→执行)</span>
+            </button>
             <select id="v2-signal-date" class="bg-gray-700 text-gray-200 rounded-lg px-2 py-1 text-xs border border-gray-600" onchange="loadSignalHistory(this.value)">
                 <option value="">今日信号</option>
             </select>
         </div>
         <div id="v2-signal-stats" class="text-xs text-gray-400 mb-2"></div>
-        <div class="overflow-x-auto max-h-[300px] custom-scrollbar">
+        <div class="hidden overflow-x-auto max-h-[300px] custom-scrollbar">
             <table class="w-full text-xs text-left whitespace-nowrap" style="border:none">
                 <thead class="text-gray-400 sticky top-0 bg-gray-800 z-10" style="border:none">
                     <tr>
@@ -1021,8 +1059,26 @@ function renderPoolMarket(marketId) {
 
 function switchTab(ev, tab) {
   if (ev) ev.preventDefault();
-  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
-  if (ev) ev.currentTarget.classList.add('active');
+  // 分组导航高亮: tab → 所属分组按钮 + 下拉链接
+  const tabGroup = {
+    dashboard: 0, pool: 0,
+    comparison: 1, evidence: 1,
+    dragon_tiger: 2, news: 2, etf: 2, reports: 2, gurus: 2, insights: 2,
+  };
+  const g = tabGroup[tab] != null ? tabGroup[tab] : -1;
+  const groups = document.querySelectorAll('.nav-group');
+  groups.forEach((grp, i) => {
+    const btn = grp.querySelector('.nav-btn');
+    if (btn) btn.classList.toggle('active', i === g);
+    grp.querySelectorAll('.nav-dropdown a').forEach(a => a.classList.remove('active'));
+  });
+  if (g >= 0) {
+    const links = groups[g].querySelectorAll('.nav-dropdown a');
+    links.forEach(a => {
+      // 匹配当前 tab 的下拉链接高亮
+      if (a.getAttribute('onclick').includes(`'${tab}'`)) a.classList.add('active');
+    });
+  }
 
   const sections = ['tab-dashboard', 'tab-pool', 'tab-etf', 'tab-news', 'tab-reports', 'tab-comparison', 'tab-dragon_tiger', 'tab-evidence', 'tab-gurus', 'tab-insights'];
   sections.forEach(id => {
@@ -1121,7 +1177,7 @@ async function loadExecutionBoard() {
   let timedOut = false;
   const timeoutId = setTimeout(() => {
     timedOut = true;
-    boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏱️ 执行决策加载超时—数据管线可能正在刷新，请2分钟后刷新查看</div><div class="text-xs text-gray-500 mt-1">提示：执行决策需要 run_trading.py 生成评分数据</div>';
+    boardEl.innerHTML = '<div class="text-gray-400 text-sm">⏱️ 执行决策加载超时 — 数据管线可能正在刷新，请稍后刷新查看</div><div class="text-xs text-gray-500 mt-1">提示：执行决策依赖评分数据生成</div>';
     if (dqEl) dqEl.textContent = '数据质量: ⏳ 超时';
   }, 8000);
   const ctrl = new AbortController();
@@ -1132,7 +1188,7 @@ async function loadExecutionBoard() {
     if (!res.ok) { boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据</div>'; return; }
     const data = await res.json();
     if (data.status !== 'ok' || !data.board) {
-      boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据（需运行run_trading.py生成）</div>';
+      boardEl.innerHTML = '<div class="text-gray-400 text-sm">暂无决策数据（评分数据生成中）</div>';
       return;
     }
     
@@ -1160,6 +1216,7 @@ async function loadExecutionBoard() {
         if (erData.status === 'ok' && erData.event_risk) {
           const er = erData.event_risk;
           const level = er.level;
+          window._erLevel = level;   // 供结论条复用
           const triggeredBy = (er.triggered_by || []).join('; ');
           const hoverText = triggeredBy ? ` title="触发原因: ${triggeredBy}"` : '';
           
@@ -1184,6 +1241,45 @@ async function loadExecutionBoard() {
     const dg = m.dual_gate || {};
     const counts = { buy: (board.buy||[]).length, sell: (board.sell||[]).length, hold: (board.hold||[]).length, wait: (board.wait||[]).length, excluded: (board.excluded||[]).length };
     const total = counts.buy + counts.sell + counts.hold + counts.wait;
+
+    // ── 今日决策结论条 (置顶一句话) ──
+    try {
+      const banner = document.getElementById('conclusion-banner');
+      const txt = document.getElementById('conclusion-text');
+      if (banner && txt) {
+        // 组合总体盈亏 (汇总各策略总收益)
+        const portfolios = (window._v2Detail && window._v2Detail.portfolios) || {};
+        const rets = Object.values(portfolios).map(p => p.total_return != null ? p.total_return : 0);
+        let overall = null;
+        if (rets.length) {
+          const sum = rets.reduce((a, b) => a + b, 0);
+          overall = sum / rets.length;
+        }
+        // 事件风险等级
+        let riskText = '';
+        if (window._erLevel) {
+          const er = { none: '无事件风险', moderate: '事件风险:控制仓位', high: '事件风险:建议降仓', extreme: '事件风险:建议清仓' };
+          riskText = er[window._erLevel] || '';
+        }
+        const parts = [];
+        if (counts.buy || counts.sell) {
+          parts.push(`今日建议<b class="text-green-400">买入 ${counts.buy} 只</b>`);
+          parts.push(`<b class="text-red-400">卖出 ${counts.sell} 只</b>`);
+        } else if (counts.hold) {
+          parts.push(`今日<b class="text-yellow-400">持有 ${counts.hold} 只</b>观望`);
+        } else {
+          parts.push('今日<b>无待处理信号</b>');
+        }
+        if (overall !== null) {
+          const cls = overall >= 0 ? 'text-green-400' : 'text-red-400';
+          parts.push(`组合平均收益 <b class="${cls}">${overall >= 0 ? '+' : ''}${overall.toFixed(2)}%</b>`);
+        }
+        if (riskText) parts.push(riskText);
+        if (counts.excluded) parts.push(`<b class="text-gray-400">${counts.excluded} 只禁反手</b>`);
+        txt.innerHTML = '📌 ' + parts.join(' · ');
+        banner.classList.remove('hidden');
+      }
+    } catch (ce) { console.error('Conclusion banner error:', ce); }
 
     let html = '';
     // ── 统计条 ──
@@ -1428,12 +1524,12 @@ async function loadEtf() {
     }
 
     if (!html) {
-      html = '<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg">⚠️ 暂无ETF数据，需先运行 python3 analysis/etf_portfolio.py</div>';
+      html = '<div class="bg-yellow-900/30 text-yellow-400 p-4 rounded-lg">⚠️ 暂无 ETF 行情数据，请稍后刷新或检查数据源是否就绪。</div>';
     }
 
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
+    console.error('load error:', e); el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败，请稍后重试</div>`;
   }
 }
 
@@ -1489,7 +1585,7 @@ async function loadEtfDetail(symbol) {
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
   } catch(e) {
-    showToast('加载失败: ' + e.message);
+    showToast('加载失败，请稍后重试');
   }
 }
 
@@ -1886,7 +1982,7 @@ async function runCustomBacktest() {
 
   } catch(e) {
     clearInterval(progressInterval);
-    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
+    console.error('load error:', e); el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败，请稍后重试</div>`;
   }
 }
 
@@ -1917,7 +2013,7 @@ async function loadV3Reports() {
     }).join('');
     el.innerHTML = rows;
   } catch (e) {
-    el.innerHTML = `<div class="empty">加载失败: ${e.message || e}</div>`;
+    console.error('load error:', e); el.innerHTML = `<div class="empty">加载失败，请稍后重试</div>`;
   }
 }
 
@@ -2093,7 +2189,7 @@ async function loadNews() {
 
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败: ${e.message}</div>`;
+    console.error('load error:', e); el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败，请稍后重试</div>`;
   }
 }
 
@@ -2141,7 +2237,7 @@ async function refreshNews() {
       el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 刷新失败: ${data.message || '未知错误'}<br/><button onclick="loadNews()" class="mt-2 bg-blue-600 text-white rounded px-2 py-1 text-xs">🔄 重试</button></div>`;
     }
   } catch(e) {
-    el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 刷新失败: ${e.message}<br/><button onclick="loadNews()" class="mt-2 bg-blue-600 text-white rounded px-2 py-1 text-xs">🔄 重试</button></div>`;
+    console.error('refresh error:', e); el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 刷新失败，请点击重试 <button onclick="loadNews()" class="mt-2 bg-blue-600 text-white rounded px-2 py-1 text-xs">🔄 重试</button></div>`;
   }
 }
 
@@ -2172,7 +2268,7 @@ async function loadReports() {
       }).join('') + '</table>';
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="empty" style="color:var(--red)">❌ 加载失败: ${e.message}</div>`;
+    console.error('load error:', e); el.innerHTML = `<div class="bg-red-900/30 text-red-400 p-4 rounded-lg">❌ 加载失败，请稍后重试</div>`;
   }
 }
 
@@ -2216,7 +2312,7 @@ async function loadEvidence() {
           </div>
         </div>`;
       if (d.total_signals === 0) {
-        saHtml += '<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ 尚无信号验证数据。cron 将在下一个交易日 08:00 自动运行 run_trading.py。</div>';
+        saHtml += '<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ 尚无信号验证数据，将在交易日信号积累后生成。</div>';
       }
     } else {
       saHtml = '<div class="bg-yellow-900/30 text-yellow-400 p-3 rounded-lg text-xs">⚠️ 尚未收集信号验证数据</div>';
@@ -2241,7 +2337,7 @@ async function loadEvidence() {
     }
     document.getElementById('evidence-attribution').innerHTML = attrHtml || '<div class="text-gray-400">暂无归因数据</div>';
   } catch(e) {
-    document.getElementById('evidence-data-quality').innerHTML = `<div class="text-red-400">❌ 加载失败: ${e.message}</div>`;
+    console.error('load error:', e); document.getElementById('evidence-data-quality').innerHTML = `<div class="text-red-400">❌ 加载失败，请稍后重试</div>`;
   }
 }
 
@@ -2280,7 +2376,7 @@ async function loadFactorEvidence() {
     }
     el.innerHTML = html;
   } catch(e) {
-    el.innerHTML = `<div class="text-red-400 text-xs">❌ 查询失败: ${e.message}</div>`;
+    console.error('query error:', e); el.innerHTML = `<div class="text-red-400 text-xs">❌ 查询失败，请稍后重试</div>`;
   }
 }
 
@@ -2288,7 +2384,7 @@ async function loadResearchReport(symbol) {
   try {
     const r = await fetch(`/api/v2/research/report/${symbol}`);
     if (!r.ok) {
-      showToast('暂无该标的的深度研报。请先运行 scripts/run_deep_research.py 生成研报。');
+      showToast('暂无该标的的深度研报，可稍后刷新或对标的进行深度分析后查看。');
       return;
     }
     const data = await r.json();
@@ -2333,7 +2429,7 @@ async function loadResearchReport(symbol) {
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
   } catch(e) {
-    showToast('加载研报失败: ' + e.message);
+    showToast('加载研报失败，请稍后重试');
   }
 }
 
@@ -2475,7 +2571,7 @@ async function loadDragonTiger(refresh = false) {
   } catch(e) {
     console.error('龙虎榜加载失败:', e);
     document.getElementById('tab-dragon_tiger').innerHTML =
-      '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 加载失败: ' + e.message + '</div>';
+      '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 加载失败，请稍后重试</div>';
   }
 }
 
@@ -2572,7 +2668,7 @@ async function loadGurusTab() {
       '</div>';
   } catch (e) {
     console.error('大师持仓列表加载失败:', e);
-    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 大师持仓加载失败: ' + escHtml(e.message) + '</div>';
+    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 大师持仓加载失败，请稍后重试</div>';
   }
 }
 
@@ -2622,7 +2718,7 @@ async function loadGuruDetail(slug) {
     console.error('大师持仓明细加载失败:', e);
     el.innerHTML =
       '<div class="flex items-center mb-3"><button onclick="loadGurusTab()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">‹ 返回</button></div>' +
-      '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 持仓明细加载失败: ' + escHtml(e.message) + '</div>';
+      '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 持仓明细加载失败，请稍后重试</div>';
   }
 }
 
@@ -2720,7 +2816,7 @@ async function loadInsightsTab() {
       '</div>';
   } catch (e) {
     console.error('观点库加载失败:', e);
-    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 观点库加载失败: ' + escHtml(e.message) + '</div>';
+    el.innerHTML = '<div class="bg-red-900/30 text-red-400 p-4 rounded-lg text-sm">❌ 观点库加载失败，请稍后重试</div>';
   }
 }
 
