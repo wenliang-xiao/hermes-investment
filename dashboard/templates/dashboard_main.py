@@ -830,7 +830,7 @@ async function loadDashboardV2() {
               <div class="flex justify-between"><span class="text-gray-400">现金</span><span class="font-mono">¥${Math.round(p.cash).toLocaleString()}</span></div>
               <div class="flex justify-between"><span class="text-gray-400">已投</span><span class="font-mono">¥${Math.round(p.invested).toLocaleString()}</span></div>
               <div class="flex justify-between"><span class="text-gray-400">仓位</span><span class="font-mono">${p.position_count} 只</span></div>
-              <div class="flex justify-between"><span class="text-gray-400">胜率</span><span class="font-mono">${p.win_rate != null ? p.win_rate.toFixed(1) + '%' : '—'}</span></div>
+              <div class="flex justify-between"><span class="text-gray-400">胜率</span><span class="font-mono">${p.win_rate != null ? p.win_rate.toFixed(1) + '%' : '—'}${(p.closed_count != null && p.closed_count < 10) ? ' <span class="text-yellow-500">(平仓' + (p.closed_count||0) + '/胜' + (p.win_trades||0) + ',样本少)</span>' : ''}</span></div>
           </div>
       </div>`;
     }
@@ -1558,28 +1558,20 @@ async function runCustomBacktest() {
       <div class="text-xs text-gray-500 mt-2" id="btProgressText">初始化数据源...</div>
     </div>`;
 
-  let progress = 15;
-  const progressInterval = setInterval(() => {
-    if (progress < 85) {
-      progress += Math.random() * 12 + 5;
-      if (progress > 85) progress = 85;
-      const bar = document.getElementById('btProgressBar');
-      if (bar) bar.style.width = progress + '%';
-      const txt = document.getElementById('btProgressText');
-      if (txt) {
-        if (progress < 40) txt.textContent = '拉取日线数据...';
-        else if (progress < 70) txt.textContent = '计算技术指标...';
-        else txt.textContent = '准备策略参数...';
-      }
-    }
-  }, 800);
+  // P0-11 (2026-08-31): 删除假进度条 (Math.random 随机推进与真实进度无关)
+  // 改静态提示文案 — 进度无法真实获取, 不再伪装
+  const progressInterval = null;
+  const barInit = document.getElementById('btProgressBar');
+  if (barInit) barInit.style.width = '30%';
+  const txtInit = document.getElementById('btProgressText');
+  if (txtInit) txtInit.textContent = '运行中... (120天约10s, 1000天约2min)';
 
   // ─── Stage 2: 回测运行中 (after 2.5s) ───
   setTimeout(() => {
     const bar = document.getElementById('btProgressBar');
-    if (bar) bar.style.width = '88%';
+    if (bar) bar.style.width = '65%';
     const txt = document.getElementById('btProgressText');
-    if (txt) txt.textContent = '🔄 回测运行中... 逐日模拟交易';
+    if (txt) txt.textContent = '🔄 回测运行中... 逐日模拟交易 (请勿关闭页面)';
     const header = el.querySelector('.text-lg');
     if (header) header.textContent = '回测运行中...';
     const emoji = el.querySelector('.text-2xl');

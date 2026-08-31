@@ -333,6 +333,9 @@ def api_v2_portfolio_detail():
             "position_count": pf.get("position_count", 0),
             "history_count": pf.get("history_count", 0),
             "win_rate": win_rate,
+            # P0-9 (2026-08-31): 胜率口径透明化 — 前端显示 "平仓N / 胜M", N<10 显示样本不足
+            "closed_count": len(closed),
+            "win_trades": wins,
         }
 
     # ── 补充持仓字段 ──
