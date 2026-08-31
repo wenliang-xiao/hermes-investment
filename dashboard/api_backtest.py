@@ -348,22 +348,61 @@ def api_v2_backtest_v3_run(
     symbols: str = "",
     benchmark: bool = True,
     run_id: str = "",
+    engine: str = "self",
 ):
     """运行 v3 专业回测 → quantstats 报告落盘, 返回指标 + 报告链接.
 
     参数:
-        strategy: faceji / silverquant / tradingagents
-        days: 回测交易日数(用于基准线拉取跨度)
+        strategy: faceji / silverquant / tradingagents / all(三策略对比)
+        days: 回测交易日数(真正控制回测窗口, 支持 60~2000)
         capital: 初始资金
         symbols: 逗号分隔标的(空=策略默认 FIXED_UNIVERSE)
         benchmark: 是否拉取沪深300基准
         run_id: 指定报告 ID(空=自动 strategy_时间戳)
+        engine: self(自研执行引擎, 默认) / xalpha(xalpha mul 真引擎交叉验证)
     """
     from engine import backtest_v3
 
     try:
         sym_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
-        result = backtest_v3.run_backtest_v3(
+
+        # strategy=all → 三策略对比报告
+        if strategy == "all":
+            navs = {}
+            results = {}
+            for s_name in ["faceji", "silverquant", "tradingagents"]:
+                r = backtest_v3.run_backtest_v3(
+                    strategy=s_name, days=days, capital=capital,
+                    custom_symbols=sym_list, benchmark=False, run_id=None,
+                )
+                if "error" in r:
+                    results[s_name] = {"error": r["error"]}
+                    continue
+                results[s_name] = {k: v for k, v in r.items() if k not in ("nav", "benchmark_nav")}
+                navs[s_name] = r.get("nav")
+            bm = None
+            if benchmark:
+                try:
+                    bm = backtest_v3._fetch_benchmark_nav(days=days)
+                except Exception:
+                    bm = None
+            cmp = backtest_v3.generate_compare_report(
+                navs, bm, params={"days": days, "capital": capital, "engine": "compare"},
+                run_id=f"all_{_dt.now().strftime('%Y%m%d_%H%M%S')}",
+            )
+            return {
+                "run_id": cmp["run_id"],
+                "report_url": f"/api/v2/backtest/v3/report/{cmp['run_id']}",
+                "metrics": cmp["metrics"],
+                "strategies": results,
+                "benchmark_nav": _v3_nav_to_list(bm),
+            }
+
+        # 单策略 → 自研或 xalpha 引擎
+        run_fn = backtest_v3.run_backtest_v3
+        if engine == "xalpha":
+            run_fn = backtest_v3.run_backtest_v3_xalpha
+        result = run_fn(
             strategy=strategy,
             days=days,
             capital=capital,

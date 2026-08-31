@@ -215,6 +215,47 @@ def preload_all_data(days: int = FIXED_DAYS, custom_symbols: list[str] | None = 
     return result
 
 
+def load_dates_map(days: int = FIXED_DAYS, custom_symbols: list[str] | None = None) -> dict[str, list[str]]:
+    """预加载各标的真实交易日序列 (YYYY-MM-DD ISO 字符串).
+
+    与 preload_all_data 同一缓存来源 — 直接从缓存 pickle 读 date 列,
+    无缓存时从 data_router get_history 拉取 (与价格同源, 保证日期-价格对齐).
+    """
+    import numpy as np
+    import pandas as pd
+
+    dates_map: dict[str, list[str]] = {}
+    if custom_symbols:
+        universe = [{"symbol": s, "name": s} for s in custom_symbols]
+    else:
+        universe = FIXED_UNIVERSE
+    for s in universe:
+        sym = s["symbol"]
+        try:
+            cache_file = CACHE_DIR / f"{sym}_{days}d.pkl"
+            if cache_file.exists():
+                df = pd.read_pickle(cache_file)
+                if "date" in df.columns:
+                    dts = [str(d)[:10] for d in df["date"].tolist()]
+                else:
+                    dts = [str(d)[:10] for d in df.index]
+            else:
+                from data.data_router import get_history
+                r = get_history(sym, days=days)
+                if r and r.get("dates") and r.get("close"):
+                    dts = [str(d)[:10] for d in r["dates"]]
+                else:
+                    continue
+            if len(dts) >= 60:
+                dates_map[sym] = dts[-len(dts):]
+            elif len(dts) >= 5:
+                # 测试/短数据窗口允许 (>=5天即可用)
+                dates_map[sym] = dts[-len(dts):]
+        except Exception:
+            continue
+    return dates_map
+
+
 # ──────────────────────────────────────────────
 # 技术指标计算
 # ──────────────────────────────────────────────
@@ -284,12 +325,24 @@ def run_backtest(
     price_data: dict[str, list[float]],
     decide_fn: Callable,
     strategy_name: str,
+    dates_map: dict[str, list[str]] | None = None,
 ) -> dict:
     """固定评估器的回测核心。
 
     对每个标的独立运行策略，最后汇总计算组合级指标。
+
+    dates_map: {symbol: [YYYY-MM-DD,...]} 真实交易日序列。传了就用真实
+    交易日(与数据对齐), 不传退回旧的自然日倒推逻辑。
     """
     from strategies.base import PositionData, Signal
+
+    # ── 临时兼容: 保持旧签名 (price_data 可能已是 dict 或仍为纯 list)
+    if isinstance(price_data, dict) and price_data and isinstance(
+            next(iter(price_data.values())), dict):
+        # 新版: {"close": [...], "dates": [...]}
+        pd_new = price_data
+        price_data = {s: v["close"] for s, v in pd_new.items()}
+        dates_map = dates_map or {s: v.get("dates", []) for s, v in pd_new.items()}
 
     total_cash = INITIAL_CASH
     all_positions: dict[str, PositionData] = {}
@@ -304,10 +357,27 @@ def run_backtest(
     if min_days < 60:
         return {"error": f"数据不足(最少60天, 实际{min_days}天)"}  # type: ignore[return-value]
 
-    # 生成日期序列（从最新数据开始倒推）
-    end_dt = date.today()
-    start_dt = end_dt - timedelta(days=min_days)
-    date_list = [(start_dt + timedelta(days=i)).isoformat() for i in range(min_days)]
+    # 生成日期序列: 优先用真实交易日(dates_map), 退回旧的自然日倒推
+    if dates_map:
+        # 取最短标的的 dates 尾部(与 min_days 对齐)
+        cand = [d for d in dates_map.values() if d]
+        if cand:
+            shortest = min(cand, key=len)
+            date_list = shortest[-min_days:] if len(shortest) >= min_days else shortest
+            # 若因停牌数据长度不一, 以首个有值的为准向后补齐不足部分用自然日
+            while len(date_list) < min_days:
+                last_d = date_list[-1] if date_list else "2026-01-01"
+                from datetime import date as _d, timedelta as _td
+                nxt = (_d.fromisoformat(last_d) + _td(days=1)).isoformat()
+                date_list.append(nxt)
+        else:
+            end_dt = date.today()
+            start_dt = end_dt - timedelta(days=min_days)
+            date_list = [(start_dt + timedelta(days=i)).isoformat() for i in range(min_days)]
+    else:
+        end_dt = date.today()
+        start_dt = end_dt - timedelta(days=min_days)
+        date_list = [(start_dt + timedelta(days=i)).isoformat() for i in range(min_days)]
 
     # 逐日推进
     score_map = dict(FIXED_SCORE_MAP)  # 固定评分
@@ -844,7 +914,8 @@ def save_to_run_log(strategy: str, result):
 # ──────────────────────────────────────────────
 def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
                        cycles: int = 3, train_days: int = 252, test_days: int = 63,
-                       custom_symbols: list[str] | None = None) -> BacktestResult | dict:
+                       custom_symbols: list[str] | None = None,
+                       days: int | None = None) -> BacktestResult | dict:
     """评估单个策略
 
     Args:
@@ -854,8 +925,12 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         train_days: WF 训练窗口天数
         test_days: WF 测试窗口天数
         custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
+        days: 回测交易日窗口（None=默认 FIXED_DAYS，WF 模式自动 ≥ train+test*cycles+100）
     """
-    data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100) if walk_forward else FIXED_DAYS
+    if walk_forward:
+        data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100)
+    else:
+        data_days = days if days and days >= 60 else FIXED_DAYS
 
     # 加载数据
     print(f"\n📦 加载数据{' (WF模式)' if walk_forward else ''}...")
@@ -886,8 +961,9 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         return run_walk_forward(price_data, decide_fn, strategy_name,
                                  train_days=train_days, test_days=test_days, cycles=cycles)
     else:
-        print(f"🏃 运行回测: {strategy_name}")
-        return run_backtest(price_data, decide_fn, strategy_name)
+        print(f"🏃 运行回测: {strategy_name} ({data_days}天窗口)")
+        dates_map = load_dates_map(days=data_days, custom_symbols=custom_symbols)
+        return run_backtest(price_data, decide_fn, strategy_name, dates_map=dates_map)
 
 
 def main():

@@ -83,15 +83,39 @@ class TestBuildStatus:
             {"date": "2026-01-03", "symbol": "300502", "action": "SELL", "shares": 5000},
         ]
         st = build_status_from_decisions(decisions, price_map, capital=100000)
-        # 契约: DataFrame[date, <code>], code 列名=第一条 decision 的 symbol
+        # 新多标的契约: 每个 code 一列
         assert "date" in st.columns
         assert "300502" in st.columns
-        assert "300750" not in st.columns  # 只保留首标的(单标的 status)
+        assert "300750" in st.columns  # 多标的全部保留
         amt = st["300502"].tolist()
         buys = sum(a for a in amt if a > 0)
         sells = abs(sum(a for a in amt if a < 0))
-        assert abs(buys - 50000) < 1  # 首标的 300502 买入 5万(300750 是另一个标的, 不在本 status)
-        assert sells == pytest.approx(5000 * 10.0, abs=1)
+        assert abs(buys - 50000) < 1  # 300502 买入 5万
+        # xalpha shuhui 契约: SELL 传负份额数(非金额) → sells == 5000 (份额)
+        assert sells == pytest.approx(5000, abs=1)
+
+    def test_sell_shares_negative_share_count(self):
+        """SELL status 值为负份额数(非金额) — xalpha shuhui 契约."""
+        from engine.backtest_v3 import build_status_from_decisions
+        decisions = [
+            {"date": "2026-01-01", "symbol": "300502", "action": "BUY", "amount": 50000},
+            {"date": "2026-01-03", "symbol": "300502", "action": "SELL", "shares": 5000},
+        ]
+        st = build_status_from_decisions(decisions, {"300502": 10.0})
+        sell_val = st["300502"].iloc[-1]
+        assert sell_val == -5000  # 份额数, 不是 -50000(金额)
+
+    def test_single_symbol_code_column(self):
+        """显式传 code_column → 只保留该标的一列(兼容单标的 xalpha trade)."""
+        from engine.backtest_v3 import build_status_from_decisions
+        decisions = [
+            {"date": "2026-01-01", "symbol": "300502", "action": "BUY", "amount": 50000},
+            {"date": "2026-01-02", "symbol": "300750", "action": "BUY", "amount": 30000},
+        ]
+        st = build_status_from_decisions(decisions, {"300502": 10.0, "300750": 20.0},
+                                         code_column="300502")
+        assert "300502" in st.columns
+        assert "300750" not in st.columns  # 单标的契约
 
     def test_sell_without_shares_uses_price(self):
         """SELL 未显式给 shares → 用 price_map 折现金额."""
@@ -101,7 +125,7 @@ class TestBuildStatus:
             {"date": "2026-01-05", "symbol": "300502", "action": "SELL", "shares": 5000},
         ]
         st = build_status_from_decisions(decisions, {"300502": 10.5})
-        assert abs(st["300502"].iloc[-1]) == pytest.approx(5000 * 10.5, abs=1)
+        assert abs(st["300502"].iloc[-1]) == pytest.approx(5000, abs=1)  # 份额数
 
 
 class TestReports:

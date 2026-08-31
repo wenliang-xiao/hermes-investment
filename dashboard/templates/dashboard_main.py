@@ -285,10 +285,17 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
               <option value="faceji">面基</option>
               <option value="silverquant">SilverQuant</option>
               <option value="tradingagents">TradingAgents</option>
+              <option value="all">三策略对比</option>
             </select>
-            <select id="v3Days" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
+            <select id="v3Days" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600" title="回测周期(交易日, 真正控制窗口)">
               <option value="120" selected>120天</option>
               <option value="250">250天</option>
+              <option value="500">500天</option>
+              <option value="1000">1000天</option>
+            </select>
+            <select id="v3Engine" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600" title="执行引擎">
+              <option value="self" selected>自研引擎</option>
+              <option value="xalpha">xalpha</option>
             </select>
             <button id="v3RunBtn" onclick="runV3Backtest()" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors">⚡ 运行 v3 回测</button>
           </div>
@@ -1898,14 +1905,23 @@ async function runV3Backtest() {
   const btn = document.getElementById('v3RunBtn');
   const strategy = document.getElementById('v3Strategy').value;
   const days = document.getElementById('v3Days').value || '120';
+  const engine = document.getElementById('v3Engine').value || 'self';
   const orig = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中(约10s)...'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中(120天约10s, 1000天约2min)...'; }
+  const t0 = Date.now();
   try {
-    const d = await fetch(`/api/v2/backtest/v3/run?strategy=${strategy}&days=${days}`).then(r => r.json());
+    let url = `/api/v2/backtest/v3/run?strategy=${strategy}&days=${days}`;
+    if (engine === 'xalpha' && strategy !== 'all') url += `&engine=xalpha`;
+    const d = await fetch(url).then(r => r.json());
     if (d.error) { alert('❌ 回测失败: ' + d.error); return; }
-    const mt = d.metrics || {};
+    const elapsed = Math.round((Date.now() - t0) / 1000);
     loadV3Reports();
-    alert(`✅ v3 回测完成\n策略: ${V3_LABELS[strategy] || strategy}\nSharpe ${mt.sharpe} | CAGR ${mt.cagr}% | MDD ${mt.max_drawdown}% | 波动 ${mt.volatility}%\n${mt.n_days}天 · ${d.trades_count || 0}笔交易\n\n打开完整报告: ${location.origin}${d.report_url}`);
+    if (strategy === 'all') {
+      alert(`✅ 三策略对比完成 (${elapsed}s)\n${(d.metrics||[]).map(r => `${r.strategy}: Sharpe ${r.sharpe} | CAGR ${r.cagr}% | MDD ${r.max_drawdown}%`).join('\n')}\n\n打开对比报告: ${location.origin}${d.report_url}`);
+    } else {
+      const mt = d.metrics || {};
+      alert(`✅ v3 回测完成 (${elapsed}s)\n策略: ${V3_LABELS[strategy] || strategy} · 引擎: ${engine}\nSharpe ${mt.sharpe} | CAGR ${mt.cagr}% | MDD ${mt.max_drawdown}% | 波动 ${mt.volatility}%\n${mt.n_days}天 · ${d.trades_count || 0}笔交易\n\n打开完整报告: ${location.origin}${d.report_url}`);
+    }
     window.open(d.report_url, '_blank');
   } catch (e) {
     alert('❌ 错误: ' + (e.message || e));
