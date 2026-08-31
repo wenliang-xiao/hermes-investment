@@ -148,13 +148,19 @@ class WalkForwardSplit:
 # 数据层：拉取并缓存日线数据
 # ──────────────────────────────────────────────
 def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | None:
-    """从 data_router 获取日线收盘价，缓存到本地 pickle"""
+    """从 data_router 获取日线收盘价，缓存到本地 pickle
+
+    缓存 DataFrame 含 close + open（T+1 成交需要开盘价）;
+    旧缓存缺 open 列时回退 close（无 T+1 能力但兼容读取）。
+    """
     import numpy as np
     import pandas as pd
 
     cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
     if cache_file.exists():
         df = pd.read_pickle(cache_file)
+        if "close" not in df.columns:
+            return None
         return df["close"].tolist()
 
     # 使用新的 data_router
@@ -164,6 +170,7 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
         if result and result.get("close"):
             df = pd.DataFrame({
                 "close": result["close"],
+                "open": result.get("open", result["close"]),
                 "date": result.get("dates", list(range(len(result["close"])))),
             })
             df = df.dropna(subset=["close"]).sort_values("date")
@@ -190,6 +197,36 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
         return None
     df.to_pickle(cache_file)
     return df["close"].tolist()
+
+
+def load_price_history_open(symbol: str, days: int = FIXED_DAYS) -> list[float] | None:
+    """获取日线开盘价（T+1 成交用；与 load_price_history 同缓存源）。
+
+    缓存缺 open 列（旧缓存）时回退 close，保证不崩但无 T+1 能力。
+    """
+    import pandas as pd
+
+    cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
+    if cache_file.exists():
+        try:
+            df = pd.read_pickle(cache_file)
+            if "open" in df.columns:
+                return df["open"].tolist()
+            return df["close"].tolist()
+        except Exception:
+            return None
+
+    # 无缓存时与 load_price_history 同源拉取一次（触发缓存写入）
+    load_price_history(symbol, days)
+    if cache_file.exists():
+        try:
+            df = pd.read_pickle(cache_file)
+            if "open" in df.columns:
+                return df["open"].tolist()
+            return df["close"].tolist()
+        except Exception:
+            return None
+    return None
 
 
 def preload_all_data(days: int = FIXED_DAYS, custom_symbols: list[str] | None = None) -> dict[str, list[float]]:
@@ -326,6 +363,7 @@ def run_backtest(
     decide_fn: Callable,
     strategy_name: str,
     dates_map: dict[str, list[str]] | None = None,
+    use_t1: bool = True,
 ) -> dict:
     """固定评估器的回测核心。
 
@@ -333,14 +371,19 @@ def run_backtest(
 
     dates_map: {symbol: [YYYY-MM-DD,...]} 真实交易日序列。传了就用真实
     交易日(与数据对齐), 不传退回旧的自然日倒推逻辑。
+
+    use_t1: True = 信号 T 日收盘生成, T+1 开盘价成交(消除前视);
+            False = 旧行为: 信号当日收盘价成交。
     """
     from strategies.base import PositionData, Signal
 
+    opens_map: dict[str, list[float]] = {}
     # ── 临时兼容: 保持旧签名 (price_data 可能已是 dict 或仍为纯 list)
     if isinstance(price_data, dict) and price_data and isinstance(
             next(iter(price_data.values())), dict):
-        # 新版: {"close": [...], "dates": [...]}
+        # 新版: {"close": [...], "open": [...], "dates": [...]}
         pd_new = price_data
+        opens_map = {s: list(v.get("open", v["close"])) for s, v in pd_new.items()}
         price_data = {s: v["close"] for s, v in pd_new.items()}
         dates_map = dates_map or {s: v.get("dates", []) for s, v in pd_new.items()}
 
@@ -382,6 +425,69 @@ def run_backtest(
     # 逐日推进
     score_map = dict(FIXED_SCORE_MAP)  # 固定评分
 
+    # T+1 机制: 前一交易日生成的信号, 本交易日开盘价成交
+    pending_signals: list = []
+
+    def _execute_signal(sig, exec_price: float, day_idx: int):
+        """执行单条信号 (SELL 先, BUY 后) — 共享 T+1 与旧模式执行逻辑."""
+        nonlocal total_cash, trade_count, closed_count, win_count
+        if sig.action == "SELL" and sig.symbol in all_positions:
+            pos = all_positions[sig.symbol]
+            # 使用成本模型
+            try:
+                from engine.cost_model import calc_adjusted_price
+                adjusted_price, cost_detail = calc_adjusted_price(exec_price, pos.quantity, "sell", sig.symbol)
+            except Exception:
+                slippage_cost = exec_price * SLIPPAGE
+                adjusted_price = exec_price - slippage_cost
+                cost_detail = {"total": max(exec_price * SLIPPAGE * pos.quantity, MIN_COMMISSION)}
+            net_proceeds = adjusted_price * pos.quantity
+            pnl = net_proceeds - (pos.entry_price * pos.quantity)
+            total_cash += net_proceeds
+            if pnl > 0:
+                win_count += 1
+            trade_count += 1
+            closed_count += 1
+            all_trades.append({
+                "symbol": sig.symbol, "action": "SELL",
+                "price": round(exec_price, 2), "quantity": pos.quantity,
+                "pnl": round(pnl, 2), "cost": round(cost_detail.get("total", 0), 2),
+                "reason": sig.reason,
+                "day": day_idx,
+            })
+            del all_positions[sig.symbol]
+
+        elif sig.action == "BUY" and sig.symbol not in all_positions:
+            try:
+                from engine.cost_model import calc_adjusted_price, calc_trade_cost
+                exec_price_adj, cost_detail = calc_adjusted_price(exec_price, 100, "buy", sig.symbol)
+            except Exception:
+                slippage_cost = exec_price * SLIPPAGE
+                exec_price_adj = exec_price + slippage_cost
+                cost_detail = {"total": slippage_cost + max(exec_price * COMMISSION_RATE, MIN_COMMISSION),
+                               "commission": max(exec_price * COMMISSION_RATE, MIN_COMMISSION)}
+            pct = (sig.size_pct or 3.0) / 100
+            qty = max(100, int(total_cash * pct / exec_price_adj / 100) * 100)
+            cost = exec_price_adj * qty
+            commission = max(cost * COMMISSION_RATE, MIN_COMMISSION)
+            total_cost = cost + commission
+            if total_cost <= total_cash:
+                total_cash -= total_cost
+                all_positions[sig.symbol] = PositionData(
+                    symbol=sig.symbol, entry_price=exec_price_adj,
+                    quantity=qty, entry_date=f"day{day_idx}",
+                    peak=exec_price_adj,
+                    current_price=exec_price_adj,
+                )
+                trade_count += 1
+                all_trades.append({
+                    "symbol": sig.symbol, "action": "BUY",
+                    "price": round(exec_price, 2), "quantity": qty,
+                    "cost": round(total_cost, 2),
+                    "reason": sig.reason,
+                    "day": day_idx,
+                })
+
     for day_idx in range(min_days):
         # 构建当日 market data
         tech_map: dict[str, dict] = {}
@@ -391,6 +497,15 @@ def run_backtest(
             price = float(closes[-1])
             price_map[sym] = price
             tech_map[sym] = compute_technicals(closes, price)
+
+        # T+1: 先执行上一交易日生成的信号, 成交价 = 今日开盘价 (消除前视)
+        if use_t1 and pending_signals:
+            for sig in pending_signals:
+                op_arr = opens_map.get(sig.symbol, [])
+                raw = float(op_arr[day_idx]) if day_idx < len(op_arr) and op_arr[day_idx] else price_map.get(sig.symbol, sig.price)
+                exec_price = raw or sig.price
+                _execute_signal(sig, exec_price, day_idx)
+            pending_signals = []
 
         # 当前持仓 PositionData 列表
         positions_dict: dict[str, PositionData] = {}
@@ -412,66 +527,14 @@ def run_backtest(
             cash=total_cash,
         )
 
-        # 执行信号（先卖后买）
-        for sig in signals:
-            if sig.action == "SELL" and sig.symbol in all_positions:
-                pos = all_positions[sig.symbol]
-                exec_price = price_map.get(sig.symbol, sig.price)
-                # 使用成本模型
-                try:
-                    from engine.cost_model import calc_adjusted_price
-                    adjusted_price, cost_detail = calc_adjusted_price(exec_price, pos.quantity, "sell", sig.symbol)
-                except Exception:
-                    slippage_cost = exec_price * SLIPPAGE
-                    adjusted_price = exec_price - slippage_cost
-                    cost_detail = {"total": max(exec_price * SLIPPAGE * pos.quantity, MIN_COMMISSION)}
-                net_proceeds = adjusted_price * pos.quantity
-                pnl = net_proceeds - (pos.entry_price * pos.quantity)
-                total_cash += net_proceeds
-                if pnl > 0:
-                    win_count += 1
-                trade_count += 1
-                closed_count += 1
-                all_trades.append({
-                    "symbol": sig.symbol, "action": "SELL",
-                    "price": round(exec_price, 2), "quantity": pos.quantity,
-                    "pnl": round(pnl, 2), "cost": round(cost_detail.get("total", 0), 2),
-                    "reason": sig.reason,
-                    "day": day_idx,
-                })
-                del all_positions[sig.symbol]
-
-            elif sig.action == "BUY" and sig.symbol not in all_positions:
+        if use_t1:
+            # 信号 T 日收盘生成 → 存入队列, T+1 日开盘价成交
+            pending_signals = list(signals)
+        else:
+            # 旧模式: 信号当日收盘价立即成交
+            for sig in signals:
                 exec_price = price_map.get(sig.symbol, sig.price) or sig.price
-                try:
-                    from engine.cost_model import calc_adjusted_price, calc_trade_cost
-                    exec_price_adj, cost_detail = calc_adjusted_price(exec_price, 100, "buy", sig.symbol)
-                except Exception:
-                    slippage_cost = exec_price * SLIPPAGE
-                    exec_price_adj = exec_price + slippage_cost
-                    cost_detail = {"total": slippage_cost + max(exec_price * COMMISSION_RATE, MIN_COMMISSION),
-                                   "commission": max(exec_price * COMMISSION_RATE, MIN_COMMISSION)}
-                pct = (sig.size_pct or 3.0) / 100
-                qty = max(100, int(total_cash * pct / exec_price_adj / 100) * 100)
-                cost = exec_price_adj * qty
-                commission = max(cost * COMMISSION_RATE, MIN_COMMISSION)
-                total_cost = cost + commission
-                if total_cost <= total_cash:
-                    total_cash -= total_cost
-                    all_positions[sig.symbol] = PositionData(
-                        symbol=sig.symbol, entry_price=exec_price_adj,
-                        quantity=qty, entry_date=f"day{day_idx}",
-                        peak=exec_price_adj,
-                        current_price=exec_price_adj,
-                    )
-                    trade_count += 1
-                    all_trades.append({
-                        "symbol": sig.symbol, "action": "BUY",
-                        "price": round(exec_price, 2), "quantity": qty,
-                        "cost": round(total_cost, 2),
-                        "reason": sig.reason,
-                        "day": day_idx,
-                    })
+                _execute_signal(sig, exec_price, day_idx)
 
         # 当日组合价值
         position_value = sum(
@@ -521,7 +584,7 @@ def run_backtest(
         total_return_pct=metrics.get("total_return_pct", 0.0),
         annualized_return_pct=annualized,
         sharpe_ratio=metrics.get("sharpe_ratio", 0.0),
-        sortino_ratio=metrics.get("sortino_ratio", metrics.get("score", 0.0)),
+        sortino_ratio=metrics.get("sortino_ratio"),
         max_drawdown_pct=mdd,
         calmar_ratio=round(calmar, 4),
         win_rate_pct=metrics.get("win_rate_pct", 0.0),

@@ -229,8 +229,17 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== 回测对比面板 ======== -->
   <div class="card" id="tab-comparison" style="display:none">
+    <!-- P0-1/P0-2 临时止血: 回测可信性告警 (point-in-time 评分与幸存者偏差未解决前必显) -->
+    <div class="bg-red-950/40 border border-red-800/60 rounded-xl p-4 mb-4">
+      <div class="text-sm font-semibold text-red-300 mb-1">⚠️ 回测结果不可作为实盘依据</div>
+      <div class="text-xs text-red-300/80 space-y-1">
+        <div>① 评分使用「当前固定评分」（point-in-time 时点评分未实现）——回测到 T 日用了非当时的评分，存在<strong>前视失真</strong>。</div>
+        <div>② 股票池为「当下热点龙头」19 只，未包含历史剔除/退市标的，存在<strong>幸存者偏差</strong>——收益可能显著虚高。</div>
+        <div class="text-red-400 font-medium">📌 红线：以上问题解决前，本页任何 CAGR / Sharpe / 超额α 数字仅供策略逻辑调试，<strong>不得对外引用为真实策略表现</strong>。</div>
+      </div>
+    </div>
     <div class="card-header"><h3>📈 三方策略回测对比</h3></div>
-    <div id="comparisonBody" style="font-size:13px;"><div class="empty">加载中...</div></div>
+    <div id="comparisonBody" style="font-size:13px;"></div>
     <div id="comparisonControls" style="margin-bottom:16px;">
       <div class="bg-gray-800/50 rounded-xl p-4 mb-4 flex flex-wrap gap-4 items-end">
         <div>
@@ -279,7 +288,7 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
       <!-- v3 专业报告 (xalpha + quantstats) -->
       <div class="bg-gray-800/40 rounded-xl p-3 mb-4 border border-gray-700/50">
         <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <span class="text-xs font-medium text-gray-300">📄 v3 专业报告 <span class="text-gray-500">(xalpha + quantstats: 月度热力图/滚动夏普/水下图/VaR)</span></span>
+          <span class="text-xs font-medium text-gray-300">📄 v3 专业报告 <span class="text-gray-500">(xalpha + quantstats: 月度热力图/滚动夏普/水下图/VaR指标·短窗口滚动图缺失)</span></span>
           <div class="flex items-center gap-2">
             <select id="v3Strategy" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
               <option value="faceji">面基</option>
@@ -1509,11 +1518,13 @@ function applyQuickDays(days) {
 }
 
 async function loadComparison() {
-  const el = document.getElementById('comparisonContent');
+  // 修复 browser-verification 3.1: comparisonBody 永停留"加载中..." — 元素名不一致
+  const el = document.getElementById('comparisonContent') || document.getElementById('comparisonBody');
+  if (!el) return;
   el.innerHTML = `
     <div class="text-gray-400 p-4 text-center">
       <div class="text-lg mb-2">📊 策略回测对比</div>
-      <div class="text-sm">选择参数后点击「运行回测」开始</div>
+      <div class="text-sm">选择参数后点击「运行回测」开始 · 默认最近60个交易日</div>
     </div>`;
 }
 
@@ -1907,27 +1918,38 @@ async function runV3Backtest() {
   const days = document.getElementById('v3Days').value || '120';
   const engine = document.getElementById('v3Engine').value || 'self';
   const orig = btn ? btn.textContent : '';
+  // P0-12: 结果用页内卡片展示, 不再原生 alert
+  const statusEl = document.getElementById('v3ReportList');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中(120天约10s, 1000天约2min)...'; }
   const t0 = Date.now();
   try {
     let url = `/api/v2/backtest/v3/run?strategy=${strategy}&days=${days}`;
     if (engine === 'xalpha' && strategy !== 'all') url += `&engine=xalpha`;
     const d = await fetch(url).then(r => r.json());
-    if (d.error) { alert('❌ 回测失败: ' + d.error); return; }
+    if (d.error) {
+      if (statusEl) statusEl.innerHTML = `<div class="bg-red-950/40 border border-red-800/60 rounded-lg p-3 text-xs text-red-300 mb-2">❌ 回测失败: ${d.error}</div>`;
+      return;
+    }
     const elapsed = Math.round((Date.now() - t0) / 1000);
     loadV3Reports();
+    // 页内结果卡片 (P0-12: 不弹 alert, 不 window.open)
+    let card = '';
     if (strategy === 'all') {
-      const NL = String.fromCharCode(10);
-      const lines = (d.metrics||[]).map(r => r.strategy + ': Sharpe ' + r.sharpe + ' | CAGR ' + r.cagr + '% | MDD ' + r.max_drawdown + '%');
-      alert('✅ 三策略对比完成 (' + elapsed + 's)' + NL + lines.join(NL) + NL + NL + '打开对比报告: ' + location.origin + d.report_url);
+      const lines = (d.metrics||[]).map(r => `<div class="flex justify-between"><span>${r.strategy}</span><span>Sharpe <b class="text-blue-400">${r.sharpe}</b> · CAGR <b class="text-green-400">${r.cagr}%</b> · MDD <b class="text-red-400">${r.max_drawdown}%</b></span></div>`).join('');
+      card = `<div class="bg-green-950/30 border border-green-800/50 rounded-lg p-3 text-xs text-green-200 mb-2">
+        <div class="font-semibold mb-1">✅ 三策略对比完成 (${elapsed}s)</div>${lines}
+        <div class="mt-1"><a href="${d.report_url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline">打开对比报告 ↗</a></div></div>`;
     } else {
       const mt = d.metrics || {};
-      const NL = String.fromCharCode(10);
-      alert('✅ v3 回测完成 (' + elapsed + 's) | 策略: ' + (V3_LABELS[strategy] || strategy) + ' | 引擎: ' + engine + NL + 'Sharpe ' + mt.sharpe + ' | CAGR ' + mt.cagr + '% | MDD ' + mt.max_drawdown + '% | 波动 ' + mt.volatility + '%' + NL + mt.n_days + '天 | ' + (d.trades_count || 0) + '笔交易' + NL + NL + '打开完整报告: ' + location.origin + d.report_url);
+      card = `<div class="bg-green-950/30 border border-green-800/50 rounded-lg p-3 text-xs text-green-200 mb-2">
+        <div class="font-semibold mb-1">✅ v3 回测完成 (${elapsed}s) | ${V3_LABELS[strategy] || strategy} | 引擎 ${engine}</div>
+        <div>Sharpe <b class="text-blue-400">${mt.sharpe}</b> · CAGR <b class="text-green-400">${mt.cagr}%</b> · MDD <b class="text-red-400">${mt.max_drawdown}%</b> · 波动 ${mt.volatility}%</div>
+        <div>${mt.n_days}天 | ${d.trades_count || 0}笔交易</div>
+        <div class="mt-1"><a href="${d.report_url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline">打开完整报告 ↗</a></div></div>`;
     }
-    window.open(d.report_url, '_blank');
+    if (statusEl) statusEl.innerHTML = card + statusEl.innerHTML;
   } catch (e) {
-    alert('❌ 错误: ' + (e.message || e));
+    if (statusEl) statusEl.innerHTML = `<div class="bg-red-950/40 border border-red-800/60 rounded-lg p-3 text-xs text-red-300 mb-2">❌ 错误: ${e.message || e}</div>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = orig || '⚡ 运行 v3 回测'; }
   }
@@ -2521,7 +2543,7 @@ async function loadGurusTab() {
       const cnt = (g.holdings_count != null) ? g.holdings_count : (g.count || 0);
       rows +=
         '<tr class="hover:bg-gray-700/30 border-b border-gray-700/50">' +
-          '<td class="py-2 pr-2 border-0 font-medium text-blue-400 cursor-pointer" onclick="loadGuruDetail(\\'' + escHtml(slug) + '\\')">' + escHtml(name) +
+          '<td class="py-2 pr-2 border-0 font-medium text-blue-400 cursor-pointer" onclick="loadGuruDetail(\'' + escHtml(slug) + '\')">' + escHtml(name) +
             ' <span class="text-gray-500 text-xs">›</span></td>' +
           '<td class="py-2 pr-2 text-right font-mono text-gray-200 border-0">' + (cnt || 0) + '</td>' +
           '<td class="py-2 pr-2 text-right font-mono text-green-500 border-0">' + escHtml(g.total_usd_fmt || '—') + '</td>' +

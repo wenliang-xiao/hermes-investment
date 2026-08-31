@@ -34,7 +34,7 @@ class BacktestResult:
 
     # 风险调整指标
     sharpe_ratio: float
-    sortino_ratio: float
+    sortino_ratio: Optional[float]  # None = 数据不足未计算（不 fallback 到 score）
     max_drawdown_pct: float
     calmar_ratio: float
 
@@ -90,7 +90,7 @@ class BacktestResult:
             total_return_pct=raw.get("total_return_pct", 0.0),
             annualized_return_pct=annualized,
             sharpe_ratio=raw.get("sharpe_ratio", 0.0),
-            sortino_ratio=raw.get("sortino_ratio", raw.get("score", 0.0)),
+            sortino_ratio=raw.get("sortino_ratio"),
             max_drawdown_pct=mdd,
             calmar_ratio=round(calmar, 4),
             win_rate_pct=raw.get("win_rate_pct", 0.0),

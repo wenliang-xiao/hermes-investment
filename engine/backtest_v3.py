@@ -226,10 +226,17 @@ def _decide_loop(
             elif sig.action == "SELL" and sym in all_positions:
                 pos = all_positions.pop(sym)
                 qty = pos["quantity"]
-                total_cash += qty * price
+                # 接入成本模型: 卖出净回款 = 调整后价格 × 数量 (与 evaluator_fixed 一致)
+                try:
+                    from engine.cost_model import calc_adjusted_price
+                    adj_price, _cost = calc_adjusted_price(price, qty, "sell", sym)
+                except Exception:
+                    adj_price = price * (1 - 0.001)  # fallback 千1滑点
+                proceeds = adj_price * qty
+                total_cash += proceeds
                 decisions.append({
                     "date": date_s, "symbol": sym, "action": "SELL",
-                    "amount": round(qty * price, 2), "shares": qty, "price": round(price, 4),
+                    "amount": round(proceeds, 2), "shares": qty, "price": round(price, 4),
                     "reason": sig.reason,
                 })
 
@@ -457,6 +464,42 @@ def build_status_from_decisions(
 # ──────────────────────────────────────────────
 # WS3: 报告引擎 — NAV → quantstats HTML 落盘
 # ──────────────────────────────────────────────
+def _strip_empty_rolling_charts(report_path: str):
+    """移除 quantstats 短窗口报告中的空滚动图 (rolling vol/sharpe/sortino/beta)。
+
+    原理: rolling 图空时 matplotlib 仍输出一个几乎空白的 SVG(只有坐标轴刻度
+    0.0/轴标签), 通过检测 SVG 中数据路径数量接近 0 来判断并整块删除。
+    保留有数据的图不动。短窗口(<126交易日)专用。
+    """
+    import re
+    try:
+        html = open(report_path, encoding="utf-8").read()
+    except Exception:
+        return
+
+    def _has_data(svg_block: str) -> bool:
+        # 数据路径特征: 折线 path 通常含 'L' (line-to) 且坐标非零
+        paths = re.findall(r"<path[^>]*d=\"([^\"]*)\"", svg_block)
+        data_paths = [p for p in paths if "L" in p and not re.fullmatch(r"[M\s0.\-]*", p)]
+        return len(data_paths) >= 2
+
+    blocks = list(re.finditer(r"<svg.*?</svg>", html, re.DOTALL))
+    if not blocks:
+        return
+    drop_ranges = []
+    for m in blocks:
+        if not _has_data(m.group(0)):
+            drop_ranges.append((m.start(), m.end()))
+    if not drop_ranges:
+        return
+    for s, e in sorted(drop_ranges, reverse=True):
+        html = html[:s] + '<!-- 短窗口: 空滚动图已移除 -->' + html[e:]
+    try:
+        open(report_path, "w", encoding="utf-8").write(html)
+    except Exception:
+        pass
+
+
 def generate_report(
     nav: pd.Series,
     benchmark_nav: pd.Series | None,
@@ -500,12 +543,24 @@ def generate_report(
 
     report_path = out_dir / "report.html"
     try:
+        # P0-13: quantstats 内部 rolling 指标硬编码 half-year(≈126交易日) 窗口,
+        # 短窗口(<126天)会产出空图/坏日期(01-01-00)。方案: 生成后清理空 rolling 子图。
+        short_window = int(len(rets)) < 126
         qs.reports.html(
             rets,
             benchmark=benchmark_nav.pct_change().dropna() if benchmark_nav is not None else None,
             output=str(report_path),
             title=f"{strategy_name} 回测报告",
         )
+        if short_window:
+            _strip_empty_rolling_charts(str(report_path))
+            # 追加短窗口说明到报告末尾
+            with open(report_path, "a", encoding="utf-8") as f:
+                f.write('<div style="color:#f0b429;font-size:12px;padding:16px;'
+                        'border-top:1px solid #30363d">⚠️ 回测窗口过短'
+                        f'（{len(rets)} 交易日 ≈ {len(rets)/252*12:.1f} 个月），'
+                        '6 个月滚动指标不可用，滚动图已被移除。'
+                        '建议使用 ≥250 交易日窗口获取完整滚动指标。</div>')
     except Exception as e:  # 报告生成失败不阻断
         report_path.write_text(f"<html><body><h1>报告生成失败</h1><p>{e}</p></body></html>")
 
@@ -680,26 +735,29 @@ def generate_compare_report(
     out_dir = REPORT_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 归一化净值 → 同图对比 (首日=1.0)
-    plt.figure(figsize=(12, 6))
-    colors = {"faceji": "#58a6ff", "silverquant": "#3fb950", "tradingagents": "#bc8cff"}
-    for name, nav in navs.items():
-        if nav is None or len(nav) < 5:
-            continue
-        norm = nav / nav.iloc[0]
-        plt.plot(norm.index, norm.values, label=name, linewidth=1.5,
-                 color=colors.get(name, None))
-    if benchmark_nav is not None and len(benchmark_nav) >= 5:
-        bm = benchmark_nav / benchmark_nav.iloc[0]
-        plt.plot(bm.index, bm.values, label="沪深300", linewidth=1.2,
-                 linestyle="--", color="#e3b341")
-    plt.title("多策略净值对比 (首日=1.0)")
-    plt.legend()
-    plt.grid(alpha=0.3)
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-    plt.close()
-    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    # 1. 归一化净值 → 同图对比 (首日=1.0) — 无有效曲线则跳过空图
+    has_curve = any(nav is not None and len(nav) >= 5 for nav in navs.values())
+    img_b64 = ""
+    if has_curve:
+        plt.figure(figsize=(12, 6))
+        colors = {"faceji": "#58a6ff", "silverquant": "#3fb950", "tradingagents": "#bc8cff"}
+        for name, nav in navs.items():
+            if nav is None or len(nav) < 5:
+                continue
+            norm = nav / nav.iloc[0]
+            plt.plot(norm.index, norm.values, label=name, linewidth=1.5,
+                     color=colors.get(name, None))
+        if benchmark_nav is not None and len(benchmark_nav) >= 5:
+            bm = benchmark_nav / benchmark_nav.iloc[0]
+            plt.plot(bm.index, bm.values, label="沪深300", linewidth=1.2,
+                     linestyle="--", color="#e3b341")
+        plt.title("多策略净值对比 (首日=1.0)")
+        plt.legend()
+        plt.grid(alpha=0.3)
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close()
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
 
     # 2. 指标对比表
     metrics_rows = []
@@ -724,6 +782,8 @@ def generate_compare_report(
         f"<td>{r['win_rate']}%</td><td>{r['n_days']}</td></tr>"
         for r in metrics_rows
     )
+    img_html = (f'<img src="data:image/png;base64,{img_b64}" alt="净值对比">'
+                if img_b64 else '<p class="meta">无有效净值曲线（数据不足 5 天）</p>')
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <title>多策略对比报告</title>
@@ -739,7 +799,7 @@ img {{ max-width: 100%; border-radius: 8px; margin-top: 12px; }}
 <h1>📊 多策略专业对比报告</h1>
 <p class="meta">生成: {datetime.now().isoformat(timespec='seconds')} · 参数: {json.dumps(params or {}, ensure_ascii=False)}</p>
 <h2>净值对比 (首日=1.0)</h2>
-<img src="data:image/png;base64,{img_b64}" alt="净值对比">
+{img_html}
 <h2>核心指标对比</h2>
 <table><thead><tr><th>策略</th><th>Sharpe</th><th>Sortino</th><th>CAGR</th>
 <th>MaxDD</th><th>波动率</th><th>日胜率</th><th>天数</th></tr></thead>
@@ -755,6 +815,8 @@ img {{ max-width: 100%; border-radius: 8px; margin-top: 12px; }}
         "params": params or {},
         "metrics": {"n_strategies": len(metrics_rows), "strategies": [r["strategy"] for r in metrics_rows]},
         "report_file": "report.html",
+        "n_days": max((r["n_days"] for r in metrics_rows), default=0),
+        "n_trades": sum(len(nav) for nav in (navs or {}).values() if nav is not None),
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     return {"run_id": meta["run_id"], "report_path": str(report_path), "meta": meta,
