@@ -189,21 +189,22 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
     return {"name": strategy, "daily_values": [], "trades": [], "error": "未知结果格式"}
 
 
-@router.get("/api/comparison")
-def get_comparison(days: int = 60):
-    """三方策略对比数据 — 支持自定义天数"""
-    try:
-        from engine.strategy_comparison import run_comparison
-        result = run_comparison(days=min(max(days, 7), 365))
-        sig_path = ROOT / "data" / "trading_signals.json"
-        if sig_path.exists():
-            with open(sig_path) as f:
-                live = json.load(f)
-            live["signals"], _dropped = _clean_signals(live.get("signals", []), "comparison")
-            result["live_signals"] = live
-        return result
-    except Exception as e:
-        return {"error": str(e)}
+# P0-5 (2026-08-31): 下线 /api/comparison — 脏数据 (卖价=买价/pnl=0), 孤儿页面无导航入口
+# @router.get("/api/comparison")
+# def get_comparison(days: int = 60):
+#     """三方策略对比数据 — 支持自定义天数"""
+#     try:
+#         from engine.strategy_comparison import run_comparison
+#         result = run_comparison(days=min(max(days, 7), 365))
+#         sig_path = ROOT / "data" / "trading_signals.json"
+#         if sig_path.exists():
+#             with open(sig_path) as f:
+#                 live = json.load(f)
+#             live["signals"], _dropped = _clean_signals(live.get("signals", []), "comparison")
+#             result["live_signals"] = live
+#         return result
+#     except Exception as e:
+#         return {"error": str(e)}
 
 
 @router.get("/api/v2/backtest")

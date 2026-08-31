@@ -349,11 +349,19 @@ def run():
             try:
                 _rt = _get_rt(_sym)
                 if _rt and _rt.get("price") and float(_rt["price"]) > 0:
-                    _strat.positions[_sym]["current_price"] = float(_rt["price"])
+                    _price = float(_rt["price"])
+                    _strat.positions[_sym]["current_price"] = _price
+                    # P0-7 (2026-08-31): 峰值追踪 — peak 只在建仓时设置, 从不更新
+                    # 导致止损线恒 = entry*0.92 (峰值回落失效)。此处在价格刷新时
+                    # 同步推进 peak_price (持仓内字段名兼容: peak / peak_price)
+                    _peak = _strat.positions[_sym].get("peak") or _strat.positions[_sym].get("peak_price")
+                    if not _peak or _price > float(_peak):
+                        _strat.positions[_sym]["peak"] = _price
+                        _strat.positions[_sym]["peak_price"] = _price
                     refresh_hits += 1
             except Exception:
                 continue
-    print(f"   ✅ 刷新 {refresh_hits} 个持仓实时价格", flush=True)
+    print(f"   ✅ 刷新 {refresh_hits} 个持仓实时价格 (含 peak 峰值追踪)", flush=True)
 
     today_str = date.today().strftime("%Y-%m-%d")
     result = engine_te.run_daily(today_str, score_map, tech_map, price_map)

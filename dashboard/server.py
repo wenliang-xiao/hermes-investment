@@ -28,7 +28,8 @@ from dashboard.api_etf import router as etf_router
 from dashboard.api_news import router as news_router
 from dashboard.api_backtest import router as backtest_router
 from dashboard.api_risk import router as risk_router
-from dashboard.api_comparison import router as comparison_router
+# P0-5 (2026-08-31): 下线脏数据 /comparison 页面 + /api/comparison 路由 (孤儿页面, 数据卖价=买价)
+# from dashboard.api_comparison import router as comparison_router
 from dashboard.api_dragon_tiger import router as dragon_tiger_router
 from dashboard.api_evidence import router as evidence_router
 from dashboard.api_execution import router as execution_router
@@ -44,7 +45,7 @@ app.include_router(etf_router)
 app.include_router(news_router)
 app.include_router(backtest_router)
 app.include_router(risk_router)
-app.include_router(comparison_router)
+# P0-5: app.include_router(comparison_router) 已下线
 app.include_router(dragon_tiger_router)
 app.include_router(evidence_router)
 app.include_router(execution_router)

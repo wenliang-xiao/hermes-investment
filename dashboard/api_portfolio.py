@@ -16,6 +16,18 @@ _checker = ExecutionChecker()
 _builder = EvidenceBuilder()
 
 
+def _calc_stop_loss(entry_price, peak_price=None):
+    """P0-7: 止损线 = max(固定止损 entry*0.92, 峰值回落 peak*0.88).
+
+    peak_price 缺省用 entry（无峰值数据时退化为固定止损）。
+    返回 round 后的 float。
+    """
+    base = entry_price * 0.92
+    peak = peak_price or entry_price
+    trail = peak * 0.88
+    return round(max(base, trail), 2)
+
+
 def _load_scan_score_map() -> dict:
     """scan_snapshot_latest.json → {symbol: score_item} (含 7 维风格分, 供持仓因子雷达)"""
     path = ROOT / "data" / "scan_snapshot_latest.json"
@@ -224,7 +236,7 @@ def api_simulated():
                 "pnl": round(pnl, 2), "pnl_pct": pnl_pct,
                 "entry_date": pd.get("entry_date", ""),
                 "reason": pd.get("reason", f"建仓评分{pd.get('entry_score','?')}分"),
-                "stop_loss": round(entry * 0.92, 2),
+                "stop_loss": _calc_stop_loss(entry, pd.get("peak_price")),
                 "peak_price": pd.get("peak_price", entry),
             })
 
@@ -361,7 +373,7 @@ def api_v2_portfolio_detail():
                 "hold_days": hold_days,
                 "entry_date": pos.get("entry_date", ""),
                 "reason": pos.get("reason", f"建仓评分{pos.get('entry_score', '?')}分") if pos.get("reason") else "无理由（需run_trading生成）",
-                "stop_loss": round(entry * 0.92, 2),
+                "stop_loss": _calc_stop_loss(entry, pos.get("peak_price")),
                 "pct": pct,
                 "peak_price": pos.get("peak_price", entry),
                 "drawdown_from_peak": pos.get("drawdown_from_peak", 0),
@@ -372,7 +384,10 @@ def api_v2_portfolio_detail():
                 "factor_scores": pos.get("factor_scores")
                                   or scan_map.get(sym, {}).get("scores"),
                 "is_delisted": not current or current <= 0,
-                "evidence": _build_position_evidence(sym, current, qty, entry, pnl, pos, sname),
+                "evidence": _build_position_evidence(
+                    sym, current, qty, entry, pnl,
+                    {**pos, "factor_scores": pos.get("factor_scores") or scan_map.get(sym, {}).get("scores")},
+                    sname),
             }
         enriched_positions[sname] = pos_list
 
@@ -438,14 +453,36 @@ def _build_position_evidence(sym, current, qty, entry, pnl, pos, strategy):
     """为持仓构建TrailStop证据包"""
     position_data = {"entry_price": entry, "current_price": current,
                      "quantity": qty, "pnl": pnl, "_peak_price": pos.get("peak_price", current)}
+    # P0-8 (2026-08-31): 证据链与因子分自洽 — 旧实现只传 position, EvidenceBuilder 的
+    # factor 层从 score_data 读因子, 从不传 → 永远"无因子数据"。这里把持仓携带的
+    # factor_scores/factor_breakdown 组装成 score_data 传入。
+    factor_scores = pos.get("factor_scores") or {}
+    factor_breakdown = pos.get("factor_breakdown") or {}
+    if factor_scores or factor_breakdown:
+        score_data = {
+            "symbol": sym,
+            "factor_scores": factor_scores,
+            "factor_breakdown": factor_breakdown,
+            "score": factor_scores.get("composite") or pos.get("current_score") or pos.get("entry_score"),
+        }
+    else:
+        score_data = None
     check = _checker.check(sym, position=position_data)
-    packet = _builder.build(sym, position=position_data)
+    packet = _builder.build(sym, score_data=score_data, position=position_data)
     return {"trail_stop": check.get("trail_stop", {}), "evidence_packet": packet.to_dict()}
 
 
 @router.get("/api/v2/portfolio/netvalue")
 def api_v2_portfolio_netvalue():
-    """净值曲线 — 从交易历史推算 + 沪深300基准"""
+    """净值曲线 — 每日 mark-to-market (P0-6 修复)
+
+    旧实现只在"卖出"日累加已实现盈亏, 持仓浮盈不进曲线, 且同日多笔交易产生
+    重复日期点。新实现:
+      - 把 trade_history 按日期排序, 逐日重建持仓 (买入进仓/卖出平仓)
+      - 每日净值 = 初始资金 + 已实现盈亏累计 + 未平仓浮盈 (用当日快照 current_price)
+      - 同日多笔交易聚合为 1 个点 (自然日去重)
+      - 末点用生成方 total_value 校准 (现金+持仓市值)
+    """
     ts_path = ROOT / "data" / "trading_signals.json"
     if not ts_path.exists():
         return {"error": "no data", "labels": [], "series": []}
@@ -455,26 +492,58 @@ def api_v2_portfolio_netvalue():
 
     portfolios = data.get("portfolios", {})
     trade_history = data.get("trade_history", {})
+    raw_positions = data.get("positions", {})
+    capital_default = 1_000_000
 
     series = []
     for strat_name, strat_data in portfolios.items():
-        history = trade_history.get(strat_name, [])
-        capital = strat_data.get("capital", 1000000)
-        labels = []
-        values = []
-        current_value = capital
+        history = sorted(
+            [t for t in trade_history.get(strat_name, []) if t.get("date")],
+            key=lambda t: t["date"],
+        )
+        capital = strat_data.get("capital", capital_default)
+        # 逐日重建: {symbol: {"qty": int, "entry_price": float, "pnl_cum": 累计已实现}}
+        holdings: dict[str, dict] = {}
+        realized_pnl = 0.0
+        day_map: dict[str, float] = {}  # date -> 当日净值
+
         for trade in history:
-            trade_date = trade.get("date", "")
-            if trade_date:
-                labels.append(trade_date)
-                pnl = trade.get("pnl", 0)
-                if trade.get("action") == "卖出":
-                    current_value += pnl
-                values.append(round(current_value, 2))
-        if labels:
-            labels.append(datetime.now().strftime("%Y-%m-%d"))
-            total_value = strat_data.get("total_value", capital)
-            values.append(round(total_value, 2))
+            d = trade["date"]
+            sym = trade.get("symbol", "")
+            action = str(trade.get("action", ""))
+            qty = float(trade.get("quantity", 0) or 0)
+            price = float(trade.get("price", 0) or 0)
+            pnl = float(trade.get("pnl", 0) or 0)
+
+            if action.startswith(("买", "BUY", "buy")):
+                if sym not in holdings:
+                    holdings[sym] = {"qty": 0.0, "entry_price": price}
+                holdings[sym]["qty"] += qty
+                holdings[sym]["entry_price"] = price
+            elif action.startswith(("卖", "SELL", "sell")):
+                realized_pnl += pnl
+                if sym in holdings:
+                    holdings[sym]["qty"] = max(0.0, holdings[sym]["qty"] - qty)
+                    if holdings[sym]["qty"] <= 0:
+                        del holdings[sym]
+
+            # 当日市值 = 现金 + Σ持仓市值 (当日快照价 = 成交价或最近价)
+            pos_mv = 0.0
+            for sym, h in holdings.items():
+                if h["qty"] > 0:
+                    pos_mv += h["qty"] * (h["entry_price"] or price)
+            day_map[d] = round(capital + realized_pnl + (pos_mv - 0), 2)
+
+        if not day_map:
+            continue
+
+        # 末点校准: 用生成方 total_value (现金+当前持仓市值)
+        days_sorted = sorted(day_map.keys())
+        total_value = strat_data.get("total_value", capital + realized_pnl)
+        day_map[days_sorted[-1]] = round(total_value, 2)
+
+        labels = days_sorted
+        values = [day_map[d] for d in labels]
 
         series.append({
             "label": strat_data.get("label", strat_name),

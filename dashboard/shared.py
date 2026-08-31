@@ -97,13 +97,17 @@ def build_summary(book):
         mkt_val = current * qty
         pnl = mkt_val - cost
         pnl_pct = (current - entry) / entry * 100 if entry else 0
-        peak = pos.get("peak_price", entry)
+        peak = pos.get("peak_price") or pos.get("peak") or entry
         dd = (current - peak) / peak * 100 if peak else 0
         try:
             entry_dt = datetime.strptime(pos.get("entry_date", ""), "%Y-%m-%d")
             hold = (datetime.now() - entry_dt).days
         except:
             hold = 0
+        # P0-7 (2026-08-31): 止损线 = max(固定止损 entry*0.92, 峰值回落 peak*0.88)
+        # 旧逻辑二选一 (hold<10 用 entry, 否则 peak) + peak 从不更新 → 止损线假数
+        base_stop = entry * 0.92
+        trail_stop = peak * 0.88 if peak else base_stop
         positions.append({
             "symbol": sym, "name": pos.get("name", sym),
             "entry_price": round(entry, 4), "current_price": round(current, 4),
@@ -113,7 +117,9 @@ def build_summary(book):
             "hold_days": hold,
             "entry_score": pos.get("entry_score"),
             "pct": pos.get("pct", 0),
-            "stop_loss": round(entry * 0.92, 4) if hold < 10 else round(peak * 0.88, 4),
+            "stop_loss": round(max(base_stop, trail_stop), 4),
+            "stop_loss_base": round(base_stop, 4),
+            "stop_loss_trail": round(trail_stop, 4),
         })
 
     cash = book.get("cash", 0)
