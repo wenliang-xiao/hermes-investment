@@ -114,37 +114,37 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== 六层横条 ======== -->
   <div id="layer-bar" class="grid grid-cols-5 gap-2 mb-2 text-xs">
-    <div class="layer-card layer-l1 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l1')">
+    <div class="layer-card layer-l1 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">L1 宏观</span>
+        <span class="font-semibold text-gray-300">🏛️ 市场环境</span>
         <span id="l1-status" class="badge">-</span>
       </div>
       <div id="l1-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l2 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l2')">
+    <div class="layer-card layer-l2 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">L2 配置</span>
+        <span class="font-semibold text-gray-300">⚖️ 资产配置</span>
         <span id="l2-status" class="badge">-</span>
       </div>
       <div id="l2-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l3')">
+    <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">L3-L4 选股</span>
+        <span class="font-semibold text-gray-300">🎯 选股</span>
         <span id="l3-status" class="badge">-</span>
       </div>
       <div id="l3-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l5 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l5')">
+    <div class="layer-card layer-l5 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">L5 风控</span>
+        <span class="font-semibold text-gray-300">🛡️ 风控</span>
         <span id="l5-status" class="badge">-</span>
       </div>
       <div id="l5-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l6 bg-gray-800 border border-gray-700 rounded-lg p-2 cursor-pointer hover:bg-gray-750" onclick="toggleLayerDetail('l6')">
+    <div class="layer-card layer-l6 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">L6 纪律</span>
+        <span class="font-semibold text-gray-300">📋 纪律</span>
         <span id="l6-status" class="badge">-</span>
       </div>
       <div id="l6-content" class="text-gray-400 mt-1"></div>
@@ -1158,10 +1158,6 @@ async function loadLayerBar() {
   } catch(e) {
     console.error('LayerBar error:', e);
   }
-}
-
-function toggleLayerDetail(layer) {
-  // Future: expand detailed view for each layer
 }
 
 // ═══════════════════════════════════════════

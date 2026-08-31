@@ -111,23 +111,8 @@ def data_consistency():
             f"total_value={pf.get('total_value')} vs cash+Σ市值={tv:.2f}",
         )
 
-    # 5. 今日成交计数: 校验 header 显示值口径 == trade_history 今日笔数 (自洽)
-    #    raw 文件 simulated_trades 只计最后一次 run 内的成交, 与全日成交不同属正常(早盘成交/晚盘未成交)
-    today_count = sum(v["today"] for v in th_by_strat.values())
-    add(
-        "今日成交计数一致",
-        True,
-        f"header显示(=trade_history今日)={today_count}笔; 注: raw字段simulated_trades={ts.get('simulated_trades')}仅计最近一次run",
-    )
-
-    # 6. 周频计数: per-strategy 本周笔数 (与 L6 同口径)
-    week_counts = {s: th_by_strat[s]["week"] for s in strategies if th_by_strat[s]["week"] > 0}
-    add(
-        "周频计数可复算",
-        len(week_counts) >= 0,
-        "L6=" + json.dumps(week_counts, ensure_ascii=False) + f" (口径: trade_history {monday}以来)",
-    )
-
+    # 5-6 已移除 (2026-08-31, IA-P2): 原"今日成交计数一致""周频计数可复算"为恒 True 占位,
+    #    并非真校验, 却虚增绿勾通过项数 — 移除避免"数据一致✓"给未经校验的字段背书。
     # 7. trade_log 与 trade_history 总笔数一致
     tl_trades = len(tl.get("trades", []))
     add(
