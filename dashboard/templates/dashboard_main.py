@@ -1917,10 +1917,13 @@ async function runV3Backtest() {
     const elapsed = Math.round((Date.now() - t0) / 1000);
     loadV3Reports();
     if (strategy === 'all') {
-      alert(`✅ 三策略对比完成 (${elapsed}s)\n${(d.metrics||[]).map(r => `${r.strategy}: Sharpe ${r.sharpe} | CAGR ${r.cagr}% | MDD ${r.max_drawdown}%`).join('\n')}\n\n打开对比报告: ${location.origin}${d.report_url}`);
+      const NL = String.fromCharCode(10);
+      const lines = (d.metrics||[]).map(r => r.strategy + ': Sharpe ' + r.sharpe + ' | CAGR ' + r.cagr + '% | MDD ' + r.max_drawdown + '%');
+      alert('✅ 三策略对比完成 (' + elapsed + 's)' + NL + lines.join(NL) + NL + NL + '打开对比报告: ' + location.origin + d.report_url);
     } else {
       const mt = d.metrics || {};
-      alert(`✅ v3 回测完成 (${elapsed}s)\n策略: ${V3_LABELS[strategy] || strategy} · 引擎: ${engine}\nSharpe ${mt.sharpe} | CAGR ${mt.cagr}% | MDD ${mt.max_drawdown}% | 波动 ${mt.volatility}%\n${mt.n_days}天 · ${d.trades_count || 0}笔交易\n\n打开完整报告: ${location.origin}${d.report_url}`);
+      const NL = String.fromCharCode(10);
+      alert('✅ v3 回测完成 (' + elapsed + 's) | 策略: ' + (V3_LABELS[strategy] || strategy) + ' | 引擎: ' + engine + NL + 'Sharpe ' + mt.sharpe + ' | CAGR ' + mt.cagr + '% | MDD ' + mt.max_drawdown + '% | 波动 ' + mt.volatility + '%' + NL + mt.n_days + '天 | ' + (d.trades_count || 0) + '笔交易' + NL + NL + '打开完整报告: ' + location.origin + d.report_url);
     }
     window.open(d.report_url, '_blank');
   } catch (e) {
