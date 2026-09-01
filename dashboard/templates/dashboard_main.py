@@ -124,6 +124,7 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <h1>面基 · 三源融合模拟盘</h1>
   <div class="subtitle" id="runInfo">加载中...</div>
+  <div id="today-summary" class="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-2.5 mt-2 text-sm"></div>
   <div id="consistency-bar" class="text-xs mt-1"></div>
 
   <!-- ======== 模拟盘 V2 ======== -->
@@ -808,6 +809,14 @@ async function loadDashboardV2() {
 
     document.getElementById('runInfo').textContent = 
       `${detailRes.date} | ${detailRes.generated_at} | 模拟交易 ${detailRes.simulated_trades} 笔`;
+
+    // 今日结论条 (信息架构: 结论先行 — 一句话看清今日状态)
+    const stratSummary = Object.entries(detailRes.portfolios || {}).map(([s, p]) => {
+      const r = p.total_return || 0;
+      return `${p.label} <span class="${r >= 0 ? 'text-green-400' : 'text-red-400'} font-mono">${r >= 0 ? '+' : ''}${r.toFixed(2)}%</span>`;
+    }).join(' · ');
+    document.getElementById('today-summary').innerHTML =
+      `今日: 模拟交易 <b>${detailRes.simulated_trades}</b> 笔 · ${stratSummary} · 信号 ${detailRes.total_raw_signals}→${detailRes.after_conflict_resolution}→${detailRes.after_weekly_filter}`;
 
     // Overview
     const stratColors = { 'faceji': 'border-blue-500', 'silverquant': 'border-green-500', 'tradingagents': 'border-purple-500' };
