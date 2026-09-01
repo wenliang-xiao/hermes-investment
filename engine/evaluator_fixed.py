@@ -168,10 +168,18 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
         from data.data_router import get_history
         result = get_history(symbol, days=days)
         if result and result.get("close"):
+            n = len(result["close"])
+
+            def _col(v):
+                return v if (v and len(v) == n) else [None] * n
+
             df = pd.DataFrame({
                 "close": result["close"],
-                "open": result.get("open", result["close"]),
-                "date": result.get("dates", list(range(len(result["close"])))),
+                "open": _col(result.get("open", result["close"])),
+                "volume": _col(result.get("volume")),
+                "amount": _col(result.get("amount")),
+                "pe": _col(result.get("pe")),
+                "date": result.get("dates", list(range(n))),
             })
             df = df.dropna(subset=["close"]).sort_values("date")
             if len(df) >= 60:
@@ -227,6 +235,31 @@ def load_price_history_open(symbol: str, days: int = FIXED_DAYS) -> list[float] 
         except Exception:
             return None
     return None
+
+
+def load_price_history_full(symbol: str, days: int = FIXED_DAYS) -> dict | None:
+    """返回完整字段 dict(close/open/volume/amount/pe/dates), 供时点评分注入。
+
+    与 load_price_history 同缓存源; 缺字段时该键为空列表。
+    """
+    import pandas as pd
+
+    cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
+    if not cache_file.exists():
+        load_price_history(symbol, days)
+    if not cache_file.exists():
+        return None
+    try:
+        df = pd.read_pickle(cache_file)
+    except Exception:
+        return None
+    out = {"close": df["close"].tolist()}
+    for col in ("open", "volume", "amount", "pe", "date"):
+        if col in df.columns:
+            out[col] = df[col].tolist()
+        else:
+            out[col] = []
+    return out
 
 
 def preload_all_data(days: int = FIXED_DAYS, custom_symbols: list[str] | None = None) -> dict[str, list[float]]:
@@ -438,9 +471,10 @@ def run_backtest(
     _symbols = list(price_data.keys())
     _rescore_every = 5
     _last_rescore = -10**9
+    _full_data: dict = {}  # 惰性加载完整字段(close/open/volume/amount/pe/dates), 供时点评分注入
 
     def _rescore(day_idx: int):
-        nonlocal score_map, _last_rescore
+        nonlocal score_map, _last_rescore, _full_data
         as_of = date_list[day_idx] if day_idx < len(date_list) else date_list[-1]
         injected = {}
         for sym in _symbols:
@@ -449,9 +483,24 @@ def run_backtest(
             n = min(day_idx + 1, len(closes))
             if n <= 0:
                 continue
+            if sym not in _full_data:
+                try:
+                    _full_data[sym] = load_price_history_full(sym, days=FIXED_DAYS) or {}
+                except Exception:
+                    _full_data[sym] = {}
+            fd = _full_data.get(sym, {})
+
+            def _tail(seq):
+                seq = seq or []
+                return list(seq[:n]) if len(seq) >= n else list(seq)
+
             injected[sym] = {
                 "close": list(closes[:n]),
-                "dates": list(dts[:n]) if dts else [str(i) for i in range(n)],
+                "dates": _tail(fd.get("dates")) or _tail(dts) or [str(i) for i in range(n)],
+                "open": _tail(fd.get("open")),
+                "volume": _tail(fd.get("volume")),
+                "amount": _tail(fd.get("amount")),
+                "pe": _tail(fd.get("pe")),
             }
         try:
             from engine.factor_engine import FactorEngine, convert_v4_to_v3
