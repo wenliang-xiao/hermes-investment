@@ -130,7 +130,7 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     </div>
     <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2">
       <div class="flex justify-between items-center">
-        <span class="font-semibold text-gray-300">🎯 选股</span>
+        <span class="font-semibold text-gray-300">🎯 选股·找票</span>
         <span id="l3-status" class="badge">-</span>
       </div>
       <div id="l3-content" class="text-gray-400 mt-1"></div>
@@ -845,8 +845,9 @@ async function loadDashboardV2() {
     }
     _v2Detail = detailRes;
 
+    const genTime = (detailRes.generated_at || '').split(' ').slice(1).join(' ');
     document.getElementById('runInfo').textContent = 
-      `${detailRes.date} | ${detailRes.generated_at} | 模拟交易 ${detailRes.simulated_trades} 笔`;
+      `${detailRes.date} | ${genTime} | 模拟交易 ${detailRes.simulated_trades} 笔`;
 
     // 今日结论条 (信息架构: 结论先行 — 一句话看清今日状态)
     const stratSummary = Object.entries(detailRes.portfolios || {}).map(([s, p]) => {
@@ -1266,8 +1267,15 @@ async function loadExecutionBoard() {
           const er = { none: '无事件风险', moderate: '事件风险:控制仓位', high: '事件风险:建议降仓', extreme: '事件风险:建议清仓' };
           riskText = er[window._erLevel] || '';
         }
+        const erPriority = { none: 0, moderate: 1, high: 2, extreme: 3 }[window._erLevel] || 0;
         const parts = [];
-        if (counts.buy || counts.sell) {
+        if (erPriority >= 2) {
+          // 事件风险高/极端: 风险优先, 压制买入建议(消除"建议买入"与"建议降仓"语义矛盾)
+          parts.push(`<b class="text-orange-400">${riskText}</b>`);
+          if (counts.buy || counts.sell) {
+            parts.push(`<span class="text-gray-400">(原建议买入 ${counts.buy} 只/卖出 ${counts.sell} 只已压制)</span>`);
+          }
+        } else if (counts.buy || counts.sell) {
           parts.push(`今日建议<b class="text-green-400">买入 ${counts.buy} 只</b>`);
           parts.push(`<b class="text-red-400">卖出 ${counts.sell} 只</b>`);
         } else if (counts.hold) {
@@ -1275,11 +1283,13 @@ async function loadExecutionBoard() {
         } else {
           parts.push('今日<b>无待处理信号</b>');
         }
+        if (erPriority === 1) {
+          parts.push(`<b class="text-yellow-400">${riskText}</b>`);
+        }
         if (overall !== null) {
           const cls = overall >= 0 ? 'text-green-400' : 'text-red-400';
           parts.push(`组合平均收益 <b class="${cls}">${overall >= 0 ? '+' : ''}${overall.toFixed(2)}%</b>`);
         }
-        if (riskText) parts.push(riskText);
         if (counts.excluded) parts.push(`<b class="text-gray-400">${counts.excluded} 只禁反手</b>`);
         txt.innerHTML = '📌 ' + parts.join(' · ');
         banner.classList.remove('hidden');

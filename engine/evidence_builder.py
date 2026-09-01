@@ -334,6 +334,7 @@ class EvidenceBuilder:
                         rf = {"quality": "质量", "value": "价值", "momentum": "动量",
                               "growth": "成长", "low_vol": "低波", "dividend": "股息",
                               "sentiment": "情绪", "risk": "风险"}.get(name, name)
+                        val = 0.0 if abs(val) < 0.005 else val
                         lines.append(f"{rf}={val:.2f}")
         # 从双门提取
         for step in chain:
@@ -357,6 +358,7 @@ class EvidenceBuilder:
                         rf = {"quality": "质量", "value": "价值", "momentum": "动量",
                               "growth": "成长", "low_vol": "低波", "dividend": "股息",
                               "sentiment": "情绪", "risk": "风险"}.get(name, name)
+                        val = 0.0 if abs(val) < 0.005 else val
                         lines.append(f"{rf}={val:.2f}")
         return lines[:3]
 
