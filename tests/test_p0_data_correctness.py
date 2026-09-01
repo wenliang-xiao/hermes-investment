@@ -172,3 +172,53 @@ class TestEvidenceFactorCoherence:
         # 应把 factor_scores 传进 score_data (P0-8: 证据链与因子分自洽)
         assert captured["score_data"] is not None, "必须传 score_data"
         assert captured["score_data"].get("factor_scores") == {"quality": 0.9, "momentum": 1.0}
+
+
+class TestMergeHeldSymbols:
+    """P1 (2026-09-01): 持仓标的并入扫描池, 保证持仓因子数据不缺失"""
+
+    def test_held_ashare_symbols_merged(self):
+        from dashboard.shared import merge_held_symbols
+        stocks = [{"symbol": "600900", "name": "长江电力", "tier": "核心"}]
+        states = {
+            "faceji": {"positions": {"300458": {"quantity": 100}, "600900": {"quantity": 200}}},
+            "silverquant": {"positions": {"0700.HK": {"quantity": 100}, "NVDA": {"quantity": 10}}},
+        }
+        merged = merge_held_symbols(stocks, states)
+        syms = [s["symbol"] for s in merged]
+        assert "300458" in syms, "A 股持仓标的应并入扫描池"
+        assert syms.count("600900") == 1, "核心池已有的标的不应重复"
+        assert "0700.HK" not in syms, "港股持仓不应并入(非 A 股)"
+        assert "NVDA" not in syms, "美股持仓不应并入(非 A 股)"
+
+
+class TestNetvalueEmptyStrategy:
+    """P2 (2026-09-01): 0 笔交易策略(如 TradingAgents)不应从净值曲线消失, 应输出平直基准线"""
+
+    def test_empty_strategy_outputs_flat_line(self, monkeypatch, tmp_path):
+        import dashboard.api_portfolio as ap
+        data = {
+            "date": "2026-08-31",
+            "portfolios": {
+                "faceji": {"label": "面基", "capital": 1000000.0, "total_value": 950000.0, "total_return": -5.0},
+                "tradingagents": {"label": "TradingAgents", "capital": 1000000.0, "total_value": 1000000.0, "total_return": 0.0},
+            },
+            "positions": {},
+            "trade_history": {
+                "faceji": [
+                    {"date": "2026-08-13", "symbol": "600519", "action": "买入", "price": 1500.0, "quantity": 100},
+                    {"date": "2026-08-20", "symbol": "600519", "action": "卖出", "price": 1550.0, "quantity": 100, "pnl": 5000.0},
+                ],
+                "tradingagents": [],
+            },
+        }
+        (tmp_path / "data").mkdir(exist_ok=True)
+        (tmp_path / "data" / "trading_signals.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(ap, "ROOT", tmp_path)
+        r = ap.api_v2_portfolio_netvalue()
+        assert "error" not in r, f"error: {r.get('error')}"
+        names = [s["name"] for s in r["series"]]
+        assert "tradingagents" in names, f"0 笔交易策略不应从净值曲线消失, got {names}"
+        ta = [s for s in r["series"] if s["name"] == "tradingagents"][0]
+        assert len(ta["values"]) >= 1
+        assert all(v == 1000000.0 for v in ta["values"]), f"平直线应为 100 万, got {ta['values']}"

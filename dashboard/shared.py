@@ -316,3 +316,20 @@ def _aggregate_strategy_portfolios():
         "created_at": "2026-06-24",
         "realized_pnl": round(realized, 2),
     }
+
+
+def merge_held_symbols(stocks, states):
+    """把持仓中的 A 股标的并入扫描池(去重), 保证持仓因子数据不缺失。
+
+    run_trading 的扫描池 = 核心观察池 + 当前持仓标的; 否则持仓标的不在
+    scan_snapshot_latest.json 里, dashboard 持仓弹窗永远"无因子数据"。
+    """
+    existing = {s["symbol"] for s in stocks}
+    merged = list(stocks)
+    for sdata in states.values():
+        for sym in sdata.get("positions", {}).keys():
+            sym = str(sym)
+            if sym not in existing and sym.isdigit() and sym.startswith(("0", "3", "6")):
+                merged.append({"symbol": sym, "name": sym, "tier": "持仓"})
+                existing.add(sym)
+    return merged

@@ -23,6 +23,7 @@ from data.data_layer import get_stock_daily
 from engine.factor_engine import FactorEngine
 from engine.factor_engine import score_to_signal, convert_v4_to_v3
 from analysis.trading_engine import TradingEngine
+from dashboard.shared import merge_held_symbols
 from config import FACTOR_WEIGHTS
 from domain import WATCHLIST
 from utils.atomic_io import atomic_write_json
@@ -202,6 +203,14 @@ def run():
     # 1. 获取观察池
     print("\n📋 Step 1: 获取核心观察池...", flush=True)
     stocks = get_core_watchlist()
+    try:
+        _st_path = os.path.join(_PROJECT_DIR, "data", "strategy_states.json")
+        if os.path.exists(_st_path):
+            with open(_st_path) as _f:
+                _states = json.load(_f)
+            stocks = merge_held_symbols(stocks, _states)
+    except Exception:
+        pass
     print(f"   {len(stocks)}只标的", flush=True)
 
     # 2. FactorEngine 批量评分

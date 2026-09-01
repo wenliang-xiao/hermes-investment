@@ -122,3 +122,56 @@ class TestSortinoNoFallback:
         assert not isinstance(r, dict)
         # sortino 可以是 None 或数值, 但绝不能等于 score 7.0 这种 fallback 痕迹
         assert r.sortino_ratio != 7.0
+
+
+class TestPointInTimeScoring:
+    """P0-1 (2026-09-01): use_point_in_time=True 时时点评分重算, False 时固定评分"""
+
+    def _make_inputs(self):
+        closes = [10.0 + i * 0.1 for i in range(70)]
+        price_data = {"600519": {"close": closes, "open": [c + 0.1 for c in closes]}}
+        dates = pd.bdate_range("2026-01-01", periods=70).strftime("%Y-%m-%d").tolist()
+        return price_data, {"600519": dates}
+
+    def test_point_in_time_calls_score_batch(self, monkeypatch):
+        from engine import evaluator_fixed as ev
+        import engine.factor_engine as fe
+        calls = {"n": 0}
+
+        class FakeEngine:
+            def score_batch(self, symbols, macro_state="扩张期", ic_samples=0,
+                            as_of_date=None, price_series=None):
+                calls["n"] += 1
+                return [{"symbol": s, "composite": 0.5, "scores": {}} for s in symbols]
+
+        monkeypatch.setattr(fe, "FactorEngine", FakeEngine)
+        price_data, dates_map = self._make_inputs()
+
+        def decide(score_map, tech_map, price_map, positions, cash):
+            return []
+
+        r = ev.run_backtest(price_data, decide, "faceji", dates_map=dates_map,
+                            use_t1=False, use_point_in_time=True)
+        assert not isinstance(r, dict)
+        assert calls["n"] > 0, "时点评分模式应调用 score_batch 重算评分"
+
+    def test_fixed_scoring_skips_score_batch(self, monkeypatch):
+        from engine import evaluator_fixed as ev
+        import engine.factor_engine as fe
+        calls = {"n": 0}
+
+        class FakeEngine:
+            def score_batch(self, **kw):
+                calls["n"] += 1
+                return []
+
+        monkeypatch.setattr(fe, "FactorEngine", FakeEngine)
+        price_data, dates_map = self._make_inputs()
+
+        def decide(score_map, tech_map, price_map, positions, cash):
+            return []
+
+        r = ev.run_backtest(price_data, decide, "faceji", dates_map=dates_map,
+                            use_t1=False, use_point_in_time=False)
+        assert not isinstance(r, dict)
+        assert calls["n"] == 0, "固定评分模式(默认)不应调用 score_batch"

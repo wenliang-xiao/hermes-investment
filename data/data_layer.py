@@ -27,6 +27,7 @@ try:
 except ImportError:
     import config as config
 from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
+from domain.financial_calendar import financial_report_available_date
 
 logger = logging.getLogger(__name__)
 
@@ -437,10 +438,15 @@ def get_financial_report(symbol: str) -> dict:
     return result
 
 
-def get_financial_history(symbol: str, quarters: int = 8) -> list:
-    """获取多季度财务历史：ROE趋势 + FCF。
+def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None = None) -> list:
+    """获取多季度财务历史：ROE/毛利率/净利率/资产负债率/净利增速 + FCF。
     直走 baostock（EM 只返回最新一期，无历史序列）。
-    返回按时间倒序的季度列表 [{year, quarter, period, roe, ocf, fcf}]"""
+    返回按时间倒序的季度列表 [{year, quarter, period, roe, gross_margin,
+    net_margin, debt_ratio, profit_growth, ocf, fcf}]
+
+    as_of_date: point-in-time 过滤 — 只返回「披露截止日 <= as_of_date」的财报,
+    消除用未来财报回测过去的前视偏差。None = 返回全部(实盘评分用当前全部)。
+    """
     key = f"FH_{symbol}_{quarters}"
     if key in _FIN_CACHE:
         return _FIN_CACHE[key]
@@ -449,61 +455,104 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
     history = []
     current_year = datetime.now().year
 
+    def _field(rs, name):
+        for r in _bs_iter_results(rs, timeout=15):
+            try:
+                v = dict(zip(rs.fields, r)).get(name)
+                if v and str(v).strip():
+                    return float(v)
+            except Exception:
+                continue
+        return None
+
     for year_off in range(0, 3):
         year = current_year - year_off
         for quarter in [4, 3, 2, 1]:
             if len(history) >= quarters:
                 break
             try:
-                roe_val = None
+                entry = {
+                    "year": year, "quarter": quarter, "period": f"{year}Q{quarter}",
+                    "roe": None, "gross_margin": None, "net_margin": None,
+                    "debt_ratio": None, "profit_growth": None,
+                    "ocf": None, "fcf": None,
+                }
+
                 rs_d = _bs_query_with_timeout(bs.query_dupont_data, code=bs_code, year=year, quarter=quarter)
                 if rs_d.error_code == "0":
-                    dupont_rows = _bs_iter_results(rs_d, timeout=15)
-                    for r in dupont_rows:
-                        try:
-                            roe_raw = r[5] if len(r) > 5 else ""
-                            if roe_raw and str(roe_raw).strip():
-                                roe_val = float(roe_raw) * 100
-                        except Exception:
-                            pass
+                    roe = _field(rs_d, "dupontROE")
+                    if roe is not None:
+                        entry["roe"] = round(roe * 100, 2)
+
+                rs_p = _bs_query_with_timeout(bs.query_profit_data, code=bs_code, year=year, quarter=quarter)
+                if rs_p.error_code == "0":
+                    gm = _field(rs_p, "gpMargin")
+                    nm = _field(rs_p, "npMargin")
+                    if gm is not None:
+                        entry["gross_margin"] = round(gm * 100, 2)
+                    if nm is not None:
+                        entry["net_margin"] = round(nm * 100, 2)
+
+                rs_b = _bs_query_with_timeout(bs.query_balance_data, code=bs_code, year=year, quarter=quarter)
+                if rs_b.error_code == "0":
+                    dr = _field(rs_b, "liabilityToAsset")
+                    if dr is not None:
+                        entry["debt_ratio"] = round(dr * 100, 2)
+
+                rs_g = _bs_query_with_timeout(bs.query_growth_data, code=bs_code, year=year, quarter=quarter)
+                if rs_g.error_code == "0":
+                    pg = _field(rs_g, "YOYNI")
+                    if pg is not None:
+                        entry["profit_growth"] = round(pg * 100, 2)
 
                 ocf = capex = None
                 rs_cf = _bs_query_with_timeout(bs.query_cash_flow_data, code=bs_code, year=year, quarter=quarter)
                 if rs_cf.error_code == "0":
-                    fields = rs_cf.fields
-                    cf_rows = _bs_iter_results(rs_cf, timeout=15)
-                    for r in cf_rows:
-                        try:
-                            row = dict(zip(fields, r))
-                            ocf_raw = row.get("netCashFlowsFromOperatingActivities") or \
-                                      row.get("netCashFlowsOperating", "")
-                            inv_raw = row.get("cashFlowsFromInvestingActivities", "")
-                            if ocf_raw and str(ocf_raw).strip():
-                                ocf = float(ocf_raw)
-                            if inv_raw and str(inv_raw).strip():
-                                capex = float(inv_raw)
-                        except Exception:
-                            pass
-
-                fcf = None
+                    ocf = _field(rs_cf, "netCashFlowsFromOperatingActivities") or \
+                          _field(rs_cf, "netCashFlowsOperating")
+                    capex = _field(rs_cf, "cashFlowsFromInvestingActivities")
+                if ocf is not None:
+                    entry["ocf"] = round(ocf / 1e8, 2)
                 if ocf is not None and capex is not None:
-                    fcf = round(ocf + capex, 2)
+                    entry["fcf"] = round((ocf + capex) / 1e8, 2)
 
-                if roe_val is not None or fcf is not None:
-                    history.append({
-                        "year": year, "quarter": quarter,
-                        "period": f"{year}Q{quarter}",
-                        "roe": round(roe_val, 2) if roe_val is not None else None,
-                        "ocf": round(ocf / 1e8, 2) if ocf is not None else None,
-                        "fcf": round(fcf / 1e8, 2) if fcf is not None else None,
-                    })
+                if any(v is not None for v in (entry["roe"], entry["gross_margin"],
+                                               entry["net_margin"], entry["ocf"], entry["fcf"])):
+                    history.append(entry)
             except Exception:
                 continue
         if len(history) >= quarters:
             break
 
     _FIN_CACHE[key] = history
+    if as_of_date is not None:
+        history = [h for h in history
+                   if financial_report_available_date(h["period"]) <= as_of_date]
     return history
+
+
+def get_delisted_stocks() -> list[dict]:
+    """A股历史退市股名单(baostock), 回测股票池补池消除幸存者偏差的数据基础。
+
+    返回 [{code, name, out_date}] 按退市日升序。status=0 退市 + type=1 股票。
+    """
+    _bs_login()
+    try:
+        rs = bs.query_stock_basic()
+    except Exception:
+        return []
+    result = []
+    while rs.error_code == "0" and rs.next():
+        row = rs.get_row_data()
+        d = dict(zip(rs.fields, row))
+        if d.get("status") == "0" and d.get("type") == "1":
+            result.append({
+                "code": d.get("code", ""),
+                "name": d.get("code_name", ""),
+                "out_date": d.get("outDate", ""),
+            })
+    result.sort(key=lambda x: x.get("out_date", ""))
+    return result
 
 
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:

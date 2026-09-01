@@ -430,6 +430,7 @@ class ICWeightSystem:
 
     def __init__(self, cache_dir: str = "data/ic_cache"):
         self.cache_dir = cache_dir
+        self.as_of: str | None = None  # point-in-time: 只读 date <= as_of 的 IC(消除 IC 权重前视)
         os.makedirs(cache_dir, exist_ok=True)
 
     def get_ic_history(self) -> list[dict]:
@@ -482,6 +483,8 @@ class ICWeightSystem:
             pass
 
         seq.sort(key=lambda s: str(s.get("date", "")))
+        if self.as_of is not None:
+            seq = [s for s in seq if str(s.get("date", "")) <= self.as_of]
         return seq
 
     def save_ic_snapshot(self, snapshot: dict):
@@ -689,6 +692,8 @@ class FactorEngine:
         self._price_cache: dict[str, dict] = {}
         self._fin_cache: dict[str, dict] = {}
         self._fin_hist_cache: dict[str, list] = {}
+        self.as_of: str | None = None  # point-in-time 评分时点 (None=实盘用当前数据)
+        self._injected_hist: dict | None = None  # 注入的价格时序(回测 point-in-time 用)
         # 并发安全 (2026-08-18): score_batch 线程池并发采集 → 缓存双检锁
         self._cache_lock = threading.RLock()
 
@@ -705,7 +710,18 @@ class FactorEngine:
             return None
 
     def _get_hist(self, symbol: str, days: int = 250) -> dict:
-        """获取历史行情（带缓存）"""
+        """获取历史行情（带缓存；注入模式下从外部时序数据读, 支持 point-in-time）"""
+        injected = getattr(self, "_injected_hist", None)
+        if injected and symbol in injected:
+            data = injected[symbol]
+            if not isinstance(data, dict):
+                seq = list(data)
+                return {"close": seq[-days:] if days else seq}
+
+            def _tail(v):
+                return v[-days:] if days and isinstance(v, list) and len(v) > days else v
+
+            return {k: _tail(v) if isinstance(v, list) else v for k, v in data.items()}
         cache_key = f"{symbol}_{days}"
         with self._cache_lock:  # 双检锁
             if cache_key in self._price_cache:
@@ -736,15 +752,17 @@ class FactorEngine:
             return {}
 
     def _get_fin_hist(self, symbol: str) -> list:
-        """获取财务历史（带缓存）"""
+        """获取财务历史（带缓存，as_of 时 point-in-time 过滤）"""
+        as_of = getattr(self, "as_of", None)
+        cache_key = f"{symbol}@{as_of}" if as_of else symbol
         with self._cache_lock:  # 双检锁
-            if symbol in self._fin_hist_cache:
-                return self._fin_hist_cache[symbol]
+            if cache_key in self._fin_hist_cache:
+                return self._fin_hist_cache[cache_key]
         from data.data_layer import get_financial_history
         try:
-            fh = get_financial_history(symbol, quarters=4) or []
+            fh = get_financial_history(symbol, quarters=4, as_of_date=as_of) or []
             with self._cache_lock:
-                self._fin_hist_cache[symbol] = fh
+                self._fin_hist_cache[cache_key] = fh
             return fh
         except Exception:
             return []
@@ -1154,7 +1172,8 @@ class FactorEngine:
     # ── 批量评分（带截面标准化） ──
 
     def score_batch(self, symbols: list[str], macro_state: str = "扩张期",
-                    ic_samples: int = 0) -> list[dict[str, Any]]:
+                    ic_samples: int = 0, as_of_date: str | None = None,
+                    price_series: dict | None = None) -> list[dict[str, Any]]:
         """
         批量评分 — 这是主要入口。
         与单标评分不同：批量评分做了**产业链内截面百分位标准化（行业中性化）**。
@@ -1165,11 +1184,36 @@ class FactorEngine:
           3. 聚合风格因子分 (Layer 1)
           4. IC加权综合分
 
+        as_of_date: point-in-time 时点 — 财务历史按「披露截止日 <= as_of」过滤,
+        消除用未来财报回测过去的前视。None = 实盘评分(用当前全部数据)。
+
+        price_series: 注入的价格时序 {symbol: {"close": [...], "dates": [...]}},
+        回测时传入已切到 as_of 的切片, 避免评分层自拉数据(绕开 720h 缓存前视与
+        窗口右端恒为今天的隐形前视)。None = 实盘评分(自拉当前数据)。
+
         Returns:
             [result1, result2, ...] 按 composite 降序
         """
         n = len(symbols)
-        logger.info(f"[factor_engine] batch scoring {n} symbols, macro={macro_state}")
+        old_as_of = self.as_of
+        old_injected = self._injected_hist
+        old_ic_asof = getattr(self.ic, "as_of", None)
+        self.as_of = as_of_date
+        self._injected_hist = price_series
+        if self.ic is not None:
+            self.ic.as_of = as_of_date
+        try:
+            return self._score_batch_inner(symbols, macro_state, ic_samples)
+        finally:
+            self.as_of = old_as_of
+            self._injected_hist = old_injected
+            if self.ic is not None:
+                self.ic.as_of = old_ic_asof
+
+    def _score_batch_inner(self, symbols: list[str], macro_state: str = "扩张期",
+                           ic_samples: int = 0) -> list[dict[str, Any]]:
+        n = len(symbols)
+        logger.info(f"[factor_engine] batch scoring {n} symbols, macro={macro_state}, as_of={self.as_of}")
 
         # Phase 1: 采集所有子因子原始值
         raw_values: dict[str, dict[str, float | None]] = {}  # {sub_key: {symbol: raw}}
