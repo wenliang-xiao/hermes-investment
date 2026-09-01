@@ -174,6 +174,24 @@ class TestEvidenceFactorCoherence:
         assert captured["score_data"].get("factor_scores") == {"quality": 0.9, "momentum": 1.0}
 
 
+class TestMergeHeldSymbols:
+    """P1 (2026-09-01): 持仓标的并入扫描池, 保证持仓因子数据不缺失"""
+
+    def test_held_ashare_symbols_merged(self):
+        from dashboard.shared import merge_held_symbols
+        stocks = [{"symbol": "600900", "name": "长江电力", "tier": "核心"}]
+        states = {
+            "faceji": {"positions": {"300458": {"quantity": 100}, "600900": {"quantity": 200}}},
+            "silverquant": {"positions": {"0700.HK": {"quantity": 100}, "NVDA": {"quantity": 10}}},
+        }
+        merged = merge_held_symbols(stocks, states)
+        syms = [s["symbol"] for s in merged]
+        assert "300458" in syms, "A 股持仓标的应并入扫描池"
+        assert syms.count("600900") == 1, "核心池已有的标的不应重复"
+        assert "0700.HK" not in syms, "港股持仓不应并入(非 A 股)"
+        assert "NVDA" not in syms, "美股持仓不应并入(非 A 股)"
+
+
 class TestNetvalueEmptyStrategy:
     """P2 (2026-09-01): 0 笔交易策略(如 TradingAgents)不应从净值曲线消失, 应输出平直基准线"""
 
