@@ -1066,7 +1066,8 @@ def save_to_run_log(strategy: str, result):
 def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
                        cycles: int = 3, train_days: int = 252, test_days: int = 63,
                        custom_symbols: list[str] | None = None,
-                       days: int | None = None) -> BacktestResult | dict:
+                       days: int | None = None,
+                       use_point_in_time: bool = False) -> BacktestResult | dict:
     """评估单个策略
 
     Args:
@@ -1077,6 +1078,7 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         test_days: WF 测试窗口天数
         custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
         days: 回测交易日窗口（None=默认 FIXED_DAYS，WF 模式自动 ≥ train+test*cycles+100）
+        use_point_in_time: 时点评分模式 (True=每5日 rescore 消除前视, 慢~10x)
     """
     if walk_forward:
         data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100)
@@ -1114,7 +1116,8 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
     else:
         print(f"🏃 运行回测: {strategy_name} ({data_days}天窗口)")
         dates_map = load_dates_map(days=data_days, custom_symbols=custom_symbols)
-        return run_backtest(price_data, decide_fn, strategy_name, dates_map=dates_map)
+        return run_backtest(price_data, decide_fn, strategy_name, dates_map=dates_map,
+                            use_point_in_time=use_point_in_time)
 
 
 def main():
@@ -1129,6 +1132,8 @@ def main():
     parser.add_argument("--train-days", type=int, default=252, help="WF 训练窗口天数 (默认252)")
     parser.add_argument("--test-days", type=int, default=63, help="WF 测试窗口天数 (默认63)")
     parser.add_argument("--with-dsr", action="store_true", help="DSR 统计检验")
+    parser.add_argument("--point-in-time", action="store_true",
+                        help="时点评分模式 (True=每5日 rescore 消除前视, 慢~10x)")
 
     args = parser.parse_args()
 
@@ -1149,6 +1154,7 @@ def main():
             cycles=args.cycles,
             train_days=args.train_days,
             test_days=args.test_days,
+            use_point_in_time=args.point_in_time,
         )
         results[strat_name] = result
 
@@ -1179,6 +1185,7 @@ def main():
             print(f"  胜率           : {result.win_rate_pct:.1f}% ({result.trade_count}笔)")
             print(f"  组合终值       : ¥{result.final_value:,.0f}")
             print(f"  标的数         : {result.extra.get('stocks_with_data', 0)}")
+            print(f"  评分模式       : {result.scoring_mode}")
         else:
             print(f"  SCORE (Sortino) : {result['score']}")
             print(f"  总收益         : {result['total_return_pct']:+.2f}%")

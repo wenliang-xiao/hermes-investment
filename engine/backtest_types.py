@@ -61,7 +61,14 @@ class BacktestResult:
         # 清理 None 基准
         if result.get("benchmark") is None:
             result["benchmark"] = []
+        # 评分模式从 extra 提升到顶层 (API/前端直接可读)
+        result["scoring_mode"] = self.scoring_mode
         return result
+
+    @property
+    def scoring_mode(self) -> str:
+        """评分模式: point_in_time / fixed_score (从 extra 映射, 直接可读)"""
+        return self.extra.get("scoring_mode", "fixed_score")
 
     @classmethod
     def from_evaluator_dict(
