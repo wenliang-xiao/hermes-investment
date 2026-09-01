@@ -361,6 +361,16 @@ def compute_technicals(
     else:
         te["rsi"] = 50.0
 
+    # ATR (14日平均真实波幅, 基于 close 简化: TR=|close-prev_close|; 无 high/low 源)
+    if n >= 15:
+        trs = [abs(close_arr[i] - close_arr[i - 1]) for i in range(1, 15)]
+        atr = float(np.mean(trs))
+        te["atr"] = round(atr, 4)
+        te["atr_pct"] = round(atr / price * 100, 2) if price > 0 else 0.0
+    else:
+        te["atr"] = 0.0
+        te["atr_pct"] = 0.0
+
     # MACD
     if n >= 26:
         import pandas as pd

@@ -100,11 +100,14 @@ def decide(
             ))
             continue
 
-        # 2. 硬止损
-        if pnl_pct <= cfg.hard_stop_loss_pct:
+        # 2. 硬止损: ATR 自适应(高波动股更宽, 保底 -8%)
+        tech = tech_map.get(sym, {})
+        atr_pct = tech.get("atr_pct", 0) or 0
+        stop_pct = -max(abs(cfg.hard_stop_loss_pct), 2 * atr_pct)
+        if pnl_pct <= stop_pct:
             signals.append(Signal(
                 symbol=sym, action="SELL", price=price,
-                reason=f"止损{pnl_pct:.1f}%",
+                reason=f"止损{pnl_pct:.1f}%(ATR{atr_pct:.1f}%)",
                 priority="HIGH", pnl_pct=pnl_pct, score=round(ds, 1),
             ))
             continue
