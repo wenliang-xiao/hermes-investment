@@ -538,6 +538,29 @@ def api_v2_portfolio_netvalue():
             day_map[d] = round(capital + realized_pnl + (pos_mv - 0), 2)
 
         if not day_map:
+            # P2 (2026-09-01): 0 笔交易策略(如 TradingAgents)不整条消失, 输出平直基准线。
+            # 用其他策略的日期范围对齐(若有), 否则用生成日单点。
+            total_value = round(strat_data.get("total_value", capital), 2)
+            all_dates = sorted({
+                str(t.get("date", ""))
+                for hist in trade_history.values()
+                for t in hist if t.get("date")
+            })
+            if len(all_dates) >= 2:
+                labels = all_dates
+                values = [total_value] * len(all_dates)
+            else:
+                d = data.get("date") or datetime.now().strftime("%Y-%m-%d")
+                labels = [d]
+                values = [total_value]
+            series.append({
+                "label": strat_data.get("label", strat_name),
+                "name": strat_name,
+                "labels": labels,
+                "values": values,
+                "total_return": strat_data.get("total_return", 0),
+                "color": {"faceji": "#58a6ff", "silverquant": "#f0883e", "tradingagents": "#bc8cff"}.get(strat_name, "#7ee787"),
+            })
             continue
 
         # 末点校准: 用生成方 total_value (现金+当前持仓市值)

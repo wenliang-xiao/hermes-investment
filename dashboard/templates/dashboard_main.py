@@ -888,7 +888,7 @@ function renderNetValueChart(labels, series) {
     if (netValueChartInstance) netValueChartInstance.destroy();
     const colors = ['#58a6ff', '#3fb950', '#bc8cff', '#d29922', '#f85149'];
     const datasets = series.map((s, i) => ({
-        label: s.name, data: s.data, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length] + '20',
+        label: s.name, data: s.values, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length] + '20',
         borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.1
     }));
     netValueChartInstance = new Chart(ctx, {
