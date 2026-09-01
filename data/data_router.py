@@ -90,6 +90,10 @@ def _detect_source(symbol: str) -> str:
     if "=" in symbol:
         return "yfinance"
 
+    # 指数 (带交易所前缀, 如 sh.000300 沪深300 / sz.399006 创业板指)
+    if symbol.startswith(("sh.", "sz.")):
+        return "baostock"
+
     # A股 (6位数字，含ETF — baostock 统一获取 A股+ETF)
     if symbol.isdigit() and len(symbol) == 6:
         return "baostock"

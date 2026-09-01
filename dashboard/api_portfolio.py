@@ -475,6 +475,75 @@ def _build_position_evidence(sym, current, qty, entry, pnl, pos, strategy):
     return {"trail_stop": check.get("trail_stop", {}), "evidence_packet": packet.to_dict()}
 
 
+def _build_price_snapshot_map(trade_history_by_strat: dict, lookback_days: int = 250) -> dict:
+    """为净曲线构建 {symbol: {date: close}} 快照价映射 (供中间点 mark-to-market)。
+
+    P1 (2026-08-31): 旧实现中间点用 entry_price(成本价) 计算持仓市值 → 浮盈
+    不随市价变化(平台), 只有末点被 total_value 校准。修复: 逐日重建时用当日
+    快照价 (forward-fill 最近可得价)。
+
+    只拉 trade_history 出现过的 symbol (模拟盘持仓少, 快); 拉取失败返回空映射
+    → 调用方降级回 entry_price (不崩溃)。
+    """
+    symbols = sorted({
+        str(t.get("symbol", ""))
+        for hist in trade_history_by_strat.values()
+        for t in hist if t.get("symbol")
+    })
+    if not symbols:
+        return {}
+    # 行情窗口: 最早交易日前推 (覆盖首笔交易日), 取最近 lookback_days
+    all_dates = [str(t.get("date", "")) for hist in trade_history_by_strat.values()
+                 for t in hist if t.get("date")]
+    min_date = min(all_dates) if all_dates else None
+
+    snap: dict[str, dict[str, float]] = {}
+    for sym in symbols:
+        try:
+            from data.data_router import get_history
+            r = get_history(sym, days=lookback_days)
+            if not r or not r.get("dates") or not r.get("close"):
+                continue
+            dates = [str(d)[:10] for d in r["dates"]]
+            closes = [float(c) if c else None for c in r["close"]]
+            m: dict[str, float] = {}
+            for d, c in zip(dates, closes):
+                if c is not None and c > 0:
+                    m[d] = c
+            if min_date:
+                # 只保留覆盖窗口内的日期 (最早交易日前 ~5 天)
+                from datetime import datetime as _dt, timedelta as _td
+                try:
+                    cutoff = (_dt.strptime(min_date, "%Y-%m-%d") - _td(days=5)).strftime("%Y-%m-%d")
+                    m = {d: c for d, c in m.items() if d >= cutoff}
+                except ValueError:
+                    pass
+            if m:
+                snap[sym] = m
+        except Exception:
+            continue
+    return snap
+
+
+def _snapshot_price(snap: dict, sym: str, day: str) -> float | None:
+    """查询 sym 在 day 的快照价 (无当日价时向前找最近价 forward-fill)。"""
+    m = snap.get(sym)
+    if not m:
+        return None
+    if day in m:
+        return m[day]
+    # 向前找最近可得价 (工作日错位/停牌)
+    for i in range(1, 10):
+        from datetime import datetime as _dt, timedelta as _td
+        try:
+            prev = (_dt.strptime(day, "%Y-%m-%d") - _td(days=i)).strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+        if prev in m:
+            return m[prev]
+    return None
+
+
 @router.get("/api/v2/portfolio/netvalue")
 def api_v2_portfolio_netvalue():
     """净值曲线 — 每日 mark-to-market (P0-6 修复)
@@ -497,6 +566,9 @@ def api_v2_portfolio_netvalue():
     trade_history = data.get("trade_history", {})
     raw_positions = data.get("positions", {})
     capital_default = 1_000_000
+
+    # P1 (2026-08-31): 中间点 mark-to-market — 预构建快照价映射
+    snap = _build_price_snapshot_map(trade_history)
 
     series = []
     for strat_name, strat_data in portfolios.items():
@@ -530,11 +602,13 @@ def api_v2_portfolio_netvalue():
                     if holdings[sym]["qty"] <= 0:
                         del holdings[sym]
 
-            # 当日市值 = 现金 + Σ持仓市值 (当日快照价 = 成交价或最近价)
+            # 当日市值 = 现金 + Σ持仓市值 (当日快照价, 无行情时降级成本价)
             pos_mv = 0.0
             for sym, h in holdings.items():
                 if h["qty"] > 0:
-                    pos_mv += h["qty"] * (h["entry_price"] or price)
+                    snap_price = _snapshot_price(snap, sym, d)
+                    val_price = snap_price or h["entry_price"] or price
+                    pos_mv += h["qty"] * val_price
             day_map[d] = round(capital + realized_pnl + (pos_mv - 0), 2)
 
         if not day_map:
@@ -546,13 +620,13 @@ def api_v2_portfolio_netvalue():
                 for hist in trade_history.values()
                 for t in hist if t.get("date")
             })
+            # P2 (2026-08-31): 0笔策略归一化到 1.0 平线 — 与其他策略/基准同尺度
+            values = [1.0] * max(len(all_dates), 1)
             if len(all_dates) >= 2:
                 labels = all_dates
-                values = [total_value] * len(all_dates)
             else:
                 d = data.get("date") or datetime.now().strftime("%Y-%m-%d")
                 labels = [d]
-                values = [total_value]
             series.append({
                 "label": strat_data.get("label", strat_name),
                 "name": strat_name,
@@ -569,7 +643,12 @@ def api_v2_portfolio_netvalue():
         day_map[days_sorted[-1]] = round(total_value, 2)
 
         labels = days_sorted
-        values = [day_map[d] for d in labels]
+        # P2 (2026-08-31): 归一化到首日=1.0 — 与沪深300基准同尺度可叠加 (相对收益曲线)
+        base_val = day_map[labels[0]] if labels else None
+        if base_val and base_val > 0:
+            values = [round(day_map[d] / base_val, 4) for d in labels]
+        else:
+            values = [day_map[d] for d in labels]
 
         series.append({
             "label": strat_data.get("label", strat_name),
@@ -579,6 +658,52 @@ def api_v2_portfolio_netvalue():
             "total_return": strat_data.get("total_return", 0),
             "color": {"faceji": "#58a6ff", "silverquant": "#f0883e", "tradingagents": "#bc8cff"}.get(strat_name, "#7ee787"),
         })
+
+    # ── P2 (2026-08-31): 沪深300基准叠加 (归一化到首日=1.0, 与策略同尺度) ──
+    # 对齐 series[0].labels (Chart.js 所有 datasets 共享 x 轴 labels)
+    if series:
+        bm_labels = series[0].get("labels") or []
+        if len(bm_labels) >= 2:
+            try:
+                from data.data_router import get_history as _gh
+                hs300 = _gh("sh.000300", days=500)
+                if hs300 and hs300.get("dates") and hs300.get("close"):
+                    hs_map = {}
+                    for d, c in zip(
+                        [str(x)[:10] for x in hs300["dates"]],
+                        [float(x) if x else None for x in hs300["close"]],
+                    ):
+                        if c and c > 0:
+                            hs_map[d] = c
+                    bm_vals = []
+                    last_v = None
+                    from datetime import timedelta as _td
+                    for d in bm_labels:
+                        v = None
+                        for i in range(0, 15):  # forward-fill 最近可得日
+                            cand = d if i == 0 else (
+                                (datetime.strptime(d, "%Y-%m-%d") - _td(days=i)).strftime("%Y-%m-%d")
+                            )
+                            if cand in hs_map:
+                                v = hs_map[cand]
+                                break
+                        if v is not None:
+                            last_v = v
+                        bm_vals.append(last_v)
+                    bm_vals = [v for v in bm_vals if v]
+                    if len(bm_vals) == len(bm_labels) and bm_vals[0] and bm_vals[0] > 0:
+                        b_base = bm_vals[0]
+                        series.append({
+                            "label": "沪深300",
+                            "name": "沪深300",
+                            "labels": bm_labels,
+                            "values": [round(v / b_base, 4) for v in bm_vals],
+                            "total_return": round((bm_vals[-1] / b_base - 1) * 100, 2),
+                            "color": "#e3b341",
+                            "benchmark": True,
+                        })
+            except Exception as e:
+                print(f"[netvalue] 沪深300基准获取失败: {e}")
 
     return {"labels": series[0]["labels"] if series else [], "series": series}
 

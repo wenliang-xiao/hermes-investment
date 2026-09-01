@@ -79,6 +79,10 @@ class TestNetvalueMarkToMarket:
                     return cls(2026, 8, 31, 9, 0, 0)
             monkeypatch.setattr(ap2, "datetime", FakeDT)
 
+            # 防真实网络: 快照映射 + 基准都 stub 为无行情 (测试不依赖真实数据源)
+            import data.data_router as dr
+            monkeypatch.setattr(dr, "get_history", lambda symbol, days=1200: None)
+
             r = ap2.api_v2_portfolio_netvalue()
             assert "error" not in r, f"error: {r.get('error')}"
             assert r["series"], "应有系列"
@@ -88,8 +92,10 @@ class TestNetvalueMarkToMarket:
             assert len(dates) >= 3, f"应至少 3 个交易日, got {dates}"
             # 无重复日期
             assert len(dates) == len(set(dates)), f"日期重复: {dates}"
-            # 最后一个值就是 total_value (现金+持仓市值)
-            assert s["values"][-1] == 950000.0
+            # P2 (2026-08-31): 归一化到首日=1.0; 末点 = total_value/首日净值
+            # 首日 08-13 = capital + 100×1500 = 1,150,000; 末点校准 total_value=950,000
+            assert s["values"][0] == pytest.approx(1.0, abs=1e-4)
+            assert s["values"][-1] == pytest.approx(950000.0 / 1_150_000, abs=1e-4)
         finally:
             pass
 
@@ -215,10 +221,14 @@ class TestNetvalueEmptyStrategy:
         (tmp_path / "data").mkdir(exist_ok=True)
         (tmp_path / "data" / "trading_signals.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         monkeypatch.setattr(ap, "ROOT", tmp_path)
+        # 防真实网络: 快照 + 基准 stub (确定性)
+        import data.data_router as dr
+        monkeypatch.setattr(dr, "get_history", lambda symbol, days=1200: None)
         r = ap.api_v2_portfolio_netvalue()
         assert "error" not in r, f"error: {r.get('error')}"
         names = [s["name"] for s in r["series"]]
         assert "tradingagents" in names, f"0 笔交易策略不应从净值曲线消失, got {names}"
         ta = [s for s in r["series"] if s["name"] == "tradingagents"][0]
         assert len(ta["values"]) >= 1
-        assert all(v == 1000000.0 for v in ta["values"]), f"平直线应为 100 万, got {ta['values']}"
+        # P2 (2026-08-31): 归一化到 1.0 平线 (与有交易策略/基准同尺度)
+        assert all(v == 1.0 for v in ta["values"]), f"平直线应归一化 1.0, got {ta['values']}"
