@@ -364,6 +364,7 @@ def run_backtest(
     strategy_name: str,
     dates_map: dict[str, list[str]] | None = None,
     use_t1: bool = True,
+    use_point_in_time: bool = False,
 ) -> dict:
     """固定评估器的回测核心。
 
@@ -374,6 +375,10 @@ def run_backtest(
 
     use_t1: True = 信号 T 日收盘生成, T+1 开盘价成交(消除前视);
             False = 旧行为: 信号当日收盘价成交。
+
+    use_point_in_time: True = 每 5 交易日用时点评分重算评分(消除评分前视);
+            False = 固定 FIXED_SCORE_MAP(旧行为, 前视)。默认 False 保持向后兼容,
+            供新旧评分并行对比(ADR-001 精神)。
     """
     from strategies.base import PositionData, Signal
 
@@ -423,10 +428,38 @@ def run_backtest(
         date_list = [(start_dt + timedelta(days=i)).isoformat() for i in range(min_days)]
 
     # 逐日推进
-    score_map = dict(FIXED_SCORE_MAP)  # 固定评分
+    score_map = dict(FIXED_SCORE_MAP)  # 固定评分 (use_point_in_time=False 时用)
 
     # T+1 机制: 前一交易日生成的信号, 本交易日开盘价成交
     pending_signals: list = []
+
+    # P0-1 (2026-09-01): 时点评分 — 每 5 交易日用时点评分重算, 消除"固定评分"前视。
+    # 仅 use_point_in_time=True 时启用; 评分失败降级沿用上次, 不崩。
+    _symbols = list(price_data.keys())
+    _rescore_every = 5
+    _last_rescore = -10**9
+
+    def _rescore(day_idx: int):
+        nonlocal score_map, _last_rescore
+        as_of = date_list[day_idx] if day_idx < len(date_list) else date_list[-1]
+        injected = {}
+        for sym in _symbols:
+            closes = price_data.get(sym, [])
+            dts = (dates_map or {}).get(sym, [])
+            n = min(day_idx + 1, len(closes))
+            if n <= 0:
+                continue
+            injected[sym] = {
+                "close": list(closes[:n]),
+                "dates": list(dts[:n]) if dts else [str(i) for i in range(n)],
+            }
+        try:
+            from engine.factor_engine import FactorEngine, convert_v4_to_v3
+            results = FactorEngine().score_batch(_symbols, as_of_date=as_of, price_series=injected)
+            score_map = {r["symbol"]: convert_v4_to_v3(r["composite"]) for r in results}
+        except Exception as e:
+            print(f"[backtest] 时点评分失败(沿用上次评分): {e}", flush=True)
+        _last_rescore = day_idx
 
     def _execute_signal(sig, exec_price: float, day_idx: int):
         """执行单条信号 (SELL 先, BUY 后) — 共享 T+1 与旧模式执行逻辑."""
@@ -489,6 +522,10 @@ def run_backtest(
                 })
 
     for day_idx in range(min_days):
+        # 降频重算评分 (时点评分模式): 每 _rescore_every 个交易日重算, 其余沿用
+        if use_point_in_time and (day_idx == 0 or (day_idx - _last_rescore) >= _rescore_every):
+            _rescore(day_idx)
+
         # 构建当日 market data
         tech_map: dict[str, dict] = {}
         price_map: dict[str, float] = {}

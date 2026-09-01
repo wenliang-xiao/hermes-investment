@@ -690,6 +690,7 @@ class FactorEngine:
         self._fin_cache: dict[str, dict] = {}
         self._fin_hist_cache: dict[str, list] = {}
         self.as_of: str | None = None  # point-in-time 评分时点 (None=实盘用当前数据)
+        self._injected_hist: dict | None = None  # 注入的价格时序(回测 point-in-time 用)
         # 并发安全 (2026-08-18): score_batch 线程池并发采集 → 缓存双检锁
         self._cache_lock = threading.RLock()
 
@@ -706,7 +707,18 @@ class FactorEngine:
             return None
 
     def _get_hist(self, symbol: str, days: int = 250) -> dict:
-        """获取历史行情（带缓存）"""
+        """获取历史行情（带缓存；注入模式下从外部时序数据读, 支持 point-in-time）"""
+        injected = getattr(self, "_injected_hist", None)
+        if injected and symbol in injected:
+            data = injected[symbol]
+            if not isinstance(data, dict):
+                seq = list(data)
+                return {"close": seq[-days:] if days else seq}
+
+            def _tail(v):
+                return v[-days:] if days and isinstance(v, list) and len(v) > days else v
+
+            return {k: _tail(v) if isinstance(v, list) else v for k, v in data.items()}
         cache_key = f"{symbol}_{days}"
         with self._cache_lock:  # 双检锁
             if cache_key in self._price_cache:
@@ -1157,7 +1169,8 @@ class FactorEngine:
     # ── 批量评分（带截面标准化） ──
 
     def score_batch(self, symbols: list[str], macro_state: str = "扩张期",
-                    ic_samples: int = 0, as_of_date: str | None = None) -> list[dict[str, Any]]:
+                    ic_samples: int = 0, as_of_date: str | None = None,
+                    price_series: dict | None = None) -> list[dict[str, Any]]:
         """
         批量评分 — 这是主要入口。
         与单标评分不同：批量评分做了**产业链内截面百分位标准化（行业中性化）**。
@@ -1171,16 +1184,23 @@ class FactorEngine:
         as_of_date: point-in-time 时点 — 财务历史按「披露截止日 <= as_of」过滤,
         消除用未来财报回测过去的前视。None = 实盘评分(用当前全部数据)。
 
+        price_series: 注入的价格时序 {symbol: {"close": [...], "dates": [...]}},
+        回测时传入已切到 as_of 的切片, 避免评分层自拉数据(绕开 720h 缓存前视与
+        窗口右端恒为今天的隐形前视)。None = 实盘评分(自拉当前数据)。
+
         Returns:
             [result1, result2, ...] 按 composite 降序
         """
         n = len(symbols)
         old_as_of = self.as_of
+        old_injected = self._injected_hist
         self.as_of = as_of_date
+        self._injected_hist = price_series
         try:
             return self._score_batch_inner(symbols, macro_state, ic_samples)
         finally:
             self.as_of = old_as_of
+            self._injected_hist = old_injected
 
     def _score_batch_inner(self, symbols: list[str], macro_state: str = "扩张期",
                            ic_samples: int = 0) -> list[dict[str, Any]]:
