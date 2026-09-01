@@ -32,22 +32,37 @@ from domain.financial_calendar import financial_report_available_date
 logger = logging.getLogger(__name__)
 
 import signal as _signal_module
+import threading as _threading_module
 
 class _BSTimeoutError(Exception):
     """baostock query timed out"""
     pass
 
+# baostock C 层全局单例, 多线程并发调用会共享句柄炸掉 → 所有 C 层调用必须串行化
+# (与 data/sources/baostock_source.py 的 _BS_LOCK 同模式)
+_BS_LOCK = _threading_module.RLock()
+
 def _bs_timeout_handler(signum, frame):
     raise _BSTimeoutError("baostock query timed out (25s)")
 
 def _bs_query_with_timeout(func, *args, timeout=25, **kwargs):
-    """Execute a baostock query with signal.alarm timeout protection.
+    """Execute a baostock query with timeout protection.
     baostock uses custom TCP protocol where socket.setdefaulttimeout doesn't work.
+
+    线程安全 (2026-08-31): signal.alarm 仅主线程可用 —
+      - 主线程: 保留 SIGALRM 硬超时 (防服务器静默挂死)
+      - worker 线程: 跳过 signal (依赖 _BS_LOCK 串行化 + socket 层超时兜底)
+    与 baostock_source.py 的 _timeout_guard 同策略。
     """
+    is_main = _threading_module.current_thread() is _threading_module.main_thread()
+    if not is_main:
+        with _BS_LOCK:
+            return func(*args, **kwargs)
     old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)
     old_alarm = _signal_module.alarm(timeout)
     try:
-        result = func(*args, **kwargs)
+        with _BS_LOCK:
+            result = func(*args, **kwargs)
         return result
     except _BSTimeoutError:
         print(f"[data] baostock timeout after {timeout}s, resetting connection")
@@ -64,36 +79,40 @@ _bs_logged_in = False
 def _bs_logout(force_close=True):
     """注销并重置baostock连接，修复死socket问题"""
     global _bs_logged_in
-    try:
-        import baostock.common.context as _bs_ctx
-        if hasattr(_bs_ctx, "default_socket"):
-            _sock = getattr(_bs_ctx, "default_socket")
-            if _sock is not None:
-                try:
-                    _sock.close()
-                except OSError:
-                    pass
-        # 清除全局socket引用
-        setattr(_bs_ctx, "default_socket", None)
-    except Exception:
-        pass
-    _bs_logged_in = False
+    with _BS_LOCK:
+        try:
+            import baostock.common.context as _bs_ctx
+            if hasattr(_bs_ctx, "default_socket"):
+                _sock = getattr(_bs_ctx, "default_socket")
+                if _sock is not None:
+                    try:
+                        _sock.close()
+                    except OSError:
+                        pass
+            # 清除全局socket引用
+            setattr(_bs_ctx, "default_socket", None)
+        except Exception:
+            pass
+        _bs_logged_in = False
 
 def _bs_login():
     global _bs_logged_in
     if not _bs_logged_in:
-        try:
-            lg = _bs_query_with_timeout(bs.login, timeout=25)
-            if lg.error_code == "0":
-                _bs_logged_in = True
-            else:
-                print(f"[data] baostock login failed: {lg.error_msg}")
-        except _BSTimeoutError:
-            print(f"[data] baostock login timed out")
-            _bs_logged_in = False
-        except Exception as e:
-            print(f"[data] baostock login exception: {e}")
-            _bs_logged_in = False
+        with _BS_LOCK:
+            if _bs_logged_in:  # 双检锁 (其他线程已登录)
+                return
+            try:
+                lg = _bs_query_with_timeout(bs.login, timeout=25)
+                if lg.error_code == "0":
+                    _bs_logged_in = True
+                else:
+                    print(f"[data] baostock login failed: {lg.error_msg}")
+            except _BSTimeoutError:
+                print(f"[data] baostock login timed out")
+                _bs_logged_in = False
+            except Exception as e:
+                print(f"[data] baostock login exception: {e}")
+                _bs_logged_in = False
 
 def _bs_code(symbol: str) -> str:
     """转换为baostock代码: sz.300502 / sh.600519"""
@@ -174,14 +193,26 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 
 
 def _bs_iter_results(rs, timeout=30):
-    """安全迭代baostock结果集，带alarm保护防止rs.next()静默挂死。"""
+    """安全迭代baostock结果集，带alarm保护防止rs.next()静默挂死。
+
+    线程安全 (2026-08-31): worker 线程跳过 signal.alarm (仅主线程可用),
+    依赖 _BS_LOCK 串行化保护 C 层句柄。
+    """
+    is_main = _threading_module.current_thread() is _threading_module.main_thread()
+    if not is_main:
+        rows = []
+        with _BS_LOCK:
+            while rs.next():
+                rows.append(rs.get_row_data())
+        return rows
     rows = []
     old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)
     old_alarm = _signal_module.alarm(timeout)
     try:
-        while rs.next():
-            _signal_module.alarm(timeout)  # 每次迭代重置alarm
-            rows.append(rs.get_row_data())
+        with _BS_LOCK:
+            while rs.next():
+                _signal_module.alarm(timeout)  # 每次迭代重置alarm
+                rows.append(rs.get_row_data())
     except _BSTimeoutError:
         print(f"[data] baostock rs.next() timed out ({timeout}s), returning partial data")
     except Exception as e:
@@ -455,15 +486,36 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
     history = []
     current_year = datetime.now().year
 
-    def _field(rs, name):
+    def _row_dict(rs) -> dict | None:
+        """一次性取 baostock 结果首行的字段 dict。
+
+        注意: baostock 结果集是**一次性游标** — rs.next() 消费后不可重放。
+        旧实现 _field(rs, name) 对同一 rs 连续调用两次 (如 gpMargin+npMargin),
+        第二次必然拿不到数据 → net_margin 恒 None。改为一次取整行, 字段按名读。
+        """
         for r in _bs_iter_results(rs, timeout=15):
             try:
-                v = dict(zip(rs.fields, r)).get(name)
-                if v and str(v).strip():
-                    return float(v)
+                return dict(zip(rs.fields, r))
             except Exception:
                 continue
         return None
+
+    def _to_float(v):
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            if np.isnan(f):
+                return None
+            return f
+        except (ValueError, TypeError):
+            return None
+
+    def _field(rs, name):
+        d = _row_dict(rs)
+        if d is None:
+            return None
+        return _to_float(d.get(name))
 
     for year_off in range(0, 3):
         year = current_year - year_off
@@ -486,8 +538,9 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
 
                 rs_p = _bs_query_with_timeout(bs.query_profit_data, code=bs_code, year=year, quarter=quarter)
                 if rs_p.error_code == "0":
-                    gm = _field(rs_p, "gpMargin")
-                    nm = _field(rs_p, "npMargin")
+                    d_p = _row_dict(rs_p) or {}
+                    gm = _to_float(d_p.get("gpMargin"))
+                    nm = _to_float(d_p.get("npMargin"))
                     if gm is not None:
                         entry["gross_margin"] = round(gm * 100, 2)
                     if nm is not None:
@@ -495,9 +548,18 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
 
                 rs_b = _bs_query_with_timeout(bs.query_balance_data, code=bs_code, year=year, quarter=quarter)
                 if rs_b.error_code == "0":
-                    dr = _field(rs_b, "liabilityToAsset")
-                    if dr is not None:
-                        entry["debt_ratio"] = round(dr * 100, 2)
+                    d_b = _row_dict(rs_b) or {}
+                    # 单位实测 (2026-08-31): baostock liabilityToAsset **报告期单位漂移**
+                    #   2026Q2 茅台=0.151931 (×100=15.19% 对), 2025Q3 茅台=0.001281 (×100=0.13% 错)
+                    #   不可直接乘固定倍数。assetToEquity 单位稳定 (恒等式: 负债率=1-1/assetToEquity)
+                    #   验证: 茅台 15.19%/12.81% 招行 90.18% 长电 59.36% — 与 EM 单期参照一致
+                    ate = _to_float(d_b.get("assetToEquity"))
+                    if ate is not None and ate > 1.0:
+                        entry["debt_ratio"] = round((1 - 1 / ate) * 100, 2)
+                    else:
+                        lta = _to_float(d_b.get("liabilityToAsset"))
+                        if lta is not None:
+                            entry["debt_ratio"] = round(lta * 100, 2)
 
                 rs_g = _bs_query_with_timeout(bs.query_growth_data, code=bs_code, year=year, quarter=quarter)
                 if rs_g.error_code == "0":
@@ -508,9 +570,11 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
                 ocf = capex = None
                 rs_cf = _bs_query_with_timeout(bs.query_cash_flow_data, code=bs_code, year=year, quarter=quarter)
                 if rs_cf.error_code == "0":
-                    ocf = _field(rs_cf, "netCashFlowsFromOperatingActivities") or \
-                          _field(rs_cf, "netCashFlowsOperating")
-                    capex = _field(rs_cf, "cashFlowsFromInvestingActivities")
+                    d_cf = _row_dict(rs_cf) or {}
+                    ocf = _to_float(d_cf.get("netCashFlowsFromOperatingActivities"))
+                    if ocf is None:
+                        ocf = _to_float(d_cf.get("netCashFlowsOperating"))
+                    capex = _to_float(d_cf.get("cashFlowsFromInvestingActivities"))
                 if ocf is not None:
                     entry["ocf"] = round(ocf / 1e8, 2)
                 if ocf is not None and capex is not None:
