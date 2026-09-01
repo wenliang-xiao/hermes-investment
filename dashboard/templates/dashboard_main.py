@@ -1379,7 +1379,7 @@ async function loadEtf() {
         html += '</div>';
       }
       if (portfolioRes.combined && portfolioRes.combined.length > 0) {
-        html += '<div class="mb-1"><span class="text-purple-400 font-medium text-sm">▸ 合并建议</span>';
+        html += '<div class="mb-1"><span class="text-purple-400 font-medium text-sm">▸ 合并视图（两组合标的去重 · 非独立执行组合）</span>';
         html += buildEtfTableV2(portfolioRes.combined);
         html += '</div>';
       }
