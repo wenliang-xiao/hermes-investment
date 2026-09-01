@@ -531,6 +531,30 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
     return history
 
 
+def get_delisted_stocks() -> list[dict]:
+    """A股历史退市股名单(baostock), 回测股票池补池消除幸存者偏差的数据基础。
+
+    返回 [{code, name, out_date}] 按退市日升序。status=0 退市 + type=1 股票。
+    """
+    _bs_login()
+    try:
+        rs = bs.query_stock_basic()
+    except Exception:
+        return []
+    result = []
+    while rs.error_code == "0" and rs.next():
+        row = rs.get_row_data()
+        d = dict(zip(rs.fields, row))
+        if d.get("status") == "0" and d.get("type") == "1":
+            result.append({
+                "code": d.get("code", ""),
+                "name": d.get("code_name", ""),
+                "out_date": d.get("outDate", ""),
+            })
+    result.sort(key=lambda x: x.get("out_date", ""))
+    return result
+
+
 def get_pe_history(symbol: str, years: int = 5) -> pd.Series:
     """获取个股 PE-TTM 历史序列，用于计算历史百分位。
     已跳过 Tushare daily_basic（永久频限），直走 baostock（周线逐笔）。

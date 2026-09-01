@@ -682,6 +682,8 @@ def run_backtest(
             "total_days": metrics.get("total_days", min_days),
             "universe_size": metrics.get("universe_size", len(score_map)),
             "stocks_with_data": metrics.get("stocks_with_data", len(price_data)),
+            "scoring_mode": "point_in_time" if use_point_in_time else "fixed_score",
+            "survivorship_bias": "fixed_universe(19只当前龙头,未含历史退市/剔除标的)",
         },
     )
 
