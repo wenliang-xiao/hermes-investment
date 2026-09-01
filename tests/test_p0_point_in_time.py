@@ -37,3 +37,22 @@ def test_financial_history_asof_year_end():
     as_of = "2024-12-31"
     visible = [p for p in periods if f(p) <= as_of]
     assert visible == ["2024Q1", "2024Q2", "2024Q3"], f"got {visible}"
+
+
+def test_ic_history_asof_filter(tmp_path):
+    """IC 权重前视消除: as_of 时只读 date <= as_of 的 IC 记录。"""
+    import json
+    from engine.factor_engine import ICWeightSystem
+    cache_dir = tmp_path / "ic_cache"
+    cache_dir.mkdir()
+    (cache_dir / "ic_history.json").write_text(json.dumps([
+        {"date": "2024-01-01", "quality": 0.5},
+        {"date": "2024-06-01", "quality": 0.6},
+        {"date": "2025-01-01", "quality": 0.7},
+    ]))
+    icw = ICWeightSystem(cache_dir=str(cache_dir))
+    icw.as_of = None
+    assert len(icw.get_ic_history()) == 3, "无 as_of 应返回全部"
+    icw.as_of = "2024-06-30"
+    hist = icw.get_ic_history()
+    assert [h["date"] for h in hist] == ["2024-01-01", "2024-06-01"], f"got {[h['date'] for h in hist]}"

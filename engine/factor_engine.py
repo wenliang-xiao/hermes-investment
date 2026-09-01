@@ -430,6 +430,7 @@ class ICWeightSystem:
 
     def __init__(self, cache_dir: str = "data/ic_cache"):
         self.cache_dir = cache_dir
+        self.as_of: str | None = None  # point-in-time: 只读 date <= as_of 的 IC(消除 IC 权重前视)
         os.makedirs(cache_dir, exist_ok=True)
 
     def get_ic_history(self) -> list[dict]:
@@ -482,6 +483,8 @@ class ICWeightSystem:
             pass
 
         seq.sort(key=lambda s: str(s.get("date", "")))
+        if self.as_of is not None:
+            seq = [s for s in seq if str(s.get("date", "")) <= self.as_of]
         return seq
 
     def save_ic_snapshot(self, snapshot: dict):
@@ -1194,13 +1197,18 @@ class FactorEngine:
         n = len(symbols)
         old_as_of = self.as_of
         old_injected = self._injected_hist
+        old_ic_asof = getattr(self.ic, "as_of", None)
         self.as_of = as_of_date
         self._injected_hist = price_series
+        if self.ic is not None:
+            self.ic.as_of = as_of_date
         try:
             return self._score_batch_inner(symbols, macro_state, ic_samples)
         finally:
             self.as_of = old_as_of
             self._injected_hist = old_injected
+            if self.ic is not None:
+                self.ic.as_of = old_ic_asof
 
     def _score_batch_inner(self, symbols: list[str], macro_state: str = "扩张期",
                            ic_samples: int = 0) -> list[dict[str, Any]]:
