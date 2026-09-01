@@ -27,6 +27,7 @@ try:
 except ImportError:
     import config as config
 from investment_system.domain.stock_universe import ALL_CORE_STOCKS, INDEX_DATA
+from domain.financial_calendar import financial_report_available_date
 
 logger = logging.getLogger(__name__)
 
@@ -437,10 +438,14 @@ def get_financial_report(symbol: str) -> dict:
     return result
 
 
-def get_financial_history(symbol: str, quarters: int = 8) -> list:
+def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None = None) -> list:
     """获取多季度财务历史：ROE趋势 + FCF。
     直走 baostock（EM 只返回最新一期，无历史序列）。
-    返回按时间倒序的季度列表 [{year, quarter, period, roe, ocf, fcf}]"""
+    返回按时间倒序的季度列表 [{year, quarter, period, roe, ocf, fcf}]
+
+    as_of_date: point-in-time 过滤 — 只返回「披露截止日 <= as_of_date」的财报,
+    消除用未来财报回测过去的前视偏差。None = 返回全部(实盘评分用当前全部)。
+    """
     key = f"FH_{symbol}_{quarters}"
     if key in _FIN_CACHE:
         return _FIN_CACHE[key]
@@ -503,6 +508,9 @@ def get_financial_history(symbol: str, quarters: int = 8) -> list:
             break
 
     _FIN_CACHE[key] = history
+    if as_of_date is not None:
+        history = [h for h in history
+                   if financial_report_available_date(h["period"]) <= as_of_date]
     return history
 
 
