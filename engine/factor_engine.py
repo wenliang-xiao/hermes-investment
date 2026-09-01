@@ -847,7 +847,7 @@ class FactorEngine:
             if not close:
                 return None
             if sub_def["field"] == "pe":
-                pe = hist.get("pe", [None])[-1]
+                pe = (hist.get("pe") or [None])[-1]
                 if pe and float(pe) > 0:
                     return float(pe)
                 # Fallback: yfinance 日线不含 PE，从 get_rt 获取
