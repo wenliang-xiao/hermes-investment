@@ -9,27 +9,24 @@ from .base import Signal, PositionData, TradingAgentsConfig
 
 
 def _debate_score(score: float, tech: dict | None, cfg: TradingAgentsConfig) -> float:
-    """辩论裁决：bull / bear / neutral 三角色加权"""
+    """辩论裁决：bull(看多) / bear(看空) / neutral(中性) → 净看多分 [0,10]。
+
+    看多分 = 评分×0.5 + 技术分×0.5；看空信号(死叉/RSI超买)压低分数。
+    修复: 原 bear = sc - bp 反向(死叉反而降低 bear)且 bear 在加权中权重仅 0.1
+    导致看空信号几乎不生效 — 改为净看多 = 看多分 − 看空惩罚。
+    """
     sc = score or 5.0
     ts = tech.get("total_tech_score", 5.0) if tech else 5.0
     bull = sc * 0.5 + ts * 0.5
 
-    bp = 0.0
+    bear_penalty = 0.0
     if tech and tech.get("macd_signal", "") in ("死叉", "🔴死叉"):
-        bp += 1.0
+        bear_penalty += 1.0
     if tech and (tech.get("rsi", 50) or 50) > 70:
-        bp += 0.5
-    bear = sc - bp
-    neut = sc
+        bear_penalty += 0.5
 
-    if bull >= bear and bull >= neut:
-        final = bull * 0.6 + neut * 0.3 + bear * 0.1
-    elif bear >= bull and bear >= neut:
-        final = bear * 0.5 + neut * 0.3 + bull * 0.2
-    else:
-        final = neut
-
-    return min(10, max(0, final))
+    final = bull - bear_penalty
+    return min(10.0, max(0.0, final))
 
 
 def decide(
