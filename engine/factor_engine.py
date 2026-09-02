@@ -62,6 +62,7 @@ SUB_FACTOR_DEFS = {
     # ── 情绪/资金因子 ──
     "sentiment:volume_ratio":{"source": "derived",    "method": "vol_ratio_20d",   "higher_is_better": True,  "label": "量比"},
     "sentiment:turnover":    {"source": "derived",    "method": "turnover_20d",    "higher_is_better": True,  "label": "换手率"},
+    "sentiment:capital_flow":{"source": "eastmoney_fund_flow", "method": "capital_flow_today", "higher_is_better": True, "label": "主力资金流"},
     # ── 行业排名因子（蜻蜓CSC，2026-07-27新增） ──
     "industry:pe_rank":      {"source": "qingting_industry", "metric": "pe",     "higher_is_better": False, "label": "PE行业排名"},
     "industry:roe_rank":     {"source": "qingting_industry", "metric": "jzcsyl","higher_is_better": True,  "label": "ROE行业排名"},
@@ -85,7 +86,7 @@ STYLE_FACTORS = {
                   "label": "动量", "default_weight": 0.15},
     "low_vol":   {"subs": ["low_vol:20d_vol", "low_vol:max_dd_60d"],
                   "label": "低波", "default_weight": 0.12},
-    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover", "sentiment:industry_heat"],
+    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover", "sentiment:industry_heat", "sentiment:capital_flow"],
                   "label": "情绪/资金", "default_weight": 0.12},
     "industry":  {"subs": ["industry:pe_rank", "industry:roe_rank", "industry:margin_rank"],
                   "label": "行业地位", "default_weight": 0.10},
@@ -994,8 +995,20 @@ class FactorEngine:
 
         elif source == "qingting_industry":
             return self._get_industry_value(sub_key, symbol)
+        elif source == "eastmoney_fund_flow":
+            return self._get_fund_flow_value(symbol)
 
         return None
+
+    def _get_fund_flow_value(self, symbol: str) -> float | None:
+        """主力资金流因子(当日实时)。回测(as_of非None)无历史资金流 → 返回 None。"""
+        if getattr(self, "as_of", None):
+            return None
+        try:
+            from data.sources.eastmoney_source import get_stock_fund_flow_today
+            return get_stock_fund_flow_today(symbol)
+        except Exception:
+            return None
 
     def _get_qt_source(self):
         """获取QTSource单例"""
@@ -1163,6 +1176,7 @@ class FactorEngine:
             "low_vol:max_dd_60d":    (-0.4, 0),
             "sentiment:volume_ratio": (0.3, 3),
             "sentiment:turnover":    (0, 10),
+            "sentiment:capital_flow": (-1e9, 1e9),
             "risk:pe_excessive":     (0.3, 3),
             "risk:volatility":       (0.1, 0.8),
             # 蜻蜓行业排名 (2026-07-27)
