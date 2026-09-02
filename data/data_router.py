@@ -140,6 +140,11 @@ def get_history(symbol: str, days: int = 1200) -> Optional[dict]:
         from data.sources.baostock_source import get_history_a
         return get_history_a(symbol, days)
     elif source == "yfinance":
+        # Finnhub 优先(实时报价, 免费60次/分钟), yfinance 兜底(零鉴权, 美股历史最全)
+        from data.sources.finnhub_source import get_history_finnhub
+        r = get_history_finnhub(symbol, days)
+        if r:
+            return r
         from data.sources.yahoo_source import get_history_yahoo
         return get_history_yahoo(symbol, days)
     elif source == "tencent":
@@ -167,6 +172,10 @@ def get_rt(symbol: str) -> Optional[dict]:
         from data.sources.akshare_source import get_rt_em
         return get_rt_em(symbol)
     elif source == "yfinance":
+        from data.sources.finnhub_source import get_rt_finnhub
+        r = get_rt_finnhub(symbol)
+        if r:
+            return r
         from data.sources.yahoo_source import get_rt_yahoo
         return get_rt_yahoo(symbol)
     elif source == "tencent":
