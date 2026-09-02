@@ -263,9 +263,17 @@ def api_simulated():
             "signals": s_sigs,
         }
 
+    ts_mtime = ""
+    try:
+        _m = (ROOT / "data" / "trading_signals.json").stat().st_mtime
+        ts_mtime = datetime.fromtimestamp(_m).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+
     return {
         "date": data.get("date", ""),
         "generated_at": data.get("generated_at", ""),
+        "signal_file_mtime": ts_mtime,   # 数据文件实际更新时间 (盘前/盘后区分依据)
         "simulated_trades": executed_today,
         "portfolios": result,
         "user_signals": signals,
@@ -435,9 +443,17 @@ def api_v2_portfolio_detail():
         if str(t.get("date", ""))[:10] == today_str
     )
 
+    ts_mtime = ""
+    try:
+        _m = (ROOT / "data" / "trading_signals.json").stat().st_mtime
+        ts_mtime = datetime.fromtimestamp(_m).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+
     result = {
         "date": data.get("date", ""),
         "generated_at": data.get("generated_at", ""),
+        "signal_file_mtime": ts_mtime,   # 数据文件实际更新时间 (盘前/盘后区分依据)
         "total_raw_signals": data.get("total_raw_signals", 0),
         "after_conflict_resolution": data.get("after_conflict_resolution", 0),
         "after_weekly_filter": data.get("after_weekly_filter", 0),

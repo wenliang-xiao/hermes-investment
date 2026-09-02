@@ -846,8 +846,24 @@ async function loadDashboardV2() {
     _v2Detail = detailRes;
 
     const genTime = (detailRes.generated_at || '').split(' ').slice(1).join(' ');
+    // 数据快照时间 = trading_signals.json 实际 mtime (比 generated_at 更可信)
+    const snapTime = (detailRes.signal_file_mtime || detailRes.generated_at || '');
+    let snapBadge = '';
+    if (snapTime) {
+      const snapHour = parseInt((snapTime.split(' ')[1] || '0:0').split(':')[0]);
+      const today = new Date().toISOString().slice(0,10);
+      if (detailRes.date === today && snapHour >= 12) {
+        snapBadge = `<span class="ml-2 text-green-400">🟢 盘后快照</span>`;
+      } else if (detailRes.date === today && snapHour < 12) {
+        snapBadge = `<span class="ml-2 text-yellow-400">🕐 盘前快照 · 盘后 19:00 日报后刷新</span>`;
+      } else {
+        snapBadge = `<span class="ml-2 text-yellow-400">🕐 快照 ${snapTime}</span>`;
+      }
+    }
     document.getElementById('runInfo').textContent = 
       `${detailRes.date} | ${genTime} | 模拟交易 ${detailRes.simulated_trades} 笔`;
+    document.getElementById('runInfo').innerHTML =
+      `${detailRes.date} | ${genTime} | 模拟交易 ${detailRes.simulated_trades} 笔${snapBadge}`;
 
     // 今日结论条 (信息架构: 结论先行 — 一句话看清今日状态)
     const stratSummary = Object.entries(detailRes.portfolios || {}).map(([s, p]) => {
