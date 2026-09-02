@@ -68,6 +68,11 @@ def evidence_signal_accuracy():
     first_date = min(dates) if dates else "N/A"
     last_date = max(dates) if dates else "N/A"
 
+    last_30d = dict(raw.get("last_30d", {}))
+    if last_30d.get("hit_rate") in (None, 0):
+        last_30d["hit_rate"] = None
+        last_30d["verification_status"] = "pending"
+
     return {
         "status": "ok",
         "message": f"信号验证数据从 {first_date} 到 {last_date}，{len(history)} 个交易日",
@@ -89,7 +94,7 @@ def evidence_signal_accuracy():
                 }
                 for h in history[-30:]
             ],
-            "last_30d": raw.get("last_30d", {}),
+            "last_30d": last_30d,
         }
     }
 

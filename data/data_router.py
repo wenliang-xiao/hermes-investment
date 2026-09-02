@@ -122,7 +122,7 @@ def _detect_source(symbol: str) -> str:
 
 # ── 核心函数 ──
 
-@cachedio(ttl_hours=720)  # 30天缓存
+@cachedio(ttl_hours=12)  # 12h缓存: 历史K线每个交易日新增一根, 必须跨交易日刷新(否则动量因子冻结30天)
 def get_history(symbol: str, days: int = 1200) -> Optional[dict]:
     """获取历史日线数据
 

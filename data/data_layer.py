@@ -503,7 +503,12 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
     """
     key = f"FH_{symbol}_{quarters}"
     if key in _FIN_CACHE:
-        return _FIN_CACHE[key]
+        history = _FIN_CACHE[key]
+        # 前视修复: 缓存命中后仍需执行 as_of 过滤(缓存存的是完整历史, 非过滤视图)
+        if as_of_date is not None:
+            history = [h for h in history
+                       if financial_report_available_date(h["period"]) <= as_of_date]
+        return history
     # 仅A股: HK/US 无 baostock 财务历史, 直接返回空
     if not symbol.isdigit() or len(symbol) != 6:
         return []

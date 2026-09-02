@@ -634,6 +634,8 @@ class ICWeightSystem:
         Returns:
             {style_factor: weight} 权重总和=1
         """
+        if n_samples <= 0:
+            n_samples = len(self.get_ic_history())
         factors = list(STYLE_FACTORS.keys())
         base = self.rolling_ic_weights()
 
@@ -1354,10 +1356,12 @@ class FactorEngine:
             logger.info(f"[factor_engine] batch done: top={results[0]['symbol']} "
                          f"score={results[0]['composite']}")
         # 自动保存因子分 → 供下一期 realized return 回算 IC (根治IC动态权重数据源)
-        try:
-            self.record_factor_scores_for_ic(results)
-        except Exception as e:
-            logger.warning(f"[factor_engine] 因子分保存失败(不影响评分): {e}")
+        # 仅实盘模式记录: 回测 as_of 评分是历史重算, 不该污染 IC 训练数据
+        if self.as_of is None:
+            try:
+                self.record_factor_scores_for_ic(results)
+            except Exception as e:
+                logger.warning(f"[factor_engine] 因子分保存失败(不影响评分): {e}")
         return results
 
     def clear_cache(self):

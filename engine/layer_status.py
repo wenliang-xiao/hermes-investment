@@ -48,11 +48,15 @@ class LayerStatus:
             if not mkt:
                 continue
             sym = p.get("symbol", "")
-            if any(kw in sym.lower() for kw in ["etf", "159", "511", "513", "518"]):
+            if ".hk" in sym.lower():
+                actual["港股"] += mkt
+            elif not sym.isdigit():
+                actual["美股"] += mkt
+            elif sym.startswith(("159", "51", "56", "58")):
                 actual["ETF"] += mkt
             elif sym.startswith(("6", "0", "3")):
                 actual["A股"] += mkt
-        total = sum(actual.values()) or 1
+        total = sum(p.get("market_value", 0) for p in pos) or 1
         actual_pct = {k: round(v / total * 100, 1) for k, v in actual.items()}
         return {
             "target": self.target_allocation,

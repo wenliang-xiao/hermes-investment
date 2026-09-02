@@ -455,7 +455,7 @@ def run():
             with open(verify_path) as f:
                 signal_accuracy = json.load(f)
         else:
-            signal_accuracy = {"history": [], "last_30d": {"by_score_band": {}, "hit_rate": 0, "mse": 0}}
+            signal_accuracy = {"history": [], "last_30d": {"by_score_band": {}, "hit_rate": None, "mse": None}}
     except Exception:
         signal_accuracy = {"history": [], "last_30d": {}}
     
@@ -489,7 +489,7 @@ def run():
     })
     signal_accuracy["last_update"] = today_str
     atomic_write_json(verify_path, signal_accuracy)
-    print(f"\n📊 信号验证历史已保存: {signal_accuracy.get('last_30d', {}).get('hit_rate', 'N/A')}", flush=True)
+    print(f"\n📊 信号验证历史已保存（方向命中率验证待实现，暂不对外展示命中率）", flush=True)
 
     return result
 
