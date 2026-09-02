@@ -49,15 +49,29 @@ def _bs_query_with_timeout(func, *args, timeout=25, **kwargs):
     """Execute a baostock query with timeout protection.
     baostock uses custom TCP protocol where socket.setdefaulttimeout doesn't work.
 
-    线程安全 (2026-08-31): signal.alarm 仅主线程可用 —
-      - 主线程: 保留 SIGALRM 硬超时 (防服务器静默挂死)
-      - worker 线程: 跳过 signal (依赖 _BS_LOCK 串行化 + socket 层超时兜底)
-    与 baostock_source.py 的 _timeout_guard 同策略。
+    线程安全 (2026-09-02 重构): signal.alarm 仅主线程可用 —
+      - 主线程: SIGALRM 硬超时 (防服务器静默挂死), 超时 → _bs_logout 重置连接
+      - worker 线程: 守护线程执行 C 层调用 + future.wait(timeout) 线程级超时;
+        超时 → _bs_logout() 关闭 socket — 双作用:
+          (a) socket.close() 打断挂死线程的 C 层 recv (阻塞返回错误, 线程退出)
+          (b) 重置连接防止协议污染 (挂死查询后续所有调用 "Error -3 decompressing")
+        返回 None → 调用方降级/跳过, 绝不永久阻塞。
+    与 baostock_source.py 的 _timeout_guard 同策略 (2026-09-02 统一锁/会话见模块头)。
     """
     is_main = _threading_module.current_thread() is _threading_module.main_thread()
     if not is_main:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
         with _BS_LOCK:
-            return func(*args, **kwargs)
+            executor = ThreadPoolExecutor(max_workers=1)
+            fut = executor.submit(func, *args, **kwargs)
+            try:
+                return fut.result(timeout=timeout)
+            except FutureTimeout:
+                print(f"[data] baostock worker query timeout ({timeout}s) → 重置连接")
+                _bs_logout()  # close socket 打断挂死线程 + 防协议污染
+                return None
+            finally:
+                executor.shutdown(wait=False)
     old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)
     old_alarm = _signal_module.alarm(timeout)
     try:
@@ -195,15 +209,28 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
 def _bs_iter_results(rs, timeout=30):
     """安全迭代baostock结果集，带alarm保护防止rs.next()静默挂死。
 
-    线程安全 (2026-08-31): worker 线程跳过 signal.alarm (仅主线程可用),
-    依赖 _BS_LOCK 串行化保护 C 层句柄。
+    线程安全 (2026-09-02 重构): worker 线程同样用守护线程 + future.wait 线程级超时,
+    超时 → _bs_logout() 重置连接 (close socket 打断挂死 recv + 防协议污染)。
     """
     is_main = _threading_module.current_thread() is _threading_module.main_thread()
     if not is_main:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
         rows = []
-        with _BS_LOCK:
+
+        def _drain():
             while rs.next():
                 rows.append(rs.get_row_data())
+
+        with _BS_LOCK:
+            executor = ThreadPoolExecutor(max_workers=1)
+            fut = executor.submit(_drain)
+            try:
+                fut.result(timeout=timeout)
+            except FutureTimeout:
+                print(f"[data] baostock rs.next() worker timeout ({timeout}s) → 重置连接")
+                _bs_logout()
+            finally:
+                executor.shutdown(wait=False)
         return rows
     rows = []
     old_handler = _signal_module.signal(_signal_module.SIGALRM, _bs_timeout_handler)

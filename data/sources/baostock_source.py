@@ -18,9 +18,29 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# 并发安全 (2026-08-18): baostock C 层全局单例, 多线程并发调用会共享句柄炸掉
-# → 所有 C 层调用(login/query/next)必须串行化
-_BS_LOCK = threading.RLock()
+# 并发安全 (2026-09-02 统一): baostock C 层全局单例, 多线程并发调用会共享句柄炸掉
+# → 所有 C 层调用(login/query/next)必须串行化。
+# 注意: data_layer.py 也有自己的 _BS_LOCK/_bs_login/_bs_logout — 若各自持锁则同一进程
+# 内 C 层句柄并发无保护 → 协议流错乱 ("Error -3 decompressing" / 接收数据异常)。
+# 因此这里**延迟复用 data_layer 的锁与 logout**, 保证全进程单锁单会话。
+_BS_LOCK: "threading.RLock | None" = None
+
+def _shared_lock():
+    """统一到 data_layer 的全局锁 (进程内单锁, C 层句柄串行化)"""
+    global _BS_LOCK
+    if _BS_LOCK is None:
+        from data.data_layer import _BS_LOCK as dl_lock
+        _BS_LOCK = dl_lock
+    return _BS_LOCK
+
+
+def _shared_logout():
+    """统一到 data_layer 的连接重置 (close socket 打断挂死 recv + 防协议污染)"""
+    try:
+        from data.data_layer import _bs_logout
+        _bs_logout(force_close=True)
+    except Exception as e:
+        logger.warning(f"[baostock] 统一 logout 失败: {e}")
 
 _CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,12 +60,23 @@ _BS_MODULE = None  # 已 login 的 baostock 模块引用
 
 
 def _bs_session() -> "module":
-    """获取模块级持久 baostock 会话 (进程内仅 login 一次)"""
+    """获取全局持久 baostock 会话 (进程内仅 login 一次, 与 data_layer 共享状态)。
+
+    2026-09-02: 会话状态必须与 data_layer._bs_logged_in 同步 —
+    超时后 _shared_logout() 会置 data_layer._bs_logged_in=False, 若本地仍缓存旧模块
+    则下次调用不会重新 login → 连接已关但继续用 → 全部失败。
+    """
     global _BS_MODULE
     if _BS_MODULE is not None:
-        return _BS_MODULE
+        try:
+            from data.data_layer import _bs_logged_in as dl_logged_in
+            if dl_logged_in:
+                return _BS_MODULE
+        except Exception:
+            return _BS_MODULE  # data_layer 不可用, 用本地缓存
     import baostock as bs
-    _bs_login(bs)
+    from data.data_layer import _bs_login as dl_login
+    dl_login()  # 统一走 data_layer 登录 (持共享锁 + 更新 _bs_logged_in)
     _BS_MODULE = bs
     return bs
 
@@ -77,7 +108,7 @@ def _timeout_guard(seconds: float):
 def _bs_iter_results(rs, timeout: float = 15):
     """安全迭代 baostock 结果集 — worker 线程里 rs.next() 也可能挂死。
 
-    用守护线程 + future.wait 实现线程级超时; 超时返回已读部分(可能为空)。
+    用守护线程 + future.wait 实现线程级超时; 超时返回已读部分(可能为空)并重置连接。
     主线程场景直接迭代 (SIGALRM 由外层守护)。
     """
     if threading.current_thread() is threading.main_thread():
@@ -97,7 +128,8 @@ def _bs_iter_results(rs, timeout: float = 15):
     try:
         fut.result(timeout=timeout)
     except FutureTimeout:
-        logger.warning(f"[baostock] 结果集读取超时(>{timeout:.0f}s) — 返回已读 {len(rows)} 行")
+        logger.warning(f"[baostock] 结果集读取超时(>{timeout:.0f}s) — 返回已读 {len(rows)} 行并重置连接")
+        _shared_logout()  # close socket 打断挂死 recv + 防协议污染
     finally:
         executor.shutdown(wait=False)
     return rows
@@ -105,7 +137,7 @@ def _bs_iter_results(rs, timeout: float = 15):
 
 def _bs_login(bs):
     """带超时的 baostock 登录 (挂死时抛 BSTimeoutError)"""
-    with _BS_LOCK, _timeout_guard(BS_LOGIN_TIMEOUT):
+    with _shared_lock(), _timeout_guard(BS_LOGIN_TIMEOUT):
         lg = bs.login()
     if lg.error_code != "0":
         raise RuntimeError(f"baostock login failed: {lg.error_msg}")
@@ -144,7 +176,8 @@ def _bs_query(bs, bs_code: str, fields: str, start_date: str, end_date: str):
     try:
         return fut.result(timeout=BS_CALL_TIMEOUT)
     except FutureTimeout:
-        logger.warning(f"[baostock] {bs_code} worker线程查询超时(>{BS_CALL_TIMEOUT:.0f}s) — 放弃")
+        logger.warning(f"[baostock] {bs_code} worker线程查询超时(>{BS_CALL_TIMEOUT:.0f}s) — 放弃并重置连接")
+        _shared_logout()  # close socket 打断挂死 recv + 防协议污染
         return None
     finally:
         executor.shutdown(wait=False)
@@ -217,33 +250,40 @@ def get_history_a(symbol: str, days: int = 1200):
 
 
 def _get_history_a_bs(symbol: str, days: int = 1200):
-    """baostock 主路径（带超时 + 持久会话）"""
+    """baostock 主路径（带超时 + 持久会话）
+
+    2026-09-02 重构: 锁只保护 C 层调用(query+读取), akshare fallback 一律在锁外 —
+    akshare 是独立网络栈, 若在锁内挂死 = 锁永持 = 整批死锁。
+    """
     import pandas as pd
-    with _BS_LOCK:  # 保护 query + rs.next() 读取全流程 (C 层共享句柄)
-        bs = _bs_session()  # 进程内仅 login 一次
-        bs_code = _a_code(symbol)
+    lock = _shared_lock()
+    bs = _bs_session()  # 进程内仅 login 一次 (login 内部已持锁)
+    bs_code = _a_code(symbol)
 
-        fields = "date,open,high,low,close,volume,amount,peTTM,pctChg"
+    fields = "date,open,high,low,close,volume,amount,peTTM,pctChg"
 
-        from datetime import datetime, timedelta
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=int(days * 1.4))).strftime("%Y-%m-%d")
+    from datetime import datetime, timedelta
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=int(days * 1.4))).strftime("%Y-%m-%d")
 
-        # Query (超时守护) — 持久会话不再每次 login/logout
+    rs = None
+    rows = []
+    with lock:  # 仅保护 C 层调用 (query + rs.next() 读取)
         rs = _bs_query(bs, bs_code, fields, start_date, end_date)
         if rs is None:
-            # worker线程超时放弃 → 降级 akshare
-            logger.warning(f"[baostock] {symbol} 查询超时放弃 → 降级 akshare")
-            return _fallback_akshare_etf(symbol)
+            logger.warning(f"[baostock] {symbol} 查询超时放弃 → 锁外降级 akshare")
+        elif rs.error_code != "0":
+            rs = None
+        else:
+            # 安全读取 (worker线程有守护超时; 主线程 SIGALRM)
+            rows = _bs_iter_results(rs, timeout=BS_CALL_TIMEOUT)
 
-        if rs.error_code != "0":
-            return None
-
-        # 安全读取 (worker线程有守护超时; 主线程 SIGALRM)
-        rows = _bs_iter_results(rs, timeout=BS_CALL_TIMEOUT)
+    if rs is None:
+        # worker线程超时放弃 → 降级 akshare (锁外)
+        return _fallback_akshare_etf(symbol)
 
     if not rows:
-        # baostock没数据 → AKShare ETF 历史
+        # baostock没数据 → AKShare ETF 历史 (锁外)
         return _fallback_akshare_etf(symbol)
 
     # Build result dict with numpy arrays
