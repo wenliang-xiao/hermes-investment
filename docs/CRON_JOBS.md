@@ -80,6 +80,7 @@
 
 - **Schedule:** 工作日 09:30
 - **模式:** `no_agent=True`（**确定性脚本，无 LLM 依赖**）——2026-08-13 从 agent-mode 改，根治 LLM 网关 502 致命化问题
+- **投递策略 (2026-09-02):** watchdog 模式——成功静默（不再每天发 9KB 摘要），部分完成/失败才输出告警；快照健康由 17:00 watchdog 兜底
 - **执行:** `~/.hermes/scripts/factor_daily_scan.sh` → `scripts/daily_factor_scan.py`（单入口编排器）
 - **完整命令:**
   ```bash
@@ -125,7 +126,8 @@
 
 - **Schedule:** 工作日 08:00（早于盘前日报 08:30，保证日报能读到当天影子记录）
 - **模式:** `no_agent=True`（确定性脚本，无 LLM 依赖）
-- **执行:** `scripts/run_event_shadow.py`
+- **投递策略 (2026-09-02):** watchdog 模式——仅 `level=high`（如 48h 内财报/降仓建议）才输出提醒给用户；低/中风险静默（不再每天发 JSON 全文）
+- **执行:** `~/.hermes/scripts/event_shadow.sh` → `scripts/run_event_shadow.py`
 - **完整命令:**
   ```bash
   cd /home/admin/.hermes/investment_system && \
@@ -182,7 +184,8 @@ ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 
 | 症状 | 根因 | 处置 |
 |---|---|---|
-| cron 报 `Script timed out after 120s` | **Hermes cron 调度器对 no_agent 脚本的默认硬超时只有 120s**（`scheduler.py` `_DEFAULT_SCRIPT_TIMEOUT`），而 `daily_factor_scan.py` 内部预算是 1200s；120s 到点脚本被整杀，batch3/4/5 + merge + 快照全没做 | 已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800`（配置文件按 mtime 缓存，改完即生效，无需重启）。再犯时先 `grep script_timeout_seconds ~/.hermes/config.yaml` 确认还在 |
+| cron 报 `Script timed out after 120s` | **Hermes cron 调度器对 no_agent 脚本的默认硬超时只有 120s**（`scheduler.py` `_DEFAULT_SCRIPT_TIMEOUT`），而 `daily_factor_scan.py` 内部预算是 1200s；120s 到点脚本被整杀，batch3/4/5 + merge + 快照全没做 | 已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds`（配置文件按 mtime 缓存，改完即生效，无需重启）。再犯时先 `grep script_timeout_seconds ~/.hermes/config.yaml` 确认还在 |
+| cron 报 `Script timed out after 1800s`（因子日扫 batch1 后有、batch2+ 无） | **1800s(30min) 仍不够全量扫描**（50-60min），09-02 超时被杀只剩 batch1 | **2026-09-02 已提额 `5400s`(90min)** 覆盖全量+余量；确认: `grep script_timeout_seconds ~/.hermes/config.yaml` 应为 5400 |
 | cron 报 `ModuleNotFoundError: numpy` | cron 用了裸 `python3` = Py3.6.8 | 改用 venv 绝对路径 |
 | cron 报 `RuntimeError: HTTP 502 (Cloudflare)` 且 `tokens=~6k` | **LLM 网关 `api.spanagent.xyz` 瞬时 502**（agent 首次响应即死，扫描未执行） | **不是数据源故障。** 已改为 no_agent 脚本免疫；老日志出现则重跑 `daily_factor_scan.py` |
 | 扫描卡住无评分输出 8min+ | baostock/CSC 挂起 | `rm -f data/scanner_progress.json` + 重跑；连败2次→报陈旧数据 |
@@ -218,6 +221,7 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-02 | **因子日扫/event-shadow 改 watchdog 静默**（成功不发摘要/JSON，仅失败或高危提醒）；**script_timeout 1800→5400s**（全量扫描 50-60min 需 90min 预算）；**collect-news 12:15 首跑静默验证通过** | 日报/自动消息降噪 + 因子日扫超时修复 |
 | 2026-09-02 | **日报×2+周报 从 agent-mode 改 no_agent**（`report_daily.sh`/`report_weekly.sh`），脱离 spanagent LLM 网关（503/429 连续 3 天杀任务）；**新建采集三件套 cron**：龙虎榜 17:20、新闻每2h、ETF 20:00（此前均无调度，数据陈旧 20-55 天） | 数据管线可靠性 (2026-09-02 评审) |
 | 2026-08-27 | 新增 `scripts/run_event_shadow.py` + cron job `event-risk-shadow`（事件风险影子运行，事件拦截的前置数据源） | 事件风险开关 |
 | 2026-08-24 | **P0 修复**: Hermes cron 默认 120s 硬超时会杀掉仍在跑的 no_agent 脚本, 导致因子扫描连续 8 个交易日缺快照。已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800` | cron 规范化 |
