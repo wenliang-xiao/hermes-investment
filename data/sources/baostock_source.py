@@ -104,10 +104,11 @@ def _bs_login_old():
 
 def _a_code(symbol: str) -> str:
     """Convert 6-digit code to baostock format (sh/sz.xxxxxx)"""
-    if symbol.startswith(("60", "68", "51", "15", "16")):
-        return f"sh.{symbol}"
-    elif symbol.startswith(("00", "30", "159")):
+    # 注意顺序: "159" 必须在 "15" 之前匹配 (深市 ETF 159xxx → sz.)
+    if symbol.startswith(("159", "00", "30")):
         return f"sz.{symbol}"
+    elif symbol.startswith(("60", "68", "51", "15", "16")):
+        return f"sh.{symbol}"
     return symbol
 
 

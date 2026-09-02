@@ -136,9 +136,43 @@ def get_history_futures(symbol: str, days: int = 600):
 
 
 def get_history_etf(symbol: str, days: int = 600):
-    """ETF历史 (AKShare)"""
+    """ETF历史 (AKShare)
+
+    主用新浪源 fund_etf_hist_sina (需 sh/sz 前缀, 快且稳)。
+    东财 fund_etf_hist_em 作为 fallback (2026-09 起东财 hist 接口常被 RemoteDisconnected 限流)。
+    """
     import akshare as ak
     from datetime import datetime, timedelta
+
+    # 加交易所前缀 (新浪要求 sh510300 / sz159915)
+    if symbol.isdigit() and len(symbol) == 6:
+        if symbol.startswith(("159", "00", "30")):
+            prefixed = f"sz{symbol}"
+        else:
+            prefixed = f"sh{symbol}"
+    else:
+        prefixed = symbol
+
+    # 1) 新浪源主路径
+    try:
+        df = ak.fund_etf_hist_sina(symbol=prefixed)
+        if df is not None and not df.empty and "date" in df.columns and "close" in df.columns:
+            df = df.tail(days)
+            dates = df["date"].tolist()
+            if dates:
+                return {
+                    "symbol": symbol,
+                    "dates": [str(d) for d in dates],
+                    "open": [float(v) if v else 0 for v in df.get("open", [0] * len(dates))],
+                    "high": [float(v) if v else 0 for v in df.get("high", [0] * len(dates))],
+                    "low": [float(v) if v else 0 for v in df.get("low", [0] * len(dates))],
+                    "close": [float(v) if v else 0 for v in df.get("close", [0] * len(dates))],
+                    "volume": [float(v) if v else 0 for v in df.get("volume", [0] * len(dates))],
+                }
+    except Exception:
+        pass
+
+    # 2) 东财源 fallback
     end = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=days + 30)).strftime("%Y%m%d")
     try:

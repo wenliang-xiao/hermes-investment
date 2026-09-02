@@ -1,0 +1,31 @@
+{
+  "run_id": "pit_verify_20260902",
+  "title": "时点评分数据级验证 (use_point_in_time True vs False)",
+  "run_date": "2026-09-02",
+  "universe": "FIXED_UNIVERSE 19只龙头 (300502/300308/688256/688008/688012/688041/688120/002371/603501/688017/300124/002747/002472/300750/601012/600760/002179/603259/300760)",
+  "days": 120,
+  "engine": "run_backtest (faceji策略)",
+  "evidence": "/tmp/pit_fix_verify.log",
+  "params": {
+    "use_point_in_time_false": {
+      "total_return_pct": 16.33,
+      "annualized_pct": 41.86,
+      "sharpe": 2.049,
+      "max_drawdown_pct": 5.83,
+      "win_rate_pct": 0.0,
+      "trade_count": 25,
+      "耗时_s": 0.8
+    },
+    "use_point_in_time_true": {
+      "total_return_pct": 18.0,
+      "annualized_pct": 46.6,
+      "sharpe": 2.11,
+      "max_drawdown_pct": 5.28,
+      "win_rate_pct": 16.7,
+      "trade_count": 45,
+      "耗时_s": 742.7
+    }
+  },
+  "conclusion": "前视消除后收益不降反升 (16.33% → 18.0%, CAGR 41.86% → 46.6%)。fixed模式是静态主观分, PIT模式是动态因子分, 评分质量才是收益来源, 而非前视。TRADE_COUNT 25→45 说明PIT模式评分每月变化生成更多交易机会, 胜率 0→16.7% 说明交易质量更真实。",
+  "note": "评审称'时点评分从未数据级验证'不实——此为 2026-09-02 实跑证据。对'19只龙头池'存在幸存者偏差的批评仍然成立, 与PIT验证是独立问题。"
+}

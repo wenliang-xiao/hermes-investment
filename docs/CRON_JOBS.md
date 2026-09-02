@@ -23,21 +23,25 @@
 
 ## 1. 任务总览
 
-共 **6 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
+共 **9 个** 常驻 cron 任务，全部在 `default` Hermes profile 下：
 
 | Job ID | 名称 | Schedule | 频率 | 推送目标 | 工作目录 |
 |---|---|---|---|---|---|
-| `ec73ef6de848` | 面基日报·盘前简报 | `30 8 * * 1-5` | 工作日 08:30 | 飞书「知行合一」群 | investment_system |
-| `233e3070a0b3` | 面基日报·盘后 | `0 18 * * 1-5` | 工作日 18:00 | 飞书「知行合一」群 | investment_system |
-| `aa3d2e888cc7` | 面基周报 | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
+| `ec73ef6de848` | 面基日报·盘前简报 (no_agent) | `30 8 * * 1-5` | 工作日 08:30 | 飞书「知行合一」群 | investment_system |
+| `233e3070a0b3` | 面基日报·盘后 (no_agent) | `0 18 * * 1-5` | 工作日 18:00 | 飞书「知行合一」群 | investment_system |
+| `aa3d2e888cc7` | 面基周报 (no_agent) | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
 | `1f704ff45437` | faceji-factor-daily-scan | `30 9 * * 1-5` | 工作日 09:30 | origin（本对话） | investment_system |
 | `64b330ed994e` | factor-snapshot-watchdog | `0 17 * * 1-5` | 工作日 17:00 | origin（本对话） | investment_system |
 | `cbda6228d443` | event-risk-shadow | `0 8 * * 1-5` | 工作日 08:00 | 无（静默写文件） | investment_system |
+| `8699718a1e8c` | collect-dragon-tiger | `20 17 * * 1-5` | 工作日 17:20 | origin（成功静默） | investment_system |
+| `5ee6817c13a3` | collect-news | `15 */2 * * 1-5` | 工作日每2h 15分 | origin（成功静默） | investment_system |
+| `bb363e122d0d` | collect-etf | `0 20 * * 1-5` | 工作日 20:00 | origin（成功静默） | investment_system |
 
 > **推送目标说明:**
 > - 日报×2 + 周报 → 飞书群 `oc_4c9d6445fab7f3a2ada0c410f3aa7043`（知行合一）
 > - faceji-factor-daily-scan → `origin`（创建时所在的对话/频道）
 > - factor-snapshot-watchdog → `origin`（no_agent 看门狗，健康时静默，快照缺失时告警）
+> - **采集三件套（龙虎榜/新闻/ETF）→ `origin`，watchdog 模式：成功无 stdout 静默，失败输出告警**
 
 ---
 
@@ -46,20 +50,28 @@
 ### 2.1 面基日报·盘前简报 (`ec73ef6de848`)
 
 - **Schedule:** 工作日 08:30（开盘前 5 分钟读完）
-- **Skill:** `devops/v10-trading-system-maintenance`
-- **执行:** 运行面基三源融合日报 v10 盘前版并推送
-- **关键:** 8 分钟同步仪表盘（DailyReport: 08:30 → dashboard）
+- **模式:** `no_agent=True`（确定性脚本，无 LLM 依赖）——**2026-09-02 从 agent-mode 改**
+- **执行:** `~/.hermes/scripts/report_daily.sh` → `scripts/run_daily.py`
+- **关键:** 8 分钟同步仪表盘（DailyReport: 08:30 → dashboard）；脚本自建飞书文档并打印 `✅`+`📄` 两行，stdout 原样投递到飞书群
+- **为何改 no_agent:** agent-mode 的 cron 依赖 LLM 网关 `api.spanagent.xyz`，2026-08-31 起网关对 deepseek-v4-flash 持续 `503 No available channel` → 重试 → `429 限流`，**连续 3 天日报整个没跑**（`msgs=2 tokens=~23k`，脚本一行没执行）。脚本本身是确定性 Python，无任何 LLM 调用，改 no_agent 后与网关彻底解耦。
 
 ### 2.2 面基日报·盘后 (`233e3070a0b3`)
 
 - **Schedule:** 工作日 18:00
-- **Skill:** `devops/v10-trading-system-maintenance`
-- **执行:** 日报 v10 盘后版（全量扫描 + 模拟盘执行 + 飞书发布）
+- **模式:** `no_agent=True`（确定性脚本，无 LLM 依赖）——**2026-09-02 从 agent-mode 改**
+- **执行:** `~/.hermes/scripts/report_daily.sh` → `scripts/run_daily.py`（脚本按当前时间自动区分盘前/盘后 session）
+- **日报 v10 盘后版:** 全量扫描 + 模拟盘执行 + 飞书发布
 
 ### 2.3 面基周报 (`aa3d2e888cc7`)
 
 - **Schedule:** 周日 18:00
-- **执行:** `cd ~/.hermes/investment_system && python3 scripts/run_weekly.py`
+- **模式:** `no_agent=True`（确定性脚本）——**2026-09-02 从 agent-mode 改**
+- **执行:** `~/.hermes/scripts/report_weekly.sh` → `scripts/run_weekly.py`
+- **完整命令:**
+  ```bash
+  cd /home/admin/.hermes/investment_system && \
+    /home/admin/.hermes/hermes-agent/venv/bin/python scripts/run_weekly.py
+  ```
 
 ### 2.4 faceji-factor-daily-scan (`1f704ff45437`) ⭐ 回测数据累积
 
@@ -126,6 +138,33 @@
 - 若影子脚本不跑，该文件不存在 → `event_blocks_buy` 返回 False → 事件拦截静默失效。
 - 详见 `docs/plans/event-risk-switch-pre-launch-checklist.md`。
 
+### 2.7 collect-dragon-tiger (`8699718a1e8c`) 🐉 龙虎榜每日采集
+
+**用途:** 每日采集最新龙虎榜数据（上榜/净买入/席位）到 `data/dragon_tiger.json`，供证据链/日报使用。
+
+- **Schedule:** 工作日 17:20（收盘后）
+- **模式:** `no_agent=True`（watchdog 模式——成功无 stdout 静默，失败输出告警）
+- **执行:** `~/.hermes/scripts/collect_dragon_tiger.sh` → `scripts/run_dragon_tiger.py --no-seats`
+- **为何新建（2026-09-02）:** 该脚本从无 cron 调度，只能手动跑。数据文件上次更新 2026-08-12（20 天陈旧），评审暴露"龙虎榜 496h expired"。建成 cron 后每天自动刷新。
+
+### 2.8 collect-news (`5ee6817c13a3`) 📰 新闻管线每日采集
+
+**用途:** 每日多次刷新新闻缓存 `data/news_cache.json`（快讯/电报，quick 模式 2-5s），供日报新闻引擎使用。
+
+- **Schedule:** 工作日每 2 小时 x:15（08:15 起）
+- **模式:** `no_agent=True`（watchdog 模式）
+- **执行:** `~/.hermes/scripts/collect_news.sh` → `scripts/run_news_pipeline.py --mode quick`
+- **为何新建（2026-09-02）:** 原先无 cron 调度，缓存上次更新 2026-08-31（39h 陈旧），评审暴露"新闻缓存 39h expired"。每 2h 刷新后日报盘前 08:30 一定能读到当日新闻。
+
+### 2.9 collect-etf (`bb363e122d0d`) 📦 ETF动态发现每日采集
+
+**用途:** 每日扫描全量 A股 ETF（多因子评分）输出动态 ETF 池到 `data/etf_discovery.json`。
+
+- **Schedule:** 工作日 20:00（夜间，全量扫描耗时长）
+- **模式:** `no_agent=True`（watchdog 模式）
+- **执行:** `~/.hermes/scripts/collect_etf.sh` → `scripts/run_etf_discovery.py --top-n 10 --per-category 2`
+- **为何新建（2026-09-02）:** 原先无 cron 调度，文件上次更新 2026-07-08（55 天陈旧，评审暴露"ETF发现 1334h expired"）。注意全量扫描较慢（akshare `fund_etf_spot_em` 37s + 逐只评分），如单次超时由下次 cron 再跑，mtime 校验保证不虚报。
+
 ---
 
 ## 3. 数据管线健康度
@@ -179,6 +218,7 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-02 | **日报×2+周报 从 agent-mode 改 no_agent**（`report_daily.sh`/`report_weekly.sh`），脱离 spanagent LLM 网关（503/429 连续 3 天杀任务）；**新建采集三件套 cron**：龙虎榜 17:20、新闻每2h、ETF 20:00（此前均无调度，数据陈旧 20-55 天） | 数据管线可靠性 (2026-09-02 评审) |
 | 2026-08-27 | 新增 `scripts/run_event_shadow.py` + cron job `event-risk-shadow`（事件风险影子运行，事件拦截的前置数据源） | 事件风险开关 |
 | 2026-08-24 | **P0 修复**: Hermes cron 默认 120s 硬超时会杀掉仍在跑的 no_agent 脚本, 导致因子扫描连续 8 个交易日缺快照。已在 `~/.hermes/config.yaml` 设 `cron.script_timeout_seconds: 1800` | cron 规范化 |
 | 2026-08-13 | 新增 `scripts/cron_watchdog.py` 看门狗 + cron job `factor-snapshot-watchdog`（主动故障检测） | cron 规范化 |

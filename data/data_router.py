@@ -94,7 +94,16 @@ def _detect_source(symbol: str) -> str:
     if symbol.startswith(("sh.", "sz.")):
         return "baostock"
 
-    # A股 (6位数字，含ETF — baostock 统一获取 A股+ETF)
+    # 场内 ETF/LOF (6位数字) — baostock 不支持场内 ETF 日线 (RemoteDisconnected),
+    # 必须直接路由 akshare ETF 源。代码段 (东财全量分布: 15x/51x/56x/58x/52x/53x):
+    #   沪市: 51xxxx(ETF) 52xxxx(LOF) 53xxxx(跨境ETF) 56xxxx(科创板ETF) 58xxxx(科创50ETF)
+    #   深市: 15xxxx(ETF)
+    if symbol.isdigit() and len(symbol) == 6 and symbol.startswith(
+        ("51", "52", "53", "56", "58", "15")
+    ):
+        return "akshare_etf"
+
+    # A股 (6位数字)
     if symbol.isdigit() and len(symbol) == 6:
         return "baostock"
 
@@ -136,6 +145,9 @@ def get_history(symbol: str, days: int = 1200) -> Optional[dict]:
     elif source == "akshare_futures":
         from data.sources.akshare_source import get_history_futures
         return get_history_futures(symbol, days)
+    elif source == "akshare_etf":
+        from data.sources.akshare_source import get_history_etf
+        return get_history_etf(symbol, days)
     return None
 
 
