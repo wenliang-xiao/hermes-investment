@@ -56,3 +56,25 @@ def test_ic_history_asof_filter(tmp_path):
     icw.as_of = "2024-06-30"
     hist = icw.get_ic_history()
     assert [h["date"] for h in hist] == ["2024-01-01", "2024-06-01"], f"got {[h['date'] for h in hist]}"
+
+
+def test_get_fin_asof_uses_financial_history(monkeypatch):
+    """as_of 模式下 _get_fin 从财务历史映射字段(而非当前财报), 消除财务前视。"""
+    import sys
+    import types
+    from engine.factor_engine import FactorEngine
+    # mock data.data_layer 模块(避免触发其 investment_system import)
+    fake_dl = types.ModuleType("data.data_layer")
+    fake_dl.get_financial_history = lambda symbol, quarters=4, as_of_date=None: [{
+        "period": "2024Q1", "roe": 17.9, "gross_margin": 89.5,
+        "net_margin": 52.0, "debt_ratio": 15.0, "profit_growth": 8.0,
+    }]
+    monkeypatch.setitem(sys.modules, "data.data_layer", fake_dl)
+    engine = FactorEngine()
+    engine.as_of = "2024-06-30"
+    fin = engine._get_fin("600519")
+    assert fin.get("净资产收益率") == 17.9
+    assert fin.get("毛利率") == 89.5
+    assert fin.get("净利率") == 52.0
+    assert fin.get("资产负债率") == 15.0
+    assert fin.get("净利润同比增长率") == 8.0

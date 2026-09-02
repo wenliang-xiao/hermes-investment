@@ -737,15 +737,41 @@ class FactorEngine:
             return {}
 
     def _get_fin(self, symbol: str) -> dict:
-        """获取财务数据（带缓存）"""
+        """获取财务数据（带缓存；as_of 模式下从财务历史 point-in-time 取）"""
+        as_of = getattr(self, "as_of", None)
+        cache_key = f"{symbol}@{as_of}" if as_of else symbol
         with self._cache_lock:  # 双检锁
-            if symbol in self._fin_cache:
-                return self._fin_cache[symbol]
+            if cache_key in self._fin_cache:
+                return self._fin_cache[cache_key]
+        if as_of:
+            # point-in-time: 从财务历史(as_of 过滤)取最新一期, 映射为 fin_report 字段,
+            # 消除"用未来财报回测过去"的前视(营收增速/股息率/每股现金流字段历史源缺失, 降级用当前值)
+            from data.data_layer import get_financial_history
+            try:
+                fh = get_financial_history(symbol, quarters=4, as_of_date=as_of) or []
+                if fh:
+                    latest = fh[0]
+                    fin = {}
+                    if latest.get("roe") is not None:
+                        fin["净资产收益率"] = latest["roe"]
+                    if latest.get("gross_margin") is not None:
+                        fin["毛利率"] = latest["gross_margin"]
+                    if latest.get("net_margin") is not None:
+                        fin["净利率"] = latest["net_margin"]
+                    if latest.get("debt_ratio") is not None:
+                        fin["资产负债率"] = latest["debt_ratio"]
+                    if latest.get("profit_growth") is not None:
+                        fin["净利润同比增长率"] = latest["profit_growth"]
+                    with self._cache_lock:
+                        self._fin_cache[cache_key] = fin
+                    return fin
+            except Exception:
+                pass  # 财务历史拿不到时降级到 get_financial_report(当前值)
         from data.data_layer import get_financial_report
         try:
             fin = get_financial_report(symbol) or {}
             with self._cache_lock:
-                self._fin_cache[symbol] = fin
+                self._fin_cache[cache_key] = fin
             return fin
         except Exception as e:
             logger.warning(f"[factor_engine] get_financial_report({symbol}) failed: {e}")
