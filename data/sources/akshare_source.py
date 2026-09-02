@@ -43,16 +43,20 @@ def get_rt_em(symbol: str):
             price = float(data[3]) if data[3] else 0
             if price <= 0:
                 return None
+            # volume 单位: 沪深主板/创业板是"手"(×100转股), 科创板(688/689)直接是"股"
+            vol_raw = float(data[6]) if data[6] else 0
+            volume = vol_raw if sym.startswith(("688", "689")) else vol_raw * 100
             return {
                 "symbol": sym,
                 "name": str(data[1]),
                 "price": price,
                 "change_pct": round(float(data[32]) if data[32] else 0, 2),
                 "change": float(data[31]) if data[31] else 0,
-                "volume": float(data[6]) if data[6] else 0,
+                "volume": volume,
                 "amount": float(data[37]) if data[37] else 0,
                 "turnover_rate": float(data[38]) if data[38] else None,
                 "pe": float(data[39]) if data[39] else None,
+                "pb": float(data[46]) if data[46] else None,
                 "source": "tencent",
             }
         except Exception as e:
