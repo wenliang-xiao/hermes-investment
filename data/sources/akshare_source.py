@@ -201,3 +201,67 @@ def get_history_etf(symbol: str, days: int = 600):
         }
     except Exception:
         return None
+
+def get_history_hk(symbol: str, days: int = 600):
+    """港股历史日线(腾讯 ifzq, 零鉴权)。symbol 如 0700.HK。
+
+    返回 {symbol, dates, open, close, high, low, volume}。
+    注意 ifzq 字段顺序是 [date, open, close, high, low, volume](close 在第3位)。
+    """
+    import requests
+    code = symbol.replace(".HK", "").zfill(5)
+    url = (f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+           f"?param=hk{code},day,,,{days},qfq")
+    try:
+        r = requests.get(url, timeout=10)
+        d = r.json()
+        node = (d.get("data") or {}).get(f"hk{code}") or {}
+        klines = node.get("qfqday") or node.get("day") or []
+    except Exception:
+        return None
+    if not klines:
+        return None
+
+    dates, opens, closes, highs, lows, volumes = [], [], [], [], [], []
+    for k in klines:
+        if len(k) < 6:
+            continue
+        dates.append(str(k[0]))
+        opens.append(float(k[1]))
+        closes.append(float(k[2]))
+        highs.append(float(k[3]))
+        lows.append(float(k[4]))
+        volumes.append(float(k[5]))
+    return {"symbol": symbol, "dates": dates, "open": opens, "close": closes,
+            "high": highs, "low": lows, "volume": volumes}
+
+
+def get_rt_hk(symbol: str):
+    """港股实时快照(腾讯 qt.gtimg, 零鉴权)。symbol 如 0700.HK。
+
+    港股字段布局与 A 股不同: [3]=现价 [32]=涨跌幅% [39]=PE, [6]=成交量(股)。
+    """
+    import requests
+    code = symbol.replace(".HK", "").zfill(5)
+    url = f"https://qt.gtimg.cn/q=hk{code}"
+    try:
+        r = requests.get(url, timeout=5)
+        text = r.content.decode("gbk", errors="replace")
+    except Exception:
+        return None
+    data = text.split('"')[1].split("~") if '"' in text else []
+    if len(data) < 40:
+        return None
+    price = float(data[3]) if data[3] else 0
+    if price <= 0:
+        return None
+    return {
+        "symbol": symbol,
+        "name": str(data[1]),
+        "price": price,
+        "change_pct": round(float(data[32]) if data[32] else 0, 2),
+        "volume": float(data[6]) if data[6] else 0,
+        "amount": float(data[37]) if data[37] else 0,
+        "pe": float(data[39]) if data[39] else None,
+        "source": "tencent",
+    }

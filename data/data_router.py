@@ -76,9 +76,9 @@ def _detect_source(symbol: str) -> str:
 
     Returns: "baostock" | "yfinance" | "akshare_futures"
     """
-    # 港股
+    # 港股 (腾讯零鉴权, 替代 yfinance 避免限流不确定性)
     if symbol.endswith(".HK"):
-        return "yfinance"
+        return "tencent"
 
     # 指数/美债收益率
     if symbol.startswith("^") or symbol in ("DXY",):
@@ -142,6 +142,9 @@ def get_history(symbol: str, days: int = 1200) -> Optional[dict]:
     elif source == "yfinance":
         from data.sources.yahoo_source import get_history_yahoo
         return get_history_yahoo(symbol, days)
+    elif source == "tencent":
+        from data.sources.akshare_source import get_history_hk
+        return get_history_hk(symbol, days)
     elif source == "akshare_futures":
         from data.sources.akshare_source import get_history_futures
         return get_history_futures(symbol, days)
@@ -166,6 +169,9 @@ def get_rt(symbol: str) -> Optional[dict]:
     elif source == "yfinance":
         from data.sources.yahoo_source import get_rt_yahoo
         return get_rt_yahoo(symbol)
+    elif source == "tencent":
+        from data.sources.akshare_source import get_rt_hk
+        return get_rt_hk(symbol)
     elif source == "akshare_futures":
         from data.sources.akshare_source import get_rt_futures
         return get_rt_futures(symbol)
