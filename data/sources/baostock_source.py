@@ -74,6 +74,35 @@ def _timeout_guard(seconds: float):
         signal.signal(signal.SIGALRM, old)
 
 
+def _bs_iter_results(rs, timeout: float = 15):
+    """安全迭代 baostock 结果集 — worker 线程里 rs.next() 也可能挂死。
+
+    用守护线程 + future.wait 实现线程级超时; 超时返回已读部分(可能为空)。
+    主线程场景直接迭代 (SIGALRM 由外层守护)。
+    """
+    if threading.current_thread() is threading.main_thread():
+        rows = []
+        while rs.next():
+            rows.append(rs.get_row_data())
+        return rows
+
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+    rows: list = []
+    def _drain():
+        while rs.next():
+            rows.append(rs.get_row_data())
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    fut = executor.submit(_drain)
+    try:
+        fut.result(timeout=timeout)
+    except FutureTimeout:
+        logger.warning(f"[baostock] 结果集读取超时(>{timeout:.0f}s) — 返回已读 {len(rows)} 行")
+    finally:
+        executor.shutdown(wait=False)
+    return rows
+
+
 def _bs_login(bs):
     """带超时的 baostock 登录 (挂死时抛 BSTimeoutError)"""
     with _BS_LOCK, _timeout_guard(BS_LOGIN_TIMEOUT):
@@ -84,14 +113,41 @@ def _bs_login(bs):
 
 
 def _bs_query(bs, bs_code: str, fields: str, start_date: str, end_date: str):
-    """带超时的 baostock 历史查询 (挂死时抛 BSTimeoutError)"""
-    with _BS_LOCK, _timeout_guard(BS_CALL_TIMEOUT):
-        rs = bs.query_history_k_data_plus(
+    """带超时的 baostock 历史查询 (挂死时抛 BSTimeoutError)
+
+    线程安全修复 (2026-09-02): SIGALRM 仅主线程可用; worker 线程里的 C 层 recv
+    挂死无法被 SIGALRM 打断。这里用守护线程 + future.wait(timeout) 实现线程级超时:
+    超时则放弃该查询(返回 None), 由调用方降级 akshare。
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+    def _do_query():
+        # 注意: _BS_LOCK 由外层 get_history_a 持有; 这里只执行 C 层调用
+        return bs.query_history_k_data_plus(
             bs_code, fields,
             start_date=start_date, end_date=end_date,
             frequency="d", adjustflag="2"  # 前复权
         )
-    return rs
+
+    # 主线程: SIGALRM 守护原逻辑
+    if threading.current_thread() is threading.main_thread():
+        with _timeout_guard(BS_CALL_TIMEOUT):
+            return bs.query_history_k_data_plus(
+                bs_code, fields,
+                start_date=start_date, end_date=end_date,
+                frequency="d", adjustflag="2"
+            )
+
+    # worker 线程: 守护线程 + future timeout
+    executor = ThreadPoolExecutor(max_workers=1)
+    fut = executor.submit(_do_query)
+    try:
+        return fut.result(timeout=BS_CALL_TIMEOUT)
+    except FutureTimeout:
+        logger.warning(f"[baostock] {bs_code} worker线程查询超时(>{BS_CALL_TIMEOUT:.0f}s) — 放弃")
+        return None
+    finally:
+        executor.shutdown(wait=False)
 
 
 def _bs_login_old():
@@ -175,13 +231,16 @@ def _get_history_a_bs(symbol: str, days: int = 1200):
 
         # Query (超时守护) — 持久会话不再每次 login/logout
         rs = _bs_query(bs, bs_code, fields, start_date, end_date)
+        if rs is None:
+            # worker线程超时放弃 → 降级 akshare
+            logger.warning(f"[baostock] {symbol} 查询超时放弃 → 降级 akshare")
+            return _fallback_akshare_etf(symbol)
 
         if rs.error_code != "0":
             return None
 
-        rows = []
-        while rs.next():
-            rows.append(rs.get_row_data())
+        # 安全读取 (worker线程有守护超时; 主线程 SIGALRM)
+        rows = _bs_iter_results(rs, timeout=BS_CALL_TIMEOUT)
 
     if not rows:
         # baostock没数据 → AKShare ETF 历史
