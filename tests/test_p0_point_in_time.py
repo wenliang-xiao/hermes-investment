@@ -82,8 +82,9 @@ def test_get_fin_asof_uses_financial_history(monkeypatch):
 
 def test_financial_report_bs_fallback_uses_field_names():
     """get_financial_report 的 baostock fallback 用字段名提取, 非索引硬编码(修复字段错位)。"""
-    import data.data_layer as dl
-    src = open(dl.__file__, encoding="utf-8").read()
+    from pathlib import Path
+    src_path = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "data" / "data_layer.py"
+    src = src_path.read_text(encoding="utf-8")
     # 旧的索引错位写法: (3, "净资产收益率"), (4, "营业收入同比增长率"), (4, "毛利率")
     assert 'for idx, key in [(3, "净资产收益率")' not in src, "仍有旧索引错位(growth_data)"
     assert 'for idx, key in [(4, "毛利率")' not in src, "仍有旧索引错位(dupont_data)"
