@@ -402,67 +402,52 @@ def get_financial_report(symbol: str) -> dict:
             return result
     except Exception:
         pass
-    # ③ baostock (免费无限频, 兜底)
+    # ③ baostock (免费无限频, 兜底) — 用字段名提取(修复旧索引硬编码的字段错位)
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
 
-    # 增长数据
+    def _field(rs, name):
+        for r in _bs_iter_results(rs, timeout=15):
+            try:
+                v = dict(zip(rs.fields, r)).get(name)
+                if v and str(v).strip():
+                    return float(v)
+            except Exception:
+                continue
+        return None
+
     for year_off in [1, 2]:
         for quarter in [4, 2]:
             try:
-                rs = _bs_query_with_timeout(bs.query_growth_data, code=bs_code,
-                    year=datetime.now().year - year_off, quarter=quarter)
-                if rs.error_code != "0":
-                    continue
-                raw_rows = _bs_iter_results(rs, timeout=15)
-                for r in raw_rows:
-                    for idx, key in [(3, "净资产收益率"), (4, "营业收入同比增长率"), (5, "净利润同比增长率")]:
-                        try:
-                            if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
-                                v = float(r[idx])
-                                if not np.isnan(v) and key not in result:
-                                    result[key] = v * 100
-                        except:
-                            pass
+                # profit_data: roeAvg=ROE, gpMargin=毛利率, npMargin=净利率
+                rs_p = _bs_query_with_timeout(bs.query_profit_data, code=bs_code,
+                                              year=datetime.now().year - year_off, quarter=quarter)
+                if rs_p.error_code == "0":
+                    roe = _field(rs_p, "roeAvg")
+                    if roe is not None and "净资产收益率" not in result:
+                        result["净资产收益率"] = roe * 100
+                    gp = _field(rs_p, "gpMargin")
+                    if gp is not None and "毛利率" not in result:
+                        result["毛利率"] = gp * 100
+                    nm = _field(rs_p, "npMargin")
+                    if nm is not None and "净利率" not in result:
+                        result["净利率"] = nm * 100
+
+                # growth_data: YOYNI=净利润同比增速(营收增速无正确字段, 不提供)
+                rs_g = _bs_query_with_timeout(bs.query_growth_data, code=bs_code,
+                                              year=datetime.now().year - year_off, quarter=quarter)
+                if rs_g.error_code == "0":
+                    yoyni = _field(rs_g, "YOYNI")
+                    if yoyni is not None and "净利润同比增长率" not in result:
+                        result["净利润同比增长率"] = yoyni * 100
+
                 if result:
                     break
-            except:
+            except Exception:
                 continue
         if result:
             break
-
-    # 杜邦指标补充
-    needs_dupont = any(k not in result for k in ["毛利率", "每股经营现金流", "净利率"])
-    if needs_dupont:
-        for year_off in [1, 2]:
-            for quarter in [4, 2]:
-                try:
-                    rs = _bs_query_with_timeout(bs.query_dupont_data, code=bs_code,
-                        year=datetime.now().year - year_off, quarter=quarter)
-                    if rs.error_code != "0":
-                        continue
-                    raw_rows = _bs_iter_results(rs, timeout=15)
-                    for r in raw_rows:
-                        for idx, key in [(4, "毛利率"), (5, "净利率")]:
-                            try:
-                                if len(r) > idx and r[idx] and str(r[idx]).strip() != "":
-                                    v = float(r[idx])
-                                    if not np.isnan(v) and key not in result:
-                                        result[key] = v * 100
-                            except:
-                                pass
-                        # 每股经营现金流不乘100
-                        try:
-                            if len(r) > 7 and r[7] and str(r[7]).strip() != "":
-                                ocps = float(r[7])
-                                if not np.isnan(ocps) and "每股经营现金流" not in result:
-                                    result["每股经营现金流"] = ocps
-                        except:
-                            pass
-                    break
-                except:
-                    continue
 
     _FIN_CACHE[symbol] = result
     _fin_disk_save(symbol, result)

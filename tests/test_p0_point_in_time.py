@@ -78,3 +78,16 @@ def test_get_fin_asof_uses_financial_history(monkeypatch):
     assert fin.get("净利率") == 52.0
     assert fin.get("资产负债率") == 15.0
     assert fin.get("净利润同比增长率") == 8.0
+
+
+def test_financial_report_bs_fallback_uses_field_names():
+    """get_financial_report 的 baostock fallback 用字段名提取, 非索引硬编码(修复字段错位)。"""
+    import data.data_layer as dl
+    src = open(dl.__file__, encoding="utf-8").read()
+    # 旧的索引错位写法: (3, "净资产收益率"), (4, "营业收入同比增长率"), (4, "毛利率")
+    assert 'for idx, key in [(3, "净资产收益率")' not in src, "仍有旧索引错位(growth_data)"
+    assert 'for idx, key in [(4, "毛利率")' not in src, "仍有旧索引错位(dupont_data)"
+    # 新的字段名提取
+    assert 'roeAvg' in src, "应用字段名 roeAvg 提取 ROE"
+    assert 'gpMargin' in src, "应用字段名 gpMargin 提取毛利率"
+    assert 'YOYNI' in src, "应用字段名 YOYNI 提取净利增速"
