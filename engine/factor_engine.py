@@ -1265,26 +1265,39 @@ class FactorEngine:
         # 线程安全: 数据源层已加锁 (baostock 全局锁 / QTSource session+缓存锁)。
         # 内存约束 (2026-08-24): 本机 1.8GB 无 swap, 6 并发 × 250天日线 DataFrame
         # 峰值 ~760MB 触发 OOM kill。降到 3 并发, 同时每批后显式 clear_cache+gc。
+        # 小批次降级 (2026-09-02): ≤10 只 (港美股 Batch#5 场景) 强制串行 —
+        #   yfinance 并发触发 Yahoo 限流 (429), 重试退避叠加无输出卡死;
+        #   9只串行 = 9×~10s ≈ 90s, 远快于并发被限流的 500s+ 超时。
         def _collect_one(sym: str) -> dict[str, float | None]:
             return {sk: self._get_sub_value(sk, sym) for sk in SUB_FACTOR_DEFS}
 
-        _BATCH_WORKERS = 3
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=_BATCH_WORKERS) as pool:
-            futures = {pool.submit(_collect_one, sym): sym for sym in symbols}
-            done = 0
-            for fut in as_completed(futures):
-                sym = futures[fut]
+        if n <= 10:
+            for sym in symbols:
                 try:
-                    sub_values = fut.result()
+                    sub_values = _collect_one(sym)
                 except Exception as e:
                     logger.warning(f"[factor_engine] collect({sym}) failed: {e}")
                     sub_values = {}
                 for sk, v in sub_values.items():
                     raw_values[sk][sym] = v
-                done += 1
-                if done % 20 == 0:
-                    logger.info(f"  [factor_engine] {done}/{n} symbols collected")
+        else:
+            _BATCH_WORKERS = 3
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=_BATCH_WORKERS) as pool:
+                futures = {pool.submit(_collect_one, sym): sym for sym in symbols}
+                done = 0
+                for fut in as_completed(futures):
+                    sym = futures[fut]
+                    try:
+                        sub_values = fut.result()
+                    except Exception as e:
+                        logger.warning(f"[factor_engine] collect({sym}) failed: {e}")
+                        sub_values = {}
+                    for sk, v in sub_values.items():
+                        raw_values[sk][sym] = v
+                    done += 1
+                    if done % 20 == 0:
+                        logger.info(f"  [factor_engine] {done}/{n} symbols collected")
 
         # Phase 2: 对每个子因子做产业链内截面分位数标准化（行业中性化）
         chain_map = _build_chain_map(symbols)

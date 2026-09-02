@@ -129,7 +129,15 @@ def _bs_login():
                 _bs_logged_in = False
 
 def _bs_code(symbol: str) -> str:
-    """转换为baostock代码: sz.300502 / sh.600519"""
+    """转换为baostock代码: sz.300502 / sh.600519
+
+    P0 (2026-09-02): baostock 仅支持 A 股 (6位数字)。HK(.HK)/美股(NVDA)等
+    代码此前会生成非法 bs_code (如 sz.0700.HK) → C 层每次报"股票代码应为9位",
+    cron 港美股批次 (daily_factor_scan Batch#5) 被拖慢数百秒刷屏。
+    非 A 股直接抛 ValueError → 各调用方 try/except 优雅降级 (返回空/跳过)。
+    """
+    if not symbol.isdigit() or len(symbol) != 6:
+        raise ValueError(f"_bs_code: 非A股代码 {symbol!r} (baostock仅支持6位A股)")
     sym = symbol.zfill(6)
     if sym.startswith("6"):
         return f"sh.{sym}"
@@ -429,7 +437,10 @@ def get_financial_report(symbol: str) -> dict:
             return result
     except Exception:
         pass
-    # ③ baostock (免费无限频, 兜底) — 用字段名提取(修复旧索引硬编码的字段错位)
+    # ③ baostock (免费无限频, 兜底) — 仅A股。HK/US 无 baostock 财务数据,
+    #   直接返回空 (避免 _bs_code 抛 ValueError + 无谓 login, 拖慢港美股 cron 批次)
+    if not symbol.isdigit() or len(symbol) != 6:
+        return {}
     _bs_login()
     bs_code = _bs_code(symbol)
     result = {}
@@ -493,6 +504,9 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
     key = f"FH_{symbol}_{quarters}"
     if key in _FIN_CACHE:
         return _FIN_CACHE[key]
+    # 仅A股: HK/US 无 baostock 财务历史, 直接返回空
+    if not symbol.isdigit() or len(symbol) != 6:
+        return []
     _bs_login()
     bs_code = _bs_code(symbol)
     history = []
