@@ -28,9 +28,9 @@
 | Job ID | 名称 | Schedule | 频率 | 推送目标 | 工作目录 |
 |---|---|---|---|---|---|
 | `ec73ef6de848` | 面基日报·盘前简报 (no_agent) | `30 8 * * 1-5` | 工作日 08:30 | 飞书「知行合一」群 | investment_system |
-| `233e3070a0b3` | 面基日报·盘后 (no_agent) | `0 18 * * 1-5` | 工作日 18:00 | 飞书「知行合一」群 | investment_system |
+| `233e3070a0b3` | 面基日报·盘后 (no_agent) | `0 19 * * 1-5` | 工作日 19:00 | 飞书「知行合一」群 | investment_system |
 | `aa3d2e888cc7` | 面基周报 (no_agent) | `0 18 * * 0` | 周日 18:00 | 飞书「知行合一」群 | investment_system |
-| `1f704ff45437` | faceji-factor-daily-scan | `30 9 * * 1-5` | 工作日 09:30 | origin（本对话） | investment_system |
+| `1f704ff45437` | faceji-factor-daily-scan | `0 7 * * 1-5` | 工作日 07:00 | origin（本对话） | investment_system |
 | `64b330ed994e` | factor-snapshot-watchdog | `0 17 * * 1-5` | 工作日 17:00 | origin（本对话） | investment_system |
 | `cbda6228d443` | event-risk-shadow | `0 8 * * 1-5` | 工作日 08:00 | 无（静默写文件） | investment_system |
 | `8699718a1e8c` | collect-dragon-tiger | `20 17 * * 1-5` | 工作日 17:20 | origin（成功静默） | investment_system |
@@ -57,7 +57,7 @@
 
 ### 2.2 面基日报·盘后 (`233e3070a0b3`)
 
-- **Schedule:** 工作日 18:00
+- **Schedule:** 工作日 19:00（2026-09-02 从 18:00 改：错开 17:00 watchdog 与 17:20 龙虎榜，让日报能读到当日龙虎榜数据）
 - **模式:** `no_agent=True`（确定性脚本，无 LLM 依赖）——**2026-09-02 从 agent-mode 改**
 - **执行:** `~/.hermes/scripts/report_daily.sh` → `scripts/run_daily.py`（脚本按当前时间自动区分盘前/盘后 session）
 - **日报 v10 盘后版:** 全量扫描 + 模拟盘执行 + 飞书发布
@@ -78,7 +78,7 @@
 **用途:** 每天生成 `data/scan_snapshots/scan_snapshot_YYYY-MM-DD.json`，供
 `strategy_comparison` 回测使用（**需要 60+ 天真实数据**）。
 
-- **Schedule:** 工作日 09:30
+- **Schedule:** 工作日 07:00（2026-09-02 从 09:30 改：盘前完成全量扫描 + 快照，让 08:30 盘前日报能读到当日因子分）
 - **模式:** `no_agent=True`（**确定性脚本，无 LLM 依赖**）——2026-08-13 从 agent-mode 改，根治 LLM 网关 502 致命化问题
 - **投递策略 (2026-09-02):** watchdog 模式——成功静默（不再每天发 9KB 摘要），部分完成/失败才输出告警；快照健康由 17:00 watchdog 兜底
 - **执行:** `~/.hermes/scripts/factor_daily_scan.sh` → `scripts/daily_factor_scan.py`（单入口编排器）
@@ -109,7 +109,7 @@
 
 **用途:** 主动监测因子扫描快照是否连续缺失，**及时发现问题**（用户核心诉求）。
 
-- **Schedule:** 工作日 17:00（晚于 09:30 因子扫描，确认当天是否产出快照）
+- **Schedule:** 工作日 17:00（晚于 07:00 因子扫描，确认当天是否产出快照）
 - **模式:** `no_agent=True` 看门狗（watchdog pattern）——健康时无 stdout（静默不打扰），
   快照缺失时输出告警并投递给用户。
 - **执行脚本:** `~/.hermes/scripts/factor_snapshot_watchdog.sh` → `scripts/cron_watchdog.py`
@@ -169,7 +169,18 @@
 
 ---
 
-## 3. 数据管线健康度
+## 3. 一键健康检查（任何助手/人工入口）
+
+```bash
+cd /home/admin/.hermes/investment_system && \
+  /home/admin/.hermes/hermes-agent/venv/bin/python scripts/cron_health_check.py
+```
+
+输出：① 9 个 cron 任务清单（调度+上次运行+状态）② 关键数据文件新鲜度 ③ 回测快照累积进度 ④ 今日失败/陈旧数据告警。
+**任何助手（面基助手/opencode/Claude）排查 cron 问题前先跑这条命令**，一眼看清全貌。
+退出码：0=健康，1=有告警（可 cron 化巡检）。
+
+## 4. 数据管线健康度
 
 **当前回测快照累积状态:** 见 `data/scan_snapshots/` 目录文件数。
 目标 = **60 天**（`strategy_comparison` 回测需要的真实数据量）。
@@ -180,7 +191,7 @@ ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 
 ---
 
-## 4. 故障排查速查表
+## 5. 故障排查速查表
 
 | 症状 | 根因 | 处置 |
 |---|---|---|
@@ -197,7 +208,7 @@ ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 
 ---
 
-## 5. 主动故障检测
+## 6. 主动故障检测
 
 Hermes cron 会在任务失败时给用户投递错误通知（见本仓库 `docs/HERMES_SYSTEM_MANUAL.md`）。
 
@@ -217,10 +228,11 @@ done
 
 ---
 
-## 6. 变更记录
+## 7. 变更记录
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-02 | **时间表调整：因子日扫 09:30→07:00**（盘前完成扫描+快照，供 08:30 盘前日报读当日因子分）；**日报盘后 18:00→19:00**（错开 watchdog/龙虎榜，日报能读当日龙虎榜）；新增 `scripts/cron_health_check.py` 一键健康检查入口 | cron 规范化 (用户指令) |
 | 2026-09-02 | **因子日扫/event-shadow 改 watchdog 静默**（成功不发摘要/JSON，仅失败或高危提醒）；**script_timeout 1800→5400s**（全量扫描 50-60min 需 90min 预算）；**collect-news 12:15 首跑静默验证通过** | 日报/自动消息降噪 + 因子日扫超时修复 |
 | 2026-09-02 | **日报×2+周报 从 agent-mode 改 no_agent**（`report_daily.sh`/`report_weekly.sh`），脱离 spanagent LLM 网关（503/429 连续 3 天杀任务）；**新建采集三件套 cron**：龙虎榜 17:20、新闻每2h、ETF 20:00（此前均无调度，数据陈旧 20-55 天） | 数据管线可靠性 (2026-09-02 评审) |
 | 2026-08-27 | 新增 `scripts/run_event_shadow.py` + cron job `event-risk-shadow`（事件风险影子运行，事件拦截的前置数据源） | 事件风险开关 |
@@ -232,7 +244,7 @@ done
 
 ---
 
-## 7. 相关文档
+## 8. 相关文档
 
 - 运维手册: `docs/HERMES_SYSTEM_MANUAL.md`
 - 因子引擎维护: skill `devops/v10-trading-system-maintenance`
