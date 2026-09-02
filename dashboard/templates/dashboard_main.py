@@ -114,35 +114,35 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
 
   <!-- ======== 六层横条 ======== -->
   <div id="layer-bar" class="grid grid-cols-5 gap-2 mb-2 text-xs">
-    <div class="layer-card layer-l1 bg-gray-800 border border-gray-700 rounded-lg p-2">
+    <div class="layer-card layer-l1 bg-gray-800 border border-gray-700 rounded-lg p-2" title="宏观环境：双门=宏观+趋势双重门控(黄灯=中性)；宽货币·紧信用=货币政策状态；平=趋势温度">
       <div class="flex justify-between items-center">
         <span class="font-semibold text-gray-300">🏛️ 市场环境</span>
         <span id="l1-status" class="badge">-</span>
       </div>
       <div id="l1-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l2 bg-gray-800 border border-gray-700 rounded-lg p-2">
+    <div class="layer-card layer-l2 bg-gray-800 border border-gray-700 rounded-lg p-2" title="资产配置：A股/ETF/债券/黄金的实际仓位占比">
       <div class="flex justify-between items-center">
         <span class="font-semibold text-gray-300">⚖️ 资产配置</span>
         <span id="l2-status" class="badge">-</span>
       </div>
       <div id="l2-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2">
+    <div class="layer-card layer-l3 bg-gray-800 border border-gray-700 rounded-lg p-2" title="选股与找票：候选池数量 + 活跃产业链条数(链=产业链分组)">
       <div class="flex justify-between items-center">
         <span class="font-semibold text-gray-300">🎯 选股·找票</span>
         <span id="l3-status" class="badge">-</span>
       </div>
       <div id="l3-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l5 bg-gray-800 border border-gray-700 rounded-lg p-2">
+    <div class="layer-card layer-l5 bg-gray-800 border border-gray-700 rounded-lg p-2" title="风控：已触发止损数 + 组合最大回撤(normal=正常)">
       <div class="flex justify-between items-center">
         <span class="font-semibold text-gray-300">🛡️ 风控</span>
         <span id="l5-status" class="badge">-</span>
       </div>
       <div id="l5-content" class="text-gray-400 mt-1"></div>
     </div>
-    <div class="layer-card layer-l6 bg-gray-800 border border-gray-700 rounded-lg p-2">
+    <div class="layer-card layer-l6 bg-gray-800 border border-gray-700 rounded-lg p-2" title="纪律：本周各策略交易次数/周频上限(面基/SQ/TA 为三策略简称)">
       <div class="flex justify-between items-center">
         <span class="font-semibold text-gray-300">📋 纪律</span>
         <span id="l6-status" class="badge">-</span>
