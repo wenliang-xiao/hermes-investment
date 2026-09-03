@@ -321,7 +321,7 @@ class TestTradingAgentsDecide:
     def test_force_sell_low_debate(self):
         pos = {"000001": PositionData("000001", entry_price=100, quantity=100)}
         signals = tradingagents.decide(
-            {"000001": 3.0},
+            {"000001": 2.0},
             {"000001": make_tech()},
             {"000001": 100},
             pos, 100000

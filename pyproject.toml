@@ -18,6 +18,8 @@ dependencies = [
     "akshare",
     "yfinance",
     "backtrader",
+    "xalpha",
+    "quantstats",
     "requests",
     "httpx",
     "tqdm",

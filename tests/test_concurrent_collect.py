@@ -77,6 +77,8 @@ def engine_with_slow_sources(monkeypatch):
     monkeypatch.setattr(ys, "get_rt_yahoo", lambda sym: {"pe": 15.0, "price": 10.0})
     # 行业排名因子走 QTSource → mock 掉 (返回确定性排名)
     monkeypatch.setattr(engine, "_get_qt_source", lambda: _FakeQT())
+    # 资金流因子走东财 API → mock 掉 (返回 None), 避免真实网络请求
+    monkeypatch.setattr(engine, "_get_fund_flow_value", lambda sym: None)
     return engine, fin, hist
 
 

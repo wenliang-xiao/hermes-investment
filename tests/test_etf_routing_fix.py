@@ -26,7 +26,7 @@ import pytest
         ("600900", "baostock"),      # A股沪市
         ("300750", "baostock"),      # A股深市创业板
         ("000001", "baostock"),      # A股深市主板
-        ("0700.HK", "yfinance"),     # 港股
+        ("0700.HK", "tencent"),     # 港股（腾讯源, 2026-08 替代 yfinance）
         ("sh.000300", "baostock"),   # 指数
     ],
 )

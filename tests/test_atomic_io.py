@@ -1,5 +1,7 @@
 """Tests for utils/atomic_io — atomic file write utilities."""
 import os, json, tempfile
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from utils.atomic_io import atomic_write_json, atomic_write_pickle
 

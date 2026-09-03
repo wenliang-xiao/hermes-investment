@@ -129,6 +129,8 @@ class TestBuildStatus:
 
 
 class TestReports:
+    pytestmark = pytest.mark.timeout(120)  # quantstats/matplotlib 首次导入慢, 超时放宽
+
     @pytest.fixture(autouse=True)
     def _isolated_report_root(self, tmp_path, monkeypatch):
         """隔离报告目录到 tmp — 防止 clear_reports() 清掉生产 data/backtest_v3_reports/ 的真实报告."""

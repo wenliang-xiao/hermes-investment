@@ -138,6 +138,8 @@ class TestXalphaEngineRealUse:
 
 
 class TestCompareReport:
+    pytestmark = pytest.mark.timeout(120)  # quantstats/matplotlib 首次导入慢, 超时放宽
+
     def test_generate_compare_report_multi_strategy(self, tmp_path, monkeypatch):
         """多策略对比报告: 3 条 NAV → 1 份 HTML 含指标表."""
         import numpy as np
