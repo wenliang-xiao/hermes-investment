@@ -56,6 +56,7 @@ SUB_FACTOR_DEFS = {
     "momentum:20d":          {"source": "derived",    "method": "ret_20d",         "higher_is_better": True,  "label": "20日动量"},
     "momentum:60d":          {"source": "derived",    "method": "ret_60d",         "higher_is_better": True,  "label": "60日动量"},
     "momentum:120d":         {"source": "derived",    "method": "ret_120d",        "higher_is_better": True,  "label": "120日动量"},
+    "momentum:distance_from_high": {"source": "derived", "method": "distance_from_high", "higher_is_better": True, "label": "距新高位置"},
     # ── 低波因子 ──
     "low_vol:20d_vol":       {"source": "derived",    "method": "vol_20d",         "higher_is_better": False, "label": "20日波动率"},
     "low_vol:max_dd_60d":    {"source": "derived",    "method": "max_dd_60d",      "higher_is_better": False, "label": "60日最大回撤"},
@@ -63,6 +64,7 @@ SUB_FACTOR_DEFS = {
     "sentiment:volume_ratio":{"source": "derived",    "method": "vol_ratio_20d",   "higher_is_better": True,  "label": "量比"},
     "sentiment:turnover":    {"source": "derived",    "method": "turnover_20d",    "higher_is_better": True,  "label": "换手率"},
     "sentiment:capital_flow":{"source": "eastmoney_fund_flow", "method": "capital_flow_today", "higher_is_better": True, "label": "主力资金流"},
+    "sentiment:fundamental_price_divergence": {"source": "derived", "method": "fundamental_price_divergence", "higher_is_better": True, "label": "基本面-价格背离"},
     # ── 行业排名因子（蜻蜓CSC，2026-07-27新增） ──
     "industry:pe_rank":      {"source": "qingting_industry", "metric": "pe",     "higher_is_better": False, "label": "PE行业排名"},
     "industry:roe_rank":     {"source": "qingting_industry", "metric": "jzcsyl","higher_is_better": True,  "label": "ROE行业排名"},
@@ -82,11 +84,11 @@ STYLE_FACTORS = {
                   "label": "价值", "default_weight": 0.15},
     "growth":    {"subs": ["growth:rev_ttm", "growth:profit_ttm", "growth:roe_trend"],
                   "label": "成长", "default_weight": 0.17},
-    "momentum":  {"subs": ["momentum:20d", "momentum:60d", "momentum:120d"],
+    "momentum":  {"subs": ["momentum:20d", "momentum:60d", "momentum:120d", "momentum:distance_from_high"],
                   "label": "动量", "default_weight": 0.15},
     "low_vol":   {"subs": ["low_vol:20d_vol", "low_vol:max_dd_60d"],
                   "label": "低波", "default_weight": 0.12},
-    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover", "sentiment:industry_heat", "sentiment:capital_flow"],
+    "sentiment": {"subs": ["sentiment:volume_ratio", "sentiment:turnover", "sentiment:industry_heat", "sentiment:capital_flow", "sentiment:fundamental_price_divergence"],
                   "label": "情绪/资金", "default_weight": 0.12},
     "industry":  {"subs": ["industry:pe_rank", "industry:roe_rank", "industry:margin_rank"],
                   "label": "行业地位", "default_weight": 0.10},
@@ -955,6 +957,32 @@ class FactorEngine:
                 peak = np.maximum.accumulate(window)
                 dd = (window - peak) / peak
                 return float(np.min(dd))
+
+            elif method == "distance_from_high":
+                if len(close) < 250:
+                    return None
+                peak = float(np.max(close[-250:]))
+                if peak <= 0:
+                    return None
+                return float(close[-1] / peak)
+
+            elif method == "fundamental_price_divergence":
+                if len(close) < 21:
+                    return None
+                fin = self._get_fin(symbol)
+                profit_growth = fin.get("净利润同比增长率") if fin else None
+                if profit_growth is None:
+                    return None
+                ret_20d = float(close[-1] / close[-21] - 1)
+                fund_up = profit_growth > 0
+                price_up = ret_20d > 0
+                if fund_up and not price_up:
+                    return 1.0
+                if not fund_up and price_up:
+                    return 0.0
+                if fund_up and price_up:
+                    return 0.75
+                return 0.25
 
             elif method == "vol_ratio_20d":
                 vol = hist.get("volume", [])
