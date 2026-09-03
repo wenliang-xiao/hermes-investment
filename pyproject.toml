@@ -17,6 +17,7 @@ dependencies = [
     "baostock",
     "akshare",
     "yfinance",
+    "backtrader",
     "requests",
     "httpx",
     "tqdm",
