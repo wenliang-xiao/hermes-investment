@@ -54,7 +54,7 @@
 
 - ❌ 不要修改 `evaluator_fixed.py` 的 `FIXED_SCORE_MAP`（ADR-001 固定评估器）
 - ❌ 不要在 `domain/__init__.py` 中重复定义配置（已改为 re-export config.py, config.py 是唯一事实源）
-- ❌ 不要新增评分引擎或策略实现
+- ❌ 不要新增评分引擎或策略实现（回测引擎例外: 统一用 backtrader, 见 `engine/bt_runner.py` 适配层; 策略分多头 `strategies/*.py` + 对冲 `bt_runner.LongShortMomentum` 两类, 不新增第三类）
 - ❌ 不要用 `as any` / `@ts-ignore` / `@ts-expect-error`
 
 ## 配置详情
