@@ -4,8 +4,8 @@
 数据来自 data_router.get_history（A股 baostock/腾讯、港股腾讯、美股 finnhub/yfinance），
 backtrader 只负责回测引擎（事件驱动、成本模型、净值、多空）。
 
-T+1 结算: A股 T+1 精确模拟（信号收盘生成→次日开盘成交）后续用 coc/自定义 broker 补齐，
-当前先跑通「数据 → backtrader → 多空 → 市场差异化成本」主链路。
+T+1 结算: backtrader 默认「信号 T 日收盘生成 → T+1 日开盘成交」即 A股 T+1。
+美股/港股 T+0 用 t0=True（coc 收盘成交）。
 """
 from __future__ import annotations
 
@@ -109,10 +109,15 @@ class LongShortMomentum(bt.Strategy):
 
 
 def run_long_short(symbols: list[str], days: int = 250, cash: float = 1_000_000,
-                   lookback: int = 20, threshold: float = 0.02) -> dict:
-    """多空回测入口: 喂 symbols → backtrader → 返回净值 + 收益 + 各市场佣金。"""
+                   lookback: int = 20, threshold: float = 0.02, t0: bool = False) -> dict:
+    """多空回测入口: 喂 symbols → backtrader → 返回净值 + 收益 + 各市场佣金。
+
+    t0: True=美股/港股 T+0(信号收盘生成即成交, coc); False=A股 T+1(信号收盘生成→次日开盘成交)。
+    """
     cerebro = bt.Cerebro()
     cerebro.addstrategy(LongShortMomentum, lookback=lookback, threshold=threshold)
+    if t0:
+        cerebro.broker.set_coc(True)
     for sym in symbols:
         feed = load_feed(sym, days)
         if feed is None:

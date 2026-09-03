@@ -350,6 +350,25 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
         </div>
         <div id="v3ReportList" class="space-y-1.5"></div>
       </div>
+      <!-- 多空对冲回测 (backtrader) -->
+      <div class="bg-gray-800/40 rounded-xl p-3 mb-4 border border-gray-700/50">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <span class="text-xs font-medium text-gray-300">🔀 多空对冲 <span class="text-gray-500">(backtrader: long高分+short低分, 跨市场佣金/T+0分派)</span></span>
+          <div class="flex items-center gap-2">
+            <input type="text" id="lsSymbols" placeholder="如: 600519,NVDA,0700.HK (空=默认跨市场)" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600 w-56" />
+            <select id="lsDays" class="bg-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-xs border border-gray-600">
+              <option value="120">120天</option>
+              <option value="250" selected>250天</option>
+              <option value="500">500天</option>
+            </select>
+            <label class="flex items-center gap-1 cursor-pointer select-none text-xs text-gray-300">
+              <input type="checkbox" id="lsT0" class="w-3.5 h-3.5 accent-emerald-500" /> 美股/港股T+0
+            </label>
+            <button onclick="runLongShort()" class="bg-purple-600 hover:bg-purple-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors">🔀 运行多空</button>
+          </div>
+        </div>
+        <div id="lsResult" class="text-xs text-gray-300"></div>
+      </div>
       <div id="comparisonContent"></div>
     </div>
   </div>
@@ -2045,6 +2064,23 @@ async function loadV3Reports() {
     el.innerHTML = rows;
   } catch (e) {
     console.error('load error:', e); el.innerHTML = `<div class="empty">加载失败，请稍后重试</div>`;
+  }
+}
+
+async function runLongShort() {
+  const symbols = document.getElementById('lsSymbols').value;
+  const days = document.getElementById('lsDays').value || '250';
+  const t0 = document.getElementById('lsT0').checked;
+  const el = document.getElementById('lsResult');
+  el.innerHTML = '<span class="text-gray-400">运行中…</span>';
+  try {
+    const url = `/api/v2/backtest/long_short?symbols=${encodeURIComponent(symbols)}&days=${days}&t0=${t0}`;
+    const res = await fetch(url).then(r => r.json());
+    if (res.error) { el.innerHTML = `<span class="text-red-400">❌ ${res.error}</span>`; return; }
+    const color = res.return_pct >= 0 ? 'emerald' : 'red';
+    el.innerHTML = `初始 ${res.start.toLocaleString()} → 最终 ${res.end.toLocaleString()} · 收益 <strong class="text-${color}-400">${res.return_pct}%</strong> · ${res.n_datas} 标的`;
+  } catch (e) {
+    el.innerHTML = `<span class="text-red-400">❌ ${e.message}</span>`;
   }
 }
 

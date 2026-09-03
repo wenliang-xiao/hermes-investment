@@ -315,6 +315,37 @@ def api_v2_backtest_custom(
         return {"error": str(e)}
 
 
+@router.get("/api/v2/backtest/long_short")
+def api_v2_backtest_long_short(
+    symbols: str = "",
+    days: int = 250,
+    capital: float = 1000000,
+    lookback: int = 20,
+    threshold: float = 0.02,
+    t0: bool = False,
+):
+    """多空对冲回测 — backtrader 引擎, 支持 A股/港股/美股多空(long高分+short低分)。
+
+    参数:
+        symbols: 逗号分隔标的代码(空=默认跨市场代表: A股/美股/港股/黄金)
+        days: 回测天数
+        capital: 初始资金
+        lookback: 动量窗口
+        threshold: 多空阈值
+        t0: True=美股/港股 T+0(coc收盘成交), False=A股 T+1(信号收盘→次日开盘)
+    """
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else []
+    if not sym_list:
+        sym_list = ["600519", "300750", "NVDA", "0700.HK", "510300", "GLD"]
+    try:
+        from engine.bt_runner import run_long_short
+        result = run_long_short(sym_list, days=days, cash=capital,
+                                lookback=lookback, threshold=threshold, t0=t0)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ──────────────────────────────────────────────
 # WS4: v3 端点 — xalpha + quantstats 专业回测报告
 # 路由均为多段路径(backtest/v3/...), 与 /backtest/{run_id} 单段不冲突。
