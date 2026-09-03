@@ -531,6 +531,39 @@ class TradingEngine:
                     print(f"  🚨清仓: [{name}] SELL {sym} @{price:.2f}", flush=True)
         return liquidated
 
+    def _deleverage_on_high(self, price_map, keep_ratio: float = 0.3) -> int:
+        """high 时降仓: 清掉浮亏最多的权益持仓, 保留 keep_ratio 比例(默认30%)的权益。"""
+        equity = []
+        for name, strategy in self.strategies.items():
+            for sym, pos in strategy.positions.items():
+                if sym in _HAVEN_SYMBOLS:
+                    continue
+                equity.append((name, sym, pos))
+        if not equity:
+            return 0
+
+        def pnl_pct(p):
+            entry = p.get("entry_price", 0)
+            if entry <= 0:
+                return 0
+            return (p.get("current_price", entry) - entry) / entry
+
+        equity.sort(key=lambda x: pnl_pct(x[2]))
+        n_keep = max(1, int(len(equity) * keep_ratio))
+        to_sell = equity[:-n_keep] if n_keep < len(equity) else []
+        sold = 0
+        for name, sym, pos in to_sell:
+            price = (price_map or {}).get(sym) if price_map else None
+            if price is None or price <= 0:
+                price = pos.get("current_price", pos.get("entry_price", 0))
+            if price <= 0:
+                continue
+            sig = Signal(name, "SELL", sym, sym, price, "事件风险high降仓", priority="HIGH")
+            if self.strategies[name].execute_sell(sig):
+                sold += 1
+                print(f"  📉降仓: [{name}] SELL {sym} @{price:.2f}", flush=True)
+        return sold
+
     def run_daily(self, date_str, score_map, tech_map, price_map, save=True):
         """每日运行全部策略"""
         print(f"\n{'='*50}", flush=True)
@@ -553,6 +586,9 @@ class TradingEngine:
         if event_level == "extreme":
             liquidated = self._liquidate_on_extreme(price_map)
             print(f"  🚨 事件风险 extreme: 清仓 {liquidated} 个权益持仓", flush=True)
+        elif event_level == "high":
+            deleveraged = self._deleverage_on_high(price_map)
+            print(f"  📉 事件风险 high: 降仓 {deleveraged} 个权益持仓(保留30%)", flush=True)
 
         # === 自动执行模拟盘（每个策略独立执行自己的信号） ===
         print(f"\n  🖥️ 自动执行模拟盘...", flush=True)
