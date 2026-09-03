@@ -61,6 +61,29 @@ FIXED_UNIVERSE = [
 FIXED_SCORE_MAP: dict[str, float] = {s["symbol"]: s["score"] for s in FIXED_UNIVERSE}
 FIXED_NAME_MAP: dict[str, str] = {s["symbol"]: s["name"] for s in FIXED_UNIVERSE}
 
+
+def build_universe_with_delisted(base_symbols: list[str] | None = None,
+                                 delisted_limit: int = 30) -> list[str]:
+    """把历史退市股加入回测池，消除幸存者偏差。
+
+    base_symbols: 基准股票池(默认 FIXED_UNIVERSE 的 symbol)。
+    delisted_limit: 纳入退市股数量上限(按退市日降序, 最近退市的优先)。
+    返回: 合并后的 symbol 列表(含退市股, 去重保序)。
+    """
+    base = base_symbols or [s["symbol"] for s in FIXED_UNIVERSE]
+    try:
+        from data.data_layer import get_delisted_stocks
+        delisted = get_delisted_stocks()
+    except Exception:  # noqa: BLE001 - 退市股名单拉取失败时退回基准池
+        delisted = []
+    if not delisted:
+        return base
+    recent = sorted(delisted, key=lambda x: x.get("out_date", ""), reverse=True)[:delisted_limit]
+    codes = [d["code"] for d in recent
+             if d.get("code") and len(str(d["code"])) == 6]
+    return list(dict.fromkeys(base + codes))
+
+
 # 固定回测参数
 FIXED_DAYS = 120              # 回测数据窗口
 INITIAL_CASH = 1_000_000.0    # 初始资金
