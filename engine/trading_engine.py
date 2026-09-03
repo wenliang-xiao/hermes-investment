@@ -31,6 +31,9 @@ MAX_TRADES_PER_WEEK_PER_STRATEGY = 3
 MAX_TRADES_PER_WEEK_TOTAL = 5
 TRADE_COOLDOWN_DAYS = 1  # 同一标的买卖后冷却天数
 
+# 避险资产（事件风险 extreme 清仓时保留）: 黄金/白银/债券类对冲资产
+_HAVEN_SYMBOLS = {"518880", "GLD", "SLV", "GC=F", "SI=F", "511260"}
+
 # ═══════════════════════════════════════════
 # 信号记录
 # ═══════════════════════════════════════════
@@ -501,12 +504,32 @@ class TradingEngine:
                 print(f"  📋 周频过滤: [{sig.strategy}] {sig.action} {sig.symbol} - {msg}", flush=True)
         return filtered
 
-    def _event_blocks_buy(self) -> bool:
+    def _get_event_risk_level(self) -> str:
         try:
-            from engine.event_risk_engine import load_latest_event_risk, event_blocks_buy
-            return event_blocks_buy(load_latest_event_risk())
-        except Exception:  # noqa: BLE001 - 影子记录缺失时不拦截
-            return False
+            from engine.event_risk_engine import load_latest_event_risk
+            er = load_latest_event_risk()
+            return er.get("level") if er else "none"
+        except Exception:  # noqa: BLE001 - 影子记录缺失时视为无风险
+            return "none"
+
+    def _liquidate_on_extreme(self, price_map) -> int:
+        """extreme 时清仓全部权益类持仓，保留黄金/白银/债券避险资产。"""
+        liquidated = 0
+        for name, strategy in self.strategies.items():
+            for sym in list(strategy.positions.keys()):
+                if sym in _HAVEN_SYMBOLS:
+                    continue
+                price = (price_map or {}).get(sym) if price_map else None
+                pos = strategy.positions[sym]
+                if price is None or price <= 0:
+                    price = pos.get("current_price", pos.get("entry_price", 0))
+                if price <= 0:
+                    continue
+                sig = Signal(name, "SELL", sym, sym, price, "事件风险extreme清仓", priority="HIGH")
+                if strategy.execute_sell(sig):
+                    liquidated += 1
+                    print(f"  🚨清仓: [{name}] SELL {sym} @{price:.2f}", flush=True)
+        return liquidated
 
     def run_daily(self, date_str, score_map, tech_map, price_map, save=True):
         """每日运行全部策略"""
@@ -514,9 +537,10 @@ class TradingEngine:
         print(f"🏃 TradingEngine 运行: {date_str}", flush=True)
         print(f"{'='*50}", flush=True)
 
-        event_blocked = self._event_blocks_buy()
+        event_level = self._get_event_risk_level()
+        event_blocked = event_level in ("high", "extreme")
         if event_blocked:
-            print("  🛡️事件避险: level≥high，禁用BUY", flush=True)
+            print(f"  🛡️事件避险: level={event_level}，禁用BUY", flush=True)
 
         all_signals = []
         for name, strategy in self.strategies.items():
@@ -525,6 +549,10 @@ class TradingEngine:
             for s in sigs:
                 print(f"    [{s.priority}] {s.action} {s.symbol}({s.name}) @{s.price:.2f} - {s.reason}", flush=True)
             all_signals.extend(sigs)
+
+        if event_level == "extreme":
+            liquidated = self._liquidate_on_extreme(price_map)
+            print(f"  🚨 事件风险 extreme: 清仓 {liquidated} 个权益持仓", flush=True)
 
         # === 自动执行模拟盘（每个策略独立执行自己的信号） ===
         print(f"\n  🖥️ 自动执行模拟盘...", flush=True)
