@@ -987,6 +987,24 @@ try:
     print(f"✅ 面基三源融合日报 {session} 已生成")
     print(f"📄 飞书文档: https://bytedance.feishu.cn/docx/{doc_id}")
 
+    # 写回日报链接到 daily_report_links.json（dashboard 日报 tab 读取，修复日报链路断裂）
+    try:
+        _links_path = os.path.join(_PROJECT_DIR, "data", "daily_report_links.json")
+        _links = []
+        if os.path.exists(_links_path):
+            with open(_links_path) as _f:
+                _links = json.load(_f)
+        _new_link = {"date": today_short, "title": f"面基·{label} {today_short}({weekday})",
+                     "url": f"https://bytedance.feishu.cn/docx/{doc_id}", "type": "daily"}
+        _links = [l for l in _links if l.get("date") != today_short]
+        _links.insert(0, _new_link)
+        _links = _links[:30]
+        with open(_links_path, "w") as _f:
+            json.dump(_links, _f, ensure_ascii=False, indent=2)
+        log(f"Daily report link saved: {_new_link['url']}")
+    except Exception as _e:
+        log(f"Daily report link save failed (non-critical): {_e}")
+
     # ── 策略状态快照 (WS1-2a: 行为诊断用) ──
     try:
         _ss_path = os.path.join(_PROJECT_DIR, "data", "strategy_states.json")
