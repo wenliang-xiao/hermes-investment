@@ -27,8 +27,9 @@ _YA_MAX_DELAY = 30.0          # 最大退避上限
 
 def _is_transient_error(exc: BaseException) -> bool:
     """判断异常是否为可重试的瞬态错误（Cloudflare 5xx / 限频 / 网络抖动）。"""
-    # yfinance 通常把 HTTP 状态码放在异常文本里，或抛 YFRateLimitError
-    if type(exc).__name__ in ("YFRateLimitError", "YFOptionalParamError"):
+    if type(exc).__name__ == "YFRateLimitError":
+        return True
+    if type(exc).__name__ == "YFOptionalParamError":
         return False
     txt = str(exc).lower()
     if any(errm in txt for errm in ("502", "503", "504", "500")):
