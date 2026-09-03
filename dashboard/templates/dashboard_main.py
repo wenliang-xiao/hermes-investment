@@ -228,7 +228,10 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
     </div>
 
     <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
-        <h3 class="text-gray-100 font-semibold mb-4">📋 交易历史</h3>
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-gray-100 font-semibold">📋 交易历史</h3>
+            <button onclick="exportTableToCsv('#v2-trade-history', '交易历史.csv')" class="text-xs text-blue-400 hover:text-blue-300">⬇ 导出CSV</button>
+        </div>
         <div class="overflow-x-auto overflow-y-auto max-h-[300px] custom-scrollbar">
             <table class="w-full text-xs text-left whitespace-nowrap" style="border:none">
                 <thead class="text-gray-400 sticky top-0 bg-gray-800 z-10" style="border:none">
@@ -610,13 +613,15 @@ function renderTradeHistory(detailRes) {
     const rowBg = isBuy ? 'bg-green-900/10 hover:bg-green-900/20' : 'bg-red-900/10 hover:bg-red-900/20';
     const rowFont = pnlVal > 0 ? 'font-bold text-white' : 'text-gray-300';
     const holdTxt = tx.hold_days != null ? tx.hold_days + '天' : '—';
+    const priceStr = tx.price != null && tx.price > 0 ? '¥' + tx.price.toFixed(2) : '—';
+    const qtyStr = tx.quantity != null ? tx.quantity.toLocaleString() : '—';
     tradeHtml += `
     <tr class="${rowBg} ${rowFont} transition-colors border-b border-gray-800 cursor-pointer" onclick="showTradeModal('${tx.sname}','${tx.symbol}','${(tx.date||tx.time||'').substring(0,10)}')">
         <td class="px-3 py-2 text-gray-400 border-0">${(tx.date||tx.time||'').substring(0,10)}</td>
         <td class="px-3 py-2 border-0"><span class="font-bold text-gray-200">${tx.symbol}</span> <span class="text-[10px] text-gray-500 ml-1">${tx.name||''}</span> <span class="text-[10px] ${stratBg[tx.sname]||'bg-gray-700'} px-1 rounded text-gray-300 ml-1">${tx.sname}</span></td>
         <td class="px-3 py-2 border-0"><span class="px-1.5 py-0.5 rounded text-[10px] ${actCls}">${tx.action}</span></td>
-        <td class="px-3 py-2 font-mono border-0">¥${(tx.price||0).toFixed(2)}</td>
-        <td class="px-3 py-2 font-mono border-0">${(tx.quantity||0).toLocaleString()}</td>
+        <td class="px-3 py-2 font-mono border-0">${priceStr}</td>
+        <td class="px-3 py-2 font-mono border-0">${qtyStr}</td>
         <td class="px-3 py-2 font-mono border-0 ${pnlCls}">${pnlStr}</td>
         <td class="px-3 py-2 font-mono text-gray-400 border-0">${holdTxt}</td>
         <td class="px-3 py-2 text-gray-400 truncate max-w-[200px] border-0" title="${tx.reason||''}">${tx.reason||''}</td>
@@ -755,7 +760,7 @@ function showTradeModal(sname, sym, date) {
     <div class="flex justify-between items-start mb-4">
       <div>
         <div class="text-lg font-bold text-gray-100">${sym} ${tx.name||''} <span class="text-sm font-normal text-gray-400">${sname}</span></div>
-        <div class="text-xs text-gray-500 mt-1">${(tx.date||'').substring(0,10)} · ${tx.action} @ ¥${(tx.price||0).toFixed(2)} × ${(tx.quantity||0).toLocaleString()}</div>
+        <div class="text-xs text-gray-500 mt-1">${(tx.date||'').substring(0,10)} · ${tx.action} @ ${tx.price!=null&&tx.price>0?'¥'+tx.price.toFixed(2):'—'} × ${tx.quantity!=null?tx.quantity.toLocaleString():'—'}</div>
       </div>
       <div class="text-right">
         <div class="text-sm font-mono ${pnlVal>0?'text-green-500':pnlVal<0?'text-red-500':'text-gray-400'}">${pnlVal!=null ? (pnlVal>0?'+':'')+'¥'+Math.round(pnlVal).toLocaleString() : '—'}</div>
@@ -1148,6 +1153,42 @@ function switchTab(ev, tab) {
 }
 
 // ═══════════════════════════════════════════
+function initLayerDetail() {
+  document.querySelectorAll('.layer-card').forEach(card => {
+    card.classList.add('cursor-pointer', 'hover:bg-gray-700/60');
+    card.onclick = () => {
+      let detail = card.querySelector('.layer-detail');
+      if (!detail) {
+        detail = document.createElement('div');
+        detail.className = 'layer-detail mt-1 text-[11px] text-gray-500';
+        detail.textContent = card.title || '';
+        card.appendChild(detail);
+      }
+      detail.classList.toggle('open');
+    };
+  });
+}
+
+function exportTableToCsv(selector, filename) {
+  const table = document.querySelector(selector);
+  if (!table) return;
+  const rows = [];
+  table.querySelectorAll('tr').forEach(tr => {
+    const cells = [];
+    tr.querySelectorAll('th,td').forEach(td => cells.push((td.textContent || '').trim()));
+    if (cells.length) rows.push(cells);
+  });
+  if (!rows.length) return;
+  const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // 六层横条
 // ═══════════════════════════════════════════
 async function loadLayerBar() {
@@ -1494,7 +1535,7 @@ function toggleEvidence(symbol) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-window.onload = () => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); };
+window.onload = () => { initLayerDetail(); loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); };
 setInterval(() => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); }, 120000);
 
 async function loadEtf() {
@@ -1908,8 +1949,8 @@ async function runCustomBacktest() {
           <td class="py-1.5 pr-2 text-gray-400">${tx.date||tx.time||''}</td>
           <td class="pr-2 font-mono">${tx.symbol||''}</td>
           <td class="pr-2"><span class="px-1.5 py-0.5 rounded text-[10px] ${isBuy?'bg-green-900/40 text-green-400':'bg-red-900/40 text-red-400'}">${tx.action}</span></td>
-          <td class="pr-2 text-right font-mono">¥${(tx.price||0).toFixed(2)}</td>
-          <td class="pr-2 text-right font-mono">${(tx.qty||tx.quantity||0).toLocaleString()}</td>
+          <td class="pr-2 text-right font-mono">${tx.price!=null&&tx.price>0?'¥'+tx.price.toFixed(2):'—'}</td>
+          <td class="pr-2 text-right font-mono">${(tx.qty||tx.quantity)!=null?(tx.qty||tx.quantity).toLocaleString():'—'}</td>
           <td class="pr-2 text-right font-mono ${pnlCls}">${tx.pnl!=null ? (tx.pnl>0?'+':'')+'¥'+fmt(tx.pnl) : '—'}</td>
           <td class="text-gray-400 text-[11px] truncate max-w-[200px]">${(tx.reason||'').substring(0,40)}</td>
         </tr>`;
