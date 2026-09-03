@@ -1100,7 +1100,8 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
                        cycles: int = 3, train_days: int = 252, test_days: int = 63,
                        custom_symbols: list[str] | None = None,
                        days: int | None = None,
-                       use_point_in_time: bool = False) -> BacktestResult | dict:
+                       use_point_in_time: bool = False,
+                       include_delisted: bool = False) -> BacktestResult | dict:
     """评估单个策略
 
     Args:
@@ -1112,7 +1113,10 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
         days: 回测交易日窗口（None=默认 FIXED_DAYS，WF 模式自动 ≥ train+test*cycles+100）
         use_point_in_time: 时点评分模式 (True=每5日 rescore 消除前视, 慢~10x)
+        include_delisted: 幸存者偏差补池 (True=纳入退市股到回测池)
     """
+    if include_delisted and not custom_symbols:
+        custom_symbols = build_universe_with_delisted()
     if walk_forward:
         data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100)
     else:

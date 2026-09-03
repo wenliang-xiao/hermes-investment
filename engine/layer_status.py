@@ -7,6 +7,12 @@ import logging, json, os
 
 logger = logging.getLogger(__name__)
 
+# 避险资产 → 资产类别（避免黄金/白银/债券被误归美股）
+_HAVEN_CLASSIFY = {
+    "518880": "黄金", "GLD": "黄金", "GC=F": "黄金", "SI=F": "黄金", "SLV": "黄金", "GDX": "黄金",
+    "511260": "债券", "TLT": "债券", "IEF": "债券",
+}
+
 
 class LayerStatus:
     def __init__(self, weekly_trade_limit=3, total_portfolio_value=1000000,
@@ -48,7 +54,10 @@ class LayerStatus:
             if not mkt:
                 continue
             sym = p.get("symbol", "")
-            if ".hk" in sym.lower():
+            haven = _HAVEN_CLASSIFY.get(sym)
+            if haven:
+                actual[haven] += mkt
+            elif ".hk" in sym.lower():
                 actual["港股"] += mkt
             elif not sym.isdigit():
                 actual["美股"] += mkt
