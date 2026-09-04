@@ -179,12 +179,14 @@ class StockAnalyzer:
     # 第四步：基本面验证
     # ═══════════════════════════════════════════
     def _fundamental_check(self, fin: dict, daily: pd.DataFrame) -> dict:
-        """基本面三重验证（LDS标准）"""
-        roe = abs(fin.get("净资产收益率", 0) or 0)
-        rev = abs(fin.get("营业收入同比增长率", 0) or 0)
-        profit = abs(fin.get("净利润同比增长率", 0) or 0)
-        gm = abs(fin.get("毛利率", 0) or 0)
-        nm = abs(fin.get("净利率", 0) or 0)
+        """基本面三重验证（LDS标准）
+        禁止 abs() 抹符号: ROE/营收/净利为负代表亏损/萎缩, 必须落到更差档位。
+        """
+        roe = fin.get("净资产收益率", 0) or 0
+        rev = fin.get("营业收入同比增长率", 0) or 0
+        profit = fin.get("净利润同比增长率", 0) or 0
+        gm = fin.get("毛利率", 0) or 0
+        nm = fin.get("净利率", 0) or 0
 
         pe = daily.iloc[-1].get("pe") if "pe" in daily.columns else None
         pb = daily.iloc[-1].get("pb") if "pb" in daily.columns else None

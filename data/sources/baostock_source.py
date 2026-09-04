@@ -192,11 +192,21 @@ def _bs_login_old():
 
 
 def _a_code(symbol: str) -> str:
-    """Convert 6-digit code to baostock format (sh/sz.xxxxxx)"""
-    # 注意顺序: "159" 必须在 "15" 之前匹配 (深市 ETF 159xxx → sz.)
-    if symbol.startswith(("159", "00", "30")):
+    """Convert 6-digit code to baostock format (sh/sz.xxxxxx)
+
+    交易所代码段 (2026-09 修正 16/15 归属):
+      sz(深): 000/001/002/003 主板, 300/301 创业板, 159 深ETF, 15/16 深基金/LOF
+      sh(沪): 600/601/603/605 主板, 688 科创板, 51/52/56/58 沪ETF, 50 沪LOF
+    顺序注意: 更长前缀(如 159/688)必须在前匹配, 避免被短前缀截胡。
+    """
+    if symbol.startswith(("159", "688")):
+        # 159深ETF → sz; 688科创板 → sh
+        return f"sz.{symbol}" if symbol.startswith("159") else f"sh.{symbol}"
+    if symbol.startswith(("00", "30", "15", "16", "301")):
+        # 00 深主板, 30/301 创业板, 15/16 深基金/LOF
         return f"sz.{symbol}"
-    elif symbol.startswith(("60", "68", "51", "15", "16")):
+    if symbol.startswith(("60", "68", "51", "52", "56", "58", "50")):
+        # 60 沪主板, 68 科创, 51/52/56/58 沪ETF, 50 沪LOF
         return f"sh.{symbol}"
     return symbol
 
