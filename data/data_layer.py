@@ -626,27 +626,53 @@ def get_financial_history(symbol: str, quarters: int = 8, as_of_date: str | None
     return history
 
 
-def get_delisted_stocks() -> list[dict]:
+def get_delisted_stocks(force: bool = False) -> list[dict]:
     """A股历史退市股名单(baostock), 回测股票池补池消除幸存者偏差的数据基础。
 
     返回 [{code, name, out_date}] 按退市日升序。status=0 退市 + type=1 股票。
+
+    2026-09 修复: query_stock_basic() 拉全市场基础信息(几千条)且原实现无缓存,
+    每次回测补池都全量重拉 -> 无超时保护下 baostock 挂死即卡死整个验证/回测。
+    退市名单月级低频变化 -> 加 7 天磁盘缓存, 命中直接返回, 规避重复全市场拉取。
     """
+    cache_file = Path(_PROJECT_DIR) / "data" / "cache" / "delisted_stocks.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    if not force and cache_file.exists():
+        age_sec = (datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)).total_seconds()
+        if age_sec < 7 * 24 * 3600:  # 7 天 TTL
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass  # 缓存损坏则重拉
+
     _bs_login()
     try:
         rs = bs.query_stock_basic()
     except Exception:
         return []
     result = []
-    while rs.error_code == "0" and rs.next():
-        row = rs.get_row_data()
-        d = dict(zip(rs.fields, row))
-        if d.get("status") == "0" and d.get("type") == "1":
-            result.append({
-                "code": d.get("code", ""),
-                "name": d.get("code_name", ""),
-                "out_date": d.get("outDate", ""),
-            })
+    try:
+        while rs.error_code == "0" and rs.next():
+            row = rs.get_row_data()
+            d = dict(zip(rs.fields, row))
+            if d.get("status") == "0" and d.get("type") == "1":
+                result.append({
+                    "code": d.get("code", ""),
+                    "name": d.get("code_name", ""),
+                    "out_date": d.get("outDate", ""),
+                })
+    except Exception:
+        # 迭代中断(可能挂死恢复)时, 已读部分也返回
+        logger.warning("[data_layer] query_stock_basic 迭代中断, 返回已读部分")
+        if not result:
+            return []
     result.sort(key=lambda x: x.get("out_date", ""))
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+    except Exception:
+        pass
     return result
 
 
