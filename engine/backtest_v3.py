@@ -265,7 +265,8 @@ def run_backtest_v3(
 
     # 1. 真实策略回测(自研执行引擎, 已验证成本模型; days 真正控制回测窗口)
     result = evaluate_strategy(strategy_name=strategy, custom_symbols=custom_symbols,
-                               days=days)
+                               days=days,
+                               use_point_in_time=True)  # P0-3 (2026-09-03): v3 报告强制时点评分, 消除 FIXED_SCORE_MAP 前视
     if isinstance(result, dict) and "error" in result:
         return {"error": result["error"]}
     if not isinstance(result, BacktestResult):

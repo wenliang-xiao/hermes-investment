@@ -436,11 +436,16 @@ class TradingEngine:
         atomic_write_json(self.state_path, states)
 
     def _check_black_swan(self):
-        """检查是否黑天鹅（简单实现：依赖宏观看跌信号）"""
+        """检查是否黑天鹅（依赖宏观 strategy_switch=off / 双门红灯）"""
         try:
-            from engine.macro_engine import get_macro_status
-            macro = get_macro_status()
-            if macro.get("market_crash", False):
+            from engine.macro_engine import MacroEngine
+            me = MacroEngine()
+            m = me.refresh() if hasattr(me, "refresh") else me.summarize()
+            if m.get("strategy_switch") == "off":
+                return True
+            dg = m.get("dual_gate", {}) or {}
+            mg = dg.get("macro_gate") or dg.get("macro")
+            if mg == "红灯":
                 return True
         except:
             pass
@@ -575,6 +580,33 @@ class TradingEngine:
         if event_blocked:
             print(f"  🛡️事件避险: level={event_level}，禁用BUY", flush=True)
 
+        # LDS 双门/宏观策略开关 → 仓位乘数 (P0-4 2026-09-03: 立项核心依据落地)
+        #   strategy_switch: on=0.7 / limited=0.4 / off=0.05 (macro_engine 定义)
+        #   BUY 时 size_pct *= switch_factor; off 时整体禁用 BUY
+        macro_factor = 1.0
+        macro_blocked = False
+        macro_detail = ""
+        try:
+            from engine.macro_engine import MacroEngine
+            _me = MacroEngine()
+            _m = _me.refresh() if hasattr(_me, "refresh") else _me.summarize()
+            _sw = _m.get("strategy_switch", "on")
+            macro_factor = {"on": 0.7, "limited": 0.4, "off": 0.05}.get(_sw, 0.5)
+            macro_blocked = (_sw == "off")
+            macro_detail = f"strategy_switch={_sw} factor={macro_factor}"
+            _dg = _m.get("dual_gate", {}) or {}
+            _mg = _dg.get("macro_gate") or _dg.get("macro") or "?"
+            _tg = _dg.get("trend_gate") or _dg.get("trend") or "?"
+            if _mg == "红灯" or _tg == "红灯" or _sw == "off":
+                macro_blocked = True
+            macro_detail += f" | 双门 {_mg}/{_tg}"
+        except Exception as _e:
+            print(f"  [trading_engine] macro gate load failed (non-blocking): {_e}", flush=True)
+        if macro_blocked:
+            print(f"  🌐 宏观双门关闭: {macro_detail} → 禁用BUY", flush=True)
+        else:
+            print(f"  🌐 宏观双门: {macro_detail}", flush=True)
+
         all_signals = []
         for name, strategy in self.strategies.items():
             sigs = strategy.daily_step(date_str, score_map, tech_map, price_map)
@@ -600,11 +632,20 @@ class TradingEngine:
                     if event_blocked:
                         print(f"  🛡️事件避险拦截: [{sig.strategy}] BUY {sig.symbol}", flush=True)
                         continue
+                    # 宏观双门关闭 → 禁用 BUY (P0-4)
+                    if macro_blocked:
+                        print(f"  🌐双门关闭拦截: [{sig.strategy}] BUY {sig.symbol}", flush=True)
+                        continue
                     # 周频检查: BUY信号受每周交易次数限制
                     ok, msg = self.calendar.can_trade(sig.strategy, sig.symbol)
                     if not ok:
                         print(f"  📋 模拟盘跳过(周频限制): [{sig.strategy}] BUY {sig.symbol} - {msg}", flush=True)
                         continue
+                    # 宏观开关仓位乘数: size_pct *= macro_factor (on=0.7/limited=0.4)
+                    _orig_size = sig.size_pct
+                    if macro_factor < 1.0 and sig.size_pct:
+                        sig.size_pct = round(sig.size_pct * macro_factor, 2)
+                        print(f"  🌐 双门仓位乘数: [{sig.strategy}] {sig.symbol} size {_orig_size}%→{sig.size_pct}% (factor={macro_factor})", flush=True)
                     ok = strategy.execute_buy(sig)
                     if ok:
                         self.calendar.record_trade(sig.strategy, sig.to_dict())

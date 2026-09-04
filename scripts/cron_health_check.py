@@ -168,4 +168,44 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+    _ap = argparse.ArgumentParser(description="面基投资系统 Cron 健康检查")
+    _ap.add_argument("--notify", action="store_true",
+                     help="有告警时发送飞书群通知 (无告警则静默)")
+    _args = _ap.parse_args()
+    _rc = main()
+    if _args.notify and _rc != 0:
+        # 告警 → 飞书群推送 (复用 FEISHU_APP_ID 应用消息, 与日报同通道)
+        try:
+            from dotenv import load_dotenv
+            _env = os.environ.get("HERMES_ENV", os.path.join(str(Path.home()), ".hermes", ".env"))
+            if os.path.exists(_env):
+                load_dotenv(_env)
+
+            import urllib.request
+            _app_id = os.environ.get("FEISHU_APP_ID", "")
+            _app_secret = os.environ.get("FEISHU_APP_SECRET", "")
+            # 1. 换 tenant_access_token
+            _req = urllib.request.Request(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                data=json.dumps({"app_id": _app_id, "app_secret": _app_secret}).encode(),
+                headers={"Content-Type": "application/json"})
+            _tok = json.loads(urllib.request.urlopen(_req, timeout=15).read())
+            _token = _tok.get("tenant_access_token")
+            if _token:
+                # 2. 发消息到知行合一群 (oc_4c9d6445fab7f3a2ada0c410f3aa7043)
+                _body = {
+                    "receive_id": "oc_4c9d6445fab7f3a2ada0c410f3aa7043",
+                    "msg_type": "text",
+                    "content": json.dumps({"text": "🔔 面基系统 Cron 健康告警\n" + os.popen(
+                        f"{sys.executable} {os.path.abspath(__file__)} 2>/dev/null | tail -25").read()[:1800]}),
+                }
+                _req2 = urllib.request.Request(
+                    "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+                    data=json.dumps(_body).encode(),
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {_token}"})
+                urllib.request.urlopen(_req2, timeout=15).read()
+        except Exception:
+            pass  # 通知失败不影响退出码 (健康检查本身的结果已打印)
+    sys.exit(_rc)

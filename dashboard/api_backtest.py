@@ -175,7 +175,8 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
     sym_list = symbols if symbols else None
     result = evaluate_strategy(strategy_name=strategy, custom_symbols=sym_list,
                                walk_forward=walk_forward, cycles=cycles,
-                               train_days=train_days, test_days=test_days)
+                               train_days=train_days, test_days=test_days,
+                               use_point_in_time=True)  # P0-3 (2026-09-03): API 驱动回测强制时点评分, 消除 FIXED_SCORE_MAP 前视
     if isinstance(result, dict) and "error" in result:
         return {"error": result["error"], "name": strategy, "daily_values": [], "trades": []}
     if isinstance(result, BacktestResult):
@@ -183,7 +184,7 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
         label_map = {
             "faceji": "faceji (面基)",
             "silverquant": "silverquant (组件化)",
-            "tradingagents": "tradingagents (辩论制)",
+            "tradingagents": "tradingagents (加权裁决)",
         }
         return _backtest_result_to_frontend(result, label_map.get(strategy, strategy))
     return {"name": strategy, "daily_values": [], "trades": [], "error": "未知结果格式"}
@@ -222,7 +223,7 @@ def api_v2_backtest_strategies():
         "strategies": [
             {"key": "faceji", "label": "面基策略", "desc": "评分驱动+MA趋势+Kelly仓位+4层风控"},
             {"key": "silverquant", "label": "SilverQuant", "desc": "固定¥30K槽位+不为清单+4层风控"},
-            {"key": "tradingagents", "label": "TradingAgents", "desc": "辩论制评分+Kelly仓位+3层风控"},
+            {"key": "tradingagents", "label": "TradingAgents", "desc": "加权裁决(bull/bear/neutral数学加权)+Kelly仓位+3层风控"},
             {"key": "all", "label": "三策略对比", "desc": "同时运行三个策略对比"},
         ],
         "defaults": {

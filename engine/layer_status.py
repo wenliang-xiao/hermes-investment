@@ -19,9 +19,16 @@ class LayerStatus:
                  target_allocation=None):
         self.weekly_trade_limit = weekly_trade_limit
         self.total_value = total_portfolio_value
-        self.target_allocation = target_allocation or {
+        # 原始目标权重加总可能为 115% (25+20+10+15+15+20+10) — 归一化到 100%
+        # 保留相对资产偏好, 消除"配置比例虚高"bug (2026-09-03)
+        raw = target_allocation or {
             "A股": 25, "ETF": 20, "债券": 10, "黄金": 15, "商品": 15, "美股": 20, "港股": 10,
         }
+        _sum = sum(raw.values())
+        self.target_allocation = {
+            k: round(v / _sum * 100, 1) if _sum else v for k, v in raw.items()
+        }
+        self._target_raw = raw
 
     def get_all(self, macro_state=None, positions=None,
                 pool_data=None, trades_this_week=None) -> dict:
@@ -67,9 +74,22 @@ class LayerStatus:
                 actual["A股"] += mkt
         total = sum(p.get("market_value", 0) for p in pos) or 1
         actual_pct = {k: round(v / total * 100, 1) for k, v in actual.items()}
+        # 目标 vs 实际偏差 (2026-09-03): 计算偏差绝对值, 输出再平衡建议
+        targets = self.target_allocation
+        dev = {}
+        for k in targets:
+            t, a = targets[k], actual_pct.get(k, 0.0)
+            dev[k] = round(a - t, 1)
+        max_dev = max((abs(v) for v in dev.values()), default=0)
+        max_dev_key = max(dev, key=lambda k: abs(dev[k]), default=None)
         return {
-            "target": self.target_allocation,
+            "target": targets,
+            "target_raw_sum": round(sum(targets.values()), 1),
             "actual": actual_pct,
+            "deviation": dev,
+            "needs_rebalance": max_dev >= 10.0,
+            "max_deviation": max_dev,
+            "max_deviation_key": max_dev_key,
             "days_to_month_end": self._days_to_month_end(),
         }
 

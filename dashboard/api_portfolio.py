@@ -199,7 +199,7 @@ def api_simulated():
     strategy_labels = {
         "faceji": {"name": "面基", "color": "#58a6ff", "style": "面基(评分+趋势+Kelly+SQ风控)"},
         "silverquant": {"name": "SilverQuant", "color": "#3fb950", "style": "组件化(评分建仓+4层风控)"},
-        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "辩论制(Kelly动态+技术融合)"},
+        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "加权裁决(Kelly动态+技术融合)"},
     }
 
     for sname in ["faceji", "silverquant", "tradingagents"]:
@@ -300,7 +300,7 @@ def api_v2_portfolio_detail():
     strategy_labels = {
         "faceji": {"name": "面基", "color": "#58a6ff", "style": "面基(评分+趋势+Kelly+SQ风控)"},
         "silverquant": {"name": "SilverQuant", "color": "#3fb950", "style": "组件化(评分建仓+4层风控)"},
-        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "辩论制(Kelly动态+技术融合)"},
+        "tradingagents": {"name": "TradingAgents", "color": "#bc8cff", "style": "加权裁决(Kelly动态+技术融合)"},
     }
     CAPITAL = 1_000_000
 
