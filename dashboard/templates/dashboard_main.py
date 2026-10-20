@@ -5,7 +5,8 @@ UNIFIED_DASHBOARD_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>面基·三源融合模拟盘</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+        onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.7/dist/chart.umd.min.js';document.head.appendChild(s);"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 :root { --bg:#0d1117; --card:#161b22; --card2:#1c2333; --border:#30363d;
@@ -973,6 +974,12 @@ function renderRadarChart(canvasId, factorScores) {
 function renderNetValueChart(labels, series) {
     const ctx = document.getElementById('netValueChart');
     if (!ctx) return;
+    // CDN 不可用时降级: 不静默留白, 明确提示 (此前外部 CDN 加载失败 → 图表空白无提示)
+    if (typeof Chart === 'undefined') {
+        const wrap = ctx.parentElement || ctx;
+        wrap.innerHTML = '<div style="color:#f0883e;font-size:12px;padding:12px;">⚠️ 图表库 (Chart.js) 未加载 — 请检查网络能否访问 cdn.jsdelivr.net</div>';
+        return;
+    }
     if (netValueChartInstance) netValueChartInstance.destroy();
     const colors = ['#58a6ff', '#3fb950', '#bc8cff', '#d29922', '#f85149'];
     const datasets = series.map((s, i) => ({

@@ -16,6 +16,90 @@ _checker = ExecutionChecker()
 _builder = EvidenceBuilder()
 
 
+# ── 沪深300 基准 (P0 2026-10-20): 带磁盘缓存 + 硬超时 ──────────────────────
+# 根因: 旧实现每次 dashboard 加载都同步调 get_history("sh.000300", 500), baostock
+# 挂死时阻塞 40s+ → 前端 Promise.all([detail, netvalue]) 整体卡住 → 交易历史/持仓/
+# 净值曲线全"加载中"。修复: 缓存当日结果 + 单次抓取硬超时 ≤6s, 失败则本期无基准(不阻塞)。
+_HS300_CACHE = ROOT / "data" / "hs300_benchmark_cache.json"
+_HS300_TTL_HOURS = 12
+
+
+def _load_hs300_disk_cache():
+    """读当日有效的沪深300缓存 {date: close}; 过期/缺失返回 None。"""
+    try:
+        if not _HS300_CACHE.exists():
+            return None
+        with open(_HS300_CACHE) as f:
+            blob = json.load(f)
+        ts = datetime.strptime(blob.get("cached_at", ""), "%Y-%m-%d %H:%M:%S")
+        if (datetime.now() - ts).total_seconds() > _HS300_TTL_HOURS * 3600:
+            return None
+        return {str(k)[:10]: float(v) for k, v in (blob.get("closes") or {}).items() if v}
+    except Exception:
+        return None
+
+
+def _save_hs300_disk_cache(closes: dict):
+    try:
+        with open(_HS300_CACHE, "w") as f:
+            json.dump({
+                "cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "closes": closes,
+            }, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _fetch_hs300_bounded(days: int = 500, timeout: float = 6.0):
+    """多源 + 单源硬超时抓沪深300收盘价 {date: close}; 全部失败返回 None。
+
+    源顺序: akshare(直取指数, 稳) → data_router(baostock/yfinance)。
+    每源在独立线程里跑, 超过 timeout 立即放弃 (daemon 线程不阻塞返回)。
+    """
+    import concurrent.futures as _cf
+
+    def _via_akshare():
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol="sh000300")
+        out = {}
+        for _, row in df.iterrows():
+            d = str(row.get("date"))[:10]
+            c = row.get("close")
+            if c and float(c) > 0:
+                out[d] = float(c)
+        return out
+
+    def _via_router():
+        from data.data_router import get_history as _gh
+        r = _gh("sh.000300", days=days)
+        if r and r.get("dates") and r.get("close"):
+            return {str(d)[:10]: float(c) for d, c in zip(r["dates"], r["close"]) if c}
+        return {}
+
+    for fn in (_via_akshare, _via_router):
+        try:
+            with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(fn)
+                res = fut.result(timeout=timeout)
+            if res:
+                return res
+        except Exception:
+            continue
+    return None
+
+
+def _get_hs300_closes(days: int = 500):
+    """获取沪深300收盘价 — 缓存优先, 抓取有硬超时, 绝不长时间阻塞请求。"""
+    cached = _load_hs300_disk_cache()
+    if cached:
+        return cached
+    fresh = _fetch_hs300_bounded(days=days)
+    if fresh:
+        _save_hs300_disk_cache(fresh)
+        return fresh
+    return cached  # 可能为 None (无基准, 不阻塞)
+
+
 def _calc_stop_loss(entry_price, peak_price=None):
     """P0-7: 止损线 = max(固定止损 entry*0.92, 峰值回落 peak*0.88).
 
@@ -675,22 +759,40 @@ def api_v2_portfolio_netvalue():
             "color": {"faceji": "#58a6ff", "silverquant": "#f0883e", "tradingagents": "#bc8cff"}.get(strat_name, "#7ee787"),
         })
 
+    # ── P1 (2026-10-20): 全 series x 轴对齐 ──────────────────────────────
+    # Chart.js 所有 dataset 共享 series[0].labels; 若某 series 的 values 长度/日期
+    # 与主轴不一致(0笔策略曾用 union 日期=21 点 vs 其他 17 点), 曲线会错位/断裂。
+    # 修复: 以最长的日期轴为基准, 把每个 series 的 values 重映射到该轴 (缺失点前向填充)。
+    if series:
+        all_labels = sorted({d for s in series for d in (s.get("labels") or [])})
+        if len(all_labels) >= 2:
+            for s in series:
+                s_dates = s.get("labels") or []
+                s_vals = s.get("values") or []
+                if not s_dates:
+                    continue
+                dmap = dict(zip(s_dates, s_vals))
+                filled = []
+                last = None
+                for d in all_labels:
+                    if d in dmap:
+                        last = dmap[d]
+                    filled.append(last if last is not None else (s_vals[0] if s_vals else None))
+                # 首点缺失时用首个可得值回填
+                first_valid = next((v for v in filled if v is not None), None)
+                filled = [v if v is not None else first_valid for v in filled]
+                if all(v is not None for v in filled):
+                    s["labels"] = all_labels
+                    s["values"] = filled
+
     # ── P2 (2026-08-31): 沪深300基准叠加 (归一化到首日=1.0, 与策略同尺度) ──
     # 对齐 series[0].labels (Chart.js 所有 datasets 共享 x 轴 labels)
     if series:
         bm_labels = series[0].get("labels") or []
         if len(bm_labels) >= 2:
-            try:
-                from data.data_router import get_history as _gh
-                hs300 = _gh("sh.000300", days=500)
-                if hs300 and hs300.get("dates") and hs300.get("close"):
-                    hs_map = {}
-                    for d, c in zip(
-                        [str(x)[:10] for x in hs300["dates"]],
-                        [float(x) if x else None for x in hs300["close"]],
-                    ):
-                        if c and c > 0:
-                            hs_map[d] = c
+            hs_map = _get_hs300_closes(days=500)
+            if hs_map:
+                try:
                     bm_vals = []
                     last_v = None
                     from datetime import timedelta as _td
@@ -718,8 +820,8 @@ def api_v2_portfolio_netvalue():
                             "color": "#e3b341",
                             "benchmark": True,
                         })
-            except Exception as e:
-                print(f"[netvalue] 沪深300基准获取失败: {e}")
+                except Exception as e:
+                    print(f"[netvalue] 沪深300基准处理失败: {e}")
 
     return {"labels": series[0]["labels"] if series else [], "series": series}
 
