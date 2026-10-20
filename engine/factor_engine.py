@@ -959,9 +959,13 @@ class FactorEngine:
                 return float(np.min(dd))
 
             elif method == "distance_from_high":
-                if len(close) < 250:
+                # 距 52 周新高位置。原阈值 250 根 → 但 A股日线一自然年只有 ~243 根,
+                # baostock 取 days=250 实际返回 ~231 根 → 恒 <250 → 永久 None → 该子因子
+                # 长期废掉(降级为中性 0.5)。改为 ≥120 根即可计算, 窗口取可用最长。
+                if len(close) < 120:
                     return None
-                peak = float(np.max(close[-250:]))
+                window = close[-250:] if len(close) >= 250 else close[-120:]
+                peak = float(np.max(window))
                 if peak <= 0:
                     return None
                 return float(close[-1] / peak)
@@ -1330,6 +1334,26 @@ class FactorEngine:
                         logger.info(f"  [factor_engine] {done}/{n} symbols collected")
 
         # Phase 2: 对每个子因子做产业链内截面分位数标准化（行业中性化）
+        # ── P0 数据质量守门 (2026-10-20) ──────────────────────────────────
+        # 此前若数据源瞬时故障 → 子因子原始值大面积 None → 标准化静默降级为 0.5,
+        # 输出的评分"看似有效"实则报废(全截面同分), 无任何告警。这里统计每个子因子
+        # 的有效覆盖率, 覆盖率过低(<50%)时显式告警 + 记录到 self._last_coverage。
+        _coverage: dict[str, float] = {}
+        _degraded: list[str] = []
+        for sk in SUB_FACTOR_DEFS:
+            vals = raw_values.get(sk, {})
+            got = sum(1 for v in vals.values() if v is not None)
+            cov = got / n if n else 0.0
+            _coverage[sk] = round(cov, 3)
+            if n >= 5 and cov < 0.5:
+                _degraded.append(f"{sk}({cov:.0%})")
+        self._last_coverage = _coverage
+        if _degraded:
+            logger.warning(
+                f"[factor_engine] ⚠️ 因子数据覆盖率过低, 以下子因子被降级为中性0.5: "
+                f"{', '.join(_degraded)} — 疑数据源(baostock/财务)故障, 本次评分可信度下降"
+            )
+
         chain_map = _build_chain_map(symbols)
         std_values: dict[str, dict[str, float]] = {}
         for sk, sub_def in SUB_FACTOR_DEFS.items():
