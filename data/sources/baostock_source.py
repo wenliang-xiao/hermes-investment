@@ -8,7 +8,14 @@ P0 加固 (2026-08-18):
   - 修复前: cron 每日 8:00/17:30 卡死在 bs.login()/query_history_k_data_plus()
     → 模拟盘数据永远停滞 (current_price=entry_price, pnl=0)
   - 修复: 每次 C 层调用外挂 SIGALRM 进程级硬超时, 超时抛 TimeoutError
-    → 调用方降级 akshare ETF 历史, 保证 run_trading 永不卡死
+    → 调用方降级 akshare 历史, 保证 run_trading 永不卡死
+
+P0 数据源加固 (2026-10-20):
+  - 降级源覆盖 A股: 原 `_fallback_akshare_etf` 只走 ETF 接口, 普通 A股传进去返回空
+    → baostock 一挂, A股完全没有可用降级源, 因子引擎拿不到日线 →
+    动量/波动率因子静默降级中性 0.5 (2026-10-20 诊断: 87/89 只 momentum=0.5)。
+  - 现 `_fallback_akshare_hist`: A股 → stock_zh_a_daily(新浪, ~1.8s/只, 5675条),
+    ETF → fund_etf_hist_em。已实测 600030/300750/002472/688012 全部拿到含当日数据。
 """
 from __future__ import annotations
 from pathlib import Path
@@ -211,28 +218,58 @@ def _a_code(symbol: str) -> str:
     return symbol
 
 
-def _fallback_akshare_etf(symbol: str):
-    """AKShare ETF 历史降级 (baostock 无数据或挂死时)"""
+def _akshare_prefix(symbol: str) -> str:
+    """6位 A股代码 → 交易所前缀 (sh/sz)"""
+    if symbol.startswith(("60", "68", "51", "52", "53", "56", "58", "11")):
+        return "sh"
+    return "sz"
+
+
+def _fallback_akshare_hist(symbol: str):
+    """AKShare 历史降级 (baostock 无数据或挂死时)。
+
+    ⚠️ P0 修复 (2026-10-20): 原实现只调 `fund_etf_hist_em`(ETF 专用接口),
+    普通 A股(如 600030/300750)传进去返回空 → **A股完全没有可用降级源** →
+    baostock 一挂, 因子引擎拿不到日线, 动量/波动率因子静默降级为 0.5。
+    现按标的分流: A股 → stock_zh_a_daily(新浪, 稳定 1.8s/只), ETF → fund_etf_hist_em。
+    """
     import akshare as ak
     from datetime import datetime as _dt
-    df = ak.fund_etf_hist_em(symbol=symbol, period="daily",
-                              start_date="20180101",
-                              end_date=_dt.now().strftime("%Y%m%d"),
-                              adjust="qfq")
+
+    is_etf = symbol.isdigit() and len(symbol) == 6 and symbol.startswith(
+        ("51", "52", "53", "56", "58", "15")
+    )
+    if is_etf:
+        df = ak.fund_etf_hist_em(symbol=symbol, period="daily",
+                                  start_date="20180101",
+                                  end_date=_dt.now().strftime("%Y%m%d"),
+                                  adjust="qfq")
+    else:
+        # A股: 新浪源, 需 sh/sz 前缀
+        df = ak.stock_zh_a_daily(symbol=_akshare_prefix(symbol) + symbol, adjust="qfq")
+
     if df is None or df.empty:
         return None
-    dates = df["日期"].tolist() if "日期" in df.columns else []
+    dates = df["date"].tolist() if "date" in df.columns else (
+        df["日期"].tolist() if "日期" in df.columns else [])
     if not dates:
         return None
+
+    def _col(*names):
+        for n in names:
+            if n in df.columns:
+                return [float(v) if v is not None else 0 for v in df[n]]
+        return [0] * len(dates)
+
     return {
         "symbol": symbol,
-        "dates": [str(d) for d in dates],
-        "open": [float(v) if v else 0 for v in df.get("开盘", [0] * len(dates))],
-        "high": [float(v) if v else 0 for v in df.get("最高", [0] * len(dates))],
-        "low": [float(v) if v else 0 for v in df.get("最低", [0] * len(dates))],
-        "close": [float(v) if v else 0 for v in df.get("收盘", [0] * len(dates))],
-        "volume": [float(v) if v else 0 for v in df.get("成交量", [0] * len(dates))],
-        "amount": [float(v) if v else 0 for v in df.get("成交额", [0] * len(dates))],
+        "dates": [str(d)[:10] for d in dates],
+        "open": _col("open", "开盘"),
+        "high": _col("high", "最高"),
+        "low": _col("low", "最低"),
+        "close": _col("close", "收盘"),
+        "volume": _col("volume", "成交量"),
+        "amount": _col("amount", "成交额"),
     }
 
 
@@ -247,14 +284,14 @@ def get_history_a(symbol: str, days: int = 1200):
     except BSTimeoutError as e:
         logger.warning(f"[baostock] {symbol} 挂死超时: {e} → 降级 akshare")
         try:
-            return _fallback_akshare_etf(symbol)
+            return _fallback_akshare_hist(symbol)
         except Exception as fe:
             logger.warning(f"[baostock] {symbol} akshare 降级失败: {fe}")
             return None
     except Exception as e:
         logger.warning(f"[baostock] {symbol} 获取失败: {e} → 降级 akshare")
         try:
-            return _fallback_akshare_etf(symbol)
+            return _fallback_akshare_hist(symbol)
         except Exception:
             return None
 
@@ -290,11 +327,11 @@ def _get_history_a_bs(symbol: str, days: int = 1200):
 
     if rs is None:
         # worker线程超时放弃 → 降级 akshare (锁外)
-        return _fallback_akshare_etf(symbol)
+        return _fallback_akshare_hist(symbol)
 
     if not rows:
         # baostock没数据 → AKShare ETF 历史 (锁外)
-        return _fallback_akshare_etf(symbol)
+        return _fallback_akshare_hist(symbol)
 
     # Build result dict with numpy arrays
     import numpy as np
