@@ -102,8 +102,16 @@
 4. `merge_batches_today.py` → 合并票池 → 生成当日 scan snapshot
 5. 记录日期到 `data/scan_snapshot_days.log`
 
-**运行时长:** 全量 ~50-60 分钟。**必须 background 运行 + poll**，不要前台短超时跑。
+**运行时长:** 全量 ~20-30 分钟（2026-10-20 起 A股走新浪主源后大幅提速；此前 baostock 路径 ~50-60min）。**必须 background 运行 + poll**，不要前台短超时跑。
 **可续扫:** 超时/中断后重跑同一命令即从已完成的批次继续。
+
+**⚠️ 数据源优先级 (2026-10-20 起):** wrapper `factor_daily_scan.sh` 内 `export FACTOR_A_AKSHARE_PRIMARY=1`，
+A股历史日线**主源改走新浪** (`stock_zh_a_daily`, ~1.9s/只, 含当日)，baostock 仅作降级。
+原因: baostock 频繁 flapping（时而响应 2-7s / 时而静默挂死 15s，ESTAB 连 114.94.20.42:10030
+但不回数据）→ ①逐只烧 15s 超时拖垮扫描 ②瞬时黑洞窗口让整批股票静默降级为 0.5。
+扫描前先跑 `scripts/data_source_healthcheck.py` 自检（TCP + 功能探测，三级状态），
+明确记录当天因子建立在什么源上。**判数据源健康不能只看有没有 fallback 代码，
+要实测降级源对每个资产类别都能取到数。**
 
 ### 2.5 factor-snapshot-watchdog (`64b330ed994e`) 🐕 主动故障检测
 
