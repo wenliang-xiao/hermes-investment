@@ -56,6 +56,37 @@ _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 BS_CALL_TIMEOUT = 15
 BS_LOGIN_TIMEOUT = 10
 
+# P0 熔断 (2026-10-20): baostock 全站 TCP 不可达时 (实测 baostock.com:10030 timed out),
+# 每只股票都要先烧满 15s SIGALRM 超时才降级 akshare → 单批 20 只 ≈ 340s 纯超时开销,
+# 4 批直接跑穿 25min 预算 (batch3 实测 26min)。
+# 现加进程级熔断: 连续 N 次 baostock 失败 → 打开熔断, 冷却期内直接走 akshare,
+# 不再逐只烧 15s。任一次 baostock 成功即复位。
+BS_BREAKER_THRESHOLD = 3       # 连续失败 N 次触发熔断
+BS_BREAKER_COOLDOWN = 180      # 熔断冷却期(秒): 期间跳过 baostock 直走 akshare
+_bs_fail_streak = 0            # 连续失败计数
+_bs_breaker_until = 0.0        # 熔断解除的 monotonic 时间戳
+
+
+def _breaker_open() -> bool:
+    """熔断是否处于打开(冷却)状态"""
+    return time.monotonic() < _bs_breaker_until
+
+
+def _breaker_record(ok: bool):
+    """记录一次 baostock 调用结果, 维护熔断状态"""
+    global _bs_fail_streak, _bs_breaker_until
+    if ok:
+        _bs_fail_streak = 0
+        _bs_breaker_until = 0.0
+        return
+    _bs_fail_streak += 1
+    if _bs_fail_streak >= BS_BREAKER_THRESHOLD and not _breaker_open():
+        _bs_breaker_until = time.monotonic() + BS_BREAKER_COOLDOWN
+        logger.warning(
+            f"[baostock] 🔌 熔断打开: 连续{_bs_fail_streak}次失败 → 冷却{BS_BREAKER_COOLDOWN}s, "
+            f"期间A股直走 akshare(新浪)"
+        )
+
 
 class BSTimeoutError(TimeoutError):
     """baostock C 层调用挂死超时"""
@@ -278,10 +309,26 @@ def get_history_a(symbol: str, days: int = 1200):
 
     P0 加固: 任一步骤挂死(服务器静默)时由 SIGALRM 强制中断,
     返回 None → 调用方走降级/缓存, 保证主流程永不卡死。
+
+    P0 熔断 (2026-10-20): baostock 全站不可达时, 熔断打开 → 直接走 akshare,
+    不再逐只烧 15s 超时。
     """
+    # 熔断打开: 跳过 baostock, 直接 akshare(新浪)
+    if _breaker_open():
+        try:
+            r = _fallback_akshare_hist(symbol)
+            if r:
+                return r
+        except Exception as fe:
+            logger.warning(f"[baostock] {symbol} 熔断期 akshare 降级失败: {fe}")
+        return None
+
     try:
-        return _get_history_a_bs(symbol, days)
+        r = _get_history_a_bs(symbol, days)
+        _breaker_record(bool(r and r.get("dates")))
+        return r
     except BSTimeoutError as e:
+        _breaker_record(False)
         logger.warning(f"[baostock] {symbol} 挂死超时: {e} → 降级 akshare")
         try:
             return _fallback_akshare_hist(symbol)
@@ -289,6 +336,7 @@ def get_history_a(symbol: str, days: int = 1200):
             logger.warning(f"[baostock] {symbol} akshare 降级失败: {fe}")
             return None
     except Exception as e:
+        _breaker_record(False)
         logger.warning(f"[baostock] {symbol} 获取失败: {e} → 降级 akshare")
         try:
             return _fallback_akshare_hist(symbol)
