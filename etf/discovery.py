@@ -41,6 +41,8 @@ DATA_DIR = _PROJECT_ROOT / "data"
 OUTPUT_PATH = DATA_DIR / "etf_discovery.json"
 HISTORY_DAYS = 250  # 需要至少120天计算R120，加缓冲取250
 MIN_HISTORY = 60    # 最少需要60天数据
+# 流动性预过滤: 评分前按成交额截取的最大候选数 (控制历史日线拉取总量, 防超时)
+MAX_SCORE_CANDIDATES = 300
 
 # ── ETF 分类规则 (基于名称关键词) ──
 CATEGORY_RULES: dict[str, list[str]] = {
@@ -108,8 +110,26 @@ def _should_exclude(name: str) -> bool:
     return False
 
 
+def _get_etf_list_via_sina() -> pd.DataFrame:
+    """备用: 从新浪获取全量 A股 ETF 列表 (EastMoney 502 时降级)
+
+    新浪列: 代码(sz159998)/名称/最新价/涨跌额/涨跌幅/买入/卖出/昨收/今开/最高/最低/成交量/成交额
+    """
+    import akshare as ak
+
+    df = ak.fund_etf_category_sina(symbol="ETF基金")
+    if df is None or df.empty:
+        return pd.DataFrame()
+    # 新浪代码带交易所前缀 (sz/sh)，剥离为标准 6 位代码
+    df = df.copy()
+    df["代码"] = df["代码"].astype(str).str.replace(r"^(sh|sz)", "", regex=True)
+    return df
+
+
 def _get_etf_list() -> pd.DataFrame:
     """从 AKShare 获取全量 A股 ETF 列表
+
+    数据源优先级: EastMoney (fund_etf_spot_em) → 新浪 (fund_etf_category_sina) 降级
 
     Returns:
         DataFrame with columns: symbol, name, price, change_pct, volume, amount
@@ -119,11 +139,23 @@ def _get_etf_list() -> pd.DataFrame:
     print("[INFO] 正在从东方财富获取全量ETF数据...")
     try:
         df = ak.fund_etf_spot_em()
-        print(f"[INFO] 获取到 {len(df)} 只ETF")
-        return df
+        if df is not None and not df.empty:
+            print(f"[INFO] 获取到 {len(df)} 只ETF (东方财富)")
+            return df
+        print("[WARN] 东方财富返回空数据, 尝试新浪降级...")
     except Exception as e:
-        print(f"[ERROR] 获取ETF列表失败: {e}")
-        return pd.DataFrame()
+        print(f"[WARN] 东方财富获取ETF列表失败: {e}, 尝试新浪降级...")
+
+    try:
+        df = _get_etf_list_via_sina()
+        if df is not None and not df.empty:
+            print(f"[INFO] 获取到 {len(df)} 只ETF (新浪降级源)")
+            return df
+        print("[ERROR] 新浪降级源也返回空数据")
+    except Exception as e:
+        print(f"[ERROR] 新浪降级源失败: {e}")
+
+    return pd.DataFrame()
 
 
 def _normalize_score(values: np.ndarray, invert: bool = False) -> np.ndarray:
@@ -287,6 +319,20 @@ class EtfDiscoveryScanner:
 
         if verbose:
             print(f"[INFO] 排除 {excluded_count} 只(货基/杠杆/反向/联接)")
+
+        # 流动性预过滤: 按成交额降序, 只保留前 MAX_SCORE_CANDIDATES 只
+        # (否则需为全部 1600+ 只 ETF 拉历史日线, 远超 cron 时间预算)
+        if col_amt and result:
+            for e in result:
+                if "amount" not in e:
+                    e["amount"] = self._safe_float(e.get("price", 0))
+            result.sort(key=lambda x: x.get("amount", 0), reverse=True)
+            if len(result) > MAX_SCORE_CANDIDATES:
+                if verbose:
+                    print(f"[INFO] 流动性预过滤: {len(result)} → {MAX_SCORE_CANDIDATES} 只 "
+                          f"(按成交额截取, 控制历史拉取量)")
+                result = result[:MAX_SCORE_CANDIDATES]
+
         return result
 
     # ────────── Step 2: 多因子评分 ──────────

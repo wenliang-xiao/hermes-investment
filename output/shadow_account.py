@@ -323,9 +323,20 @@ def get_all_no_trade_reasons(scan_results: list, positions: list,
     return reasons
 
 def init_portfolio(capital: float = 1000000.0) -> dict:
-    """初始化策略四投资组合。仅在 shadow_account.json 不存在时调用。"""
+    """初始化策略四投资组合。仅在 shadow_account.json 不存在或为空仓时调用。
+
+    ⚠️ P0 防护 (2026-10-20): 绝不因缺 initialized 字段就清空已建仓账户 ——
+    run_trading._aggregate_shadow 写出的主账户曾缺 initialized, 导致每日
+    run_daily 调用本函数时把 positions/history 全清 (账户被重置的根因)。
+    判据改为"有任何持仓或历史"即视为已初始化, 只补 initialized 标记。
+    """
     book = load_shadow()
-    if book.get("capital", 0) > 0 and book.get("initialized"):
+    has_data = bool(book.get("positions")) or bool(book.get("history"))
+    if (book.get("capital", 0) > 0 and book.get("initialized")) or has_data:
+        # 已建仓/有历史/已初始化 → 只补齐 initialized 标记, 绝不清空
+        if not book.get("initialized"):
+            book["initialized"] = True
+            save_shadow(book)
         return book
     book["capital"] = capital
     book["cash"] = capital

@@ -112,6 +112,9 @@ def _aggregate_shadow(states: dict) -> dict:
         "history": all_history,
         "realized_pnl": round(realized, 2),
         "created_at": date.today().strftime("%Y-%m-%d"),
+        # ⚠️ P0: 必须带 initialized, 否则 d+1 run_daily 的 init_portfolio() 判定
+        # 账户"未初始化" → 清空 positions/history (每日账户被重置的根因)
+        "initialized": True,
     }
 
 
