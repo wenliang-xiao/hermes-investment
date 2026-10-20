@@ -692,7 +692,10 @@ class TradingEngine:
                 for name, strategy in self.strategies.items()
             },
             "trade_history": {
-                name: strategy.history[-50:]
+                # P1 (2026-10-20): 原 [-50:] 会把 >50 笔的策略截断 → 与 state 的 [-100:]
+                # 及 win/lose(从完整 history 算) 口径不一致, 导致 dashboard 一致性校验
+                # "胜率口径 win+lose(27) == 卖出笔数(26)" 永久差 1。对齐到 100。
+                name: strategy.history[-100:]
                 for name, strategy in self.strategies.items()
             },
         }

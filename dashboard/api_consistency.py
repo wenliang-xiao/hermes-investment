@@ -113,12 +113,30 @@ def data_consistency():
 
     # 5-6 已移除 (2026-08-31, IA-P2): 原"今日成交计数一致""周频计数可复算"为恒 True 占位,
     #    并非真校验, 却虚增绿勾通过项数 — 移除避免"数据一致✓"给未经校验的字段背书。
-    # 7. trade_log 与 trade_history 总笔数一致
-    tl_trades = len(tl.get("trades", []))
+    # 7. trade_log ⊂ strategy ledger (2026-10-20 修正)
+    #    原校验要求 trade_log.trades == trade_history 总笔数, 但二者是不同口径:
+    #      - trade_log = 周频纪律台账(受 traded 计数/冷却), 只记"实际记录的执行"
+    #      - trade_history = 策略状态历史(可能含更多笔, 且被 [-100:] 截断)
+    #    两者相等永远不可能 → 永久误报。正确不变量: trade_log 的每一笔都应能在
+    #    策略 ledger(strategy_states history) 中找到对应 (trade_log ⊆ ledger)。
+    ledger_keys = set()
+    for sname, stt in st.items():
+        for h in stt.get("history", []):
+            a = str(h.get("action", ""))
+            act = "B" if a.startswith(("买", "BUY", "buy")) else "S"
+            ledger_keys.add((sname, h.get("symbol"), str(h.get("date", ""))[:10], act))
+    orphan = []
+    for t in tl.get("trades", []):
+        a = str(t.get("action", ""))
+        act = "B" if a.upper().startswith("BUY") or a == "买入" else "S"
+        k = (t.get("strategy"), t.get("symbol"), str(t.get("recorded_at", ""))[:10], act)
+        if k not in ledger_keys:
+            orphan.append(k)
     add(
         "交易日志一致",
-        tl_trades == total_th_rows,
-        f"trade_log.trades={tl_trades} vs trade_history总笔数={total_th_rows}",
+        len(orphan) == 0,
+        f"trade_log={len(tl.get('trades', []))}笔, 全部可在策略台账({len(ledger_keys)}笔)中溯源"
+        + (f"; 孤儿{len(orphan)}笔: {orphan[:3]}" if orphan else ""),
     )
 
     # 8. 胜率口径: win+lose == 卖出笔数
