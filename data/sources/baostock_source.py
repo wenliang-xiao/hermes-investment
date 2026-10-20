@@ -304,17 +304,42 @@ def _fallback_akshare_hist(symbol: str):
     }
 
 
+def _akshare_primary_enabled() -> bool:
+    """A股是否以 akshare(新浪) 为主源 (baostock 为降级)。
+
+    2026-10-20: baostock 频繁进入"flapping"状态 — 时而响应(2-7s)时而静默挂死(15s 超时),
+    导致 ① 逐只烧超时拖垮扫描 ② 瞬时黑洞窗口让整批股票静默降级为 0.5。
+    新浪源稳定(~1.8s/只, 含当日), 故允许将其设为主源以根治。
+    默认关闭(保持 baostock 主源)以兼容既有行为; 置 FACTOR_A_AKSHARE_PRIMARY=1 启用。
+    """
+    return os.environ.get("FACTOR_A_AKSHARE_PRIMARY", "0") == "1"
+
+
 def get_history_a(symbol: str, days: int = 1200):
-    """拉取 A 股/ETF 历史日线 (baostock + 超时防护 + AKShare fallback)
+    """拉取 A 股/ETF 历史日线 (akshare 主源可选 + baostock + 超时防护)
 
     P0 加固: 任一步骤挂死(服务器静默)时由 SIGALRM 强制中断,
     返回 None → 调用方走降级/缓存, 保证主流程永不卡死。
 
     P0 熔断 (2026-10-20): baostock 全站不可达时, 熔断打开 → 直接走 akshare,
     不再逐只烧 15s 超时。
+
+    P0 主源切换 (2026-10-20): FACTOR_A_AKSHARE_PRIMARY=1 时 A股先走 akshare(新浪),
+    拿不到才回落 baostock — 规避 baostock flapping 的瞬时黑洞降级。
     """
-    # 熔断打开: 跳过 baostock, 直接 akshare(新浪)
-    if _breaker_open():
+    a_primary = _akshare_primary_enabled()
+
+    # ① akshare 主源模式: 先试新浪(稳定), 失败回落 baostock
+    if a_primary:
+        try:
+            r = _fallback_akshare_hist(symbol)
+            if r and r.get("dates"):
+                return r
+        except Exception as fe:
+            logger.warning(f"[akshare-primary] {symbol} 新浪失败: {fe} → 回落 baostock")
+
+    # ② 熔断打开: 跳过 baostock, 直接 akshare(新浪)
+    if _breaker_open() or a_primary:
         try:
             r = _fallback_akshare_hist(symbol)
             if r:
