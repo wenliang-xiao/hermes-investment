@@ -196,17 +196,27 @@ def standardize_cross_section(raw_values: dict[str, float | None],
 
 def standardize_by_chain(raw_values: dict[str, float | None],
                           chain_map: dict[str, str],
-                          higher_is_better: bool = True) -> dict[str, float]:
+                          higher_is_better: bool = True,
+                          min_group: int = 3) -> dict[str, float]:
     """
     按产业链分组做截面分位数标准化（行业中性化）。
 
     每条产业链算一个行业组，在组内独立做 rankdata 百分位排序。
     不在任何产业链中的标的归入 '其他' 组单独排序。
 
+    P0 修复 (2026-10-20): 原实现对**单成员链**（组内 <2 只有效值）返回 0.5 —
+    单成员链的股票所有子因子恒为 0.5，composite 恰好 =0.5，被静默判为"中性"。
+    由于扫描按 20 只/批切分，同一只股票落在哪一批决定了它是否退化（批次边界伪影），
+    实测 batch3 有 3 只（688390/601899/600028，各自独占链）composite 恰好 0.5。
+
+    修复: 组内有效成员数 < min_group 时，**回退到全截面（这批所有标的）标准化**，
+    而非给平 0.5 — 保证每只股票都基于可比样本得到有区分度的分数。
+
     Args:
         raw_values: {symbol: raw_value or None}
         chain_map: {symbol: chain_name} 产业链映射
         higher_is_better: True=高分位数代表好, False=低分位数代表好
+        min_group: 链内最小有效成员数，低于此值回退全截面标准化
 
     Returns:
         {symbol: percentile_score [0,1]}
@@ -222,11 +232,20 @@ def standardize_by_chain(raw_values: dict[str, float | None],
             chain_groups[chain] = []
         chain_groups[chain].append(sym)
 
+    # 全截面标准化（回退基准）— 只对有数据的标的算一次
+    global_result = standardize_cross_section(raw_values, higher_is_better)
+
     result: dict[str, float] = {}
     for chain, syms in chain_groups.items():
-        chain_raw = {s: raw_values[s] for s in syms}
-        chain_result = standardize_cross_section(chain_raw, higher_is_better)
-        result.update(chain_result)
+        n_valid = sum(1 for s in syms if raw_values.get(s) is not None)
+        if n_valid < min_group:
+            # 小组退化 → 回退全截面，避免平 0.5（批次边界伪影）
+            for s in syms:
+                result[s] = global_result.get(s, 0.5)
+        else:
+            chain_raw = {s: raw_values[s] for s in syms}
+            chain_result = standardize_cross_section(chain_raw, higher_is_better)
+            result.update(chain_result)
 
     return result
 
