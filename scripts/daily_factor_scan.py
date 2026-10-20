@@ -93,6 +93,22 @@ def main() -> int:
     logger.info(f"{'='*60}")
     logger.info(f"📊 面基因子日扫编排器 | {date.today().isoformat()} | 时间预算 {budget}s")
 
+    # ── 0. 数据源健康自检 (前置守卫) ──
+    # 数据源断链曾导致引擎静默产出残废因子 (87/89 momentum=0.5)。
+    # 扫描前先探测, 明确记录今天因子建立在什么源上。
+    try:
+        from scripts.data_source_healthcheck import run_checks as _ds_check
+        _h = _ds_check()
+        if _h["status"] == 2:
+            logger.warning(f"[scan] 🔴 数据源 CRITICAL: A股链不可用 — 今日因子不可信, 建议中止")
+        elif _h["status"] == 1:
+            _down = [c["name"] for c in _h["endpoints"] if not c["ok"]]
+            logger.warning(f"[scan] ⚠️ 数据源 DEGRADED: 不可用={_down} — 因子走降级源, 精度下降")
+        else:
+            logger.info(f"[scan] ✅ 数据源健康")
+    except Exception as _e:
+        logger.warning(f"[scan] 数据源自检跳过: {_e}")
+
     # 跨天清理: 本日若是全新的一天, 清掉昨日残留批文件, 从零开始
     _clean_old_batches()
 
