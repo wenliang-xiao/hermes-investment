@@ -389,6 +389,7 @@ try:
     w.write(doc_id, [('quote', f'宏观象限:{regime} | 六因子动态扫描 | 板块轮抽覆盖')])
     scan_results = []
     scan_status = ""
+    _a_pool = []          # A股子池 (主榜/深研/建仓/IC 只用它, 港美股不进 A 股榜位)
     try:
         # 强制重置baostock连接状态 (_fetch_watchlist_prices可能已logout导致标志不同步)
         try:
