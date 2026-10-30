@@ -31,6 +31,12 @@ MAX_TRADES_PER_WEEK_PER_STRATEGY = 3
 MAX_TRADES_PER_WEEK_TOTAL = 5
 TRADE_COOLDOWN_DAYS = 1  # 同一标的买卖后冷却天数
 
+# 建议信号预算 — 与模拟盘预算完全隔离。
+# 原因: 模拟盘自动执行会调用 record_trade() 占用 week_count, 导致"给用户的建议信号"
+# 被模拟盘的交易吃光, 连续多周输出 0 条 (W28-W44 每周一 08:1x 即打满 5/5)。
+# 人工交易纪律为"周最多 1 次", 故建议层单独计数。
+MAX_ADVICE_TRADES_PER_WEEK = 1
+
 # 避险资产（事件风险 extreme 清仓时保留）: 黄金/白银/债券类对冲资产
 _HAVEN_SYMBOLS = {"518880", "GLD", "SLV", "GC=F", "SI=F", "511260"}
 
@@ -127,6 +133,32 @@ class TradeCalendar:
                     return False, f"{symbol}在冷却期内({strategy_name}最后交易{cooldowns.get(cd_key, cooldowns.get(symbol))})"
 
         return True, "ok"
+
+    # ─── 建议信号预算（与模拟盘 week_count 隔离）───
+    def advice_count(self) -> int:
+        """本周已推送的建议买入条数。"""
+        return self.log.get("advice_week_count", {}).get(self.week_key(), 0)
+
+    def can_advise(self, strategy_name, symbol=None):
+        """建议信号是否可推送 — 只读 advice_week_count, 不受模拟盘影响。"""
+        n = self.advice_count()
+        if n >= MAX_ADVICE_TRADES_PER_WEEK:
+            return False, f"本周已推送{n}条建议买入(人工周频上限{MAX_ADVICE_TRADES_PER_WEEK})"
+        if symbol:
+            cooldowns = self.log.get("cooldowns", {})
+            key = f"{strategy_name}:{symbol}"
+            if key in cooldowns:
+                last = datetime.strptime(cooldowns[key], "%Y-%m-%d").date()
+                if (date.today() - last).days < TRADE_COOLDOWN_DAYS:
+                    return False, f"{symbol}冷却期内({cooldowns[key]})"
+        return True, "ok"
+
+    def record_advice(self, strategy_name, symbol) -> None:
+        """登记一条已推送的建议买入, 占用建议预算。"""
+        wk = self.week_key()
+        aw = self.log.setdefault("advice_week_count", {})
+        aw[wk] = aw.get(wk, 0) + 1
+        self._save()
 
     def record_trade(self, strategy_name, signal_dict):
         """记录已执行的交易"""
@@ -495,18 +527,22 @@ class TradingEngine:
         return resolved
 
     def _filter_by_weekly_rule(self, resolved_signals):
-        """应用周频规则"""
+        """应用周频规则 — 建议层用独立预算池, 不被模拟盘记账挤占。"""
         black_swan = self._check_black_swan()
         if black_swan:
             return resolved_signals  # 黑天鹅豁免
 
         filtered = []
         for sig in resolved_signals:
-            ok, msg = self.calendar.can_trade(sig.strategy, sig.symbol)
+            if sig.action != "BUY":
+                filtered.append(sig)  # SELL/止损不受建议预算限制
+                continue
+            ok, msg = self.calendar.can_advise(sig.strategy, sig.symbol)
             if ok:
+                self.calendar.record_advice(sig.strategy, sig.symbol)
                 filtered.append(sig)
             else:
-                print(f"  📋 周频过滤: [{sig.strategy}] {sig.action} {sig.symbol} - {msg}", flush=True)
+                print(f"  📋 建议周频过滤: [{sig.strategy}] {sig.action} {sig.symbol} - {msg}", flush=True)
         return filtered
 
     def _get_event_risk_level(self) -> str:
