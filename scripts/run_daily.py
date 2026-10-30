@@ -396,9 +396,20 @@ try:
             _reset_bs()
         except Exception:
             pass
-        scanner.MAX_SCAN = 18
-        scan_results, scan_status = scanner.scan_market_batch(batch_size=9, top_n=100)
-        log(f"Scan initial: {scan_status}, results={len(scan_results)}")
+        # 优先 v4 因子全池 (89只, 11板块全覆盖, 与 Dashboard 池子同引擎);
+        # v4 缺失/过期才退回 v3.1 的 18 只象限宇宙 (历史行为保留作兜底)
+        try:
+            from engine.daily_universe import build_daily_universe
+            # 行情走批量腾讯接口 (89只一次请求, ~1s), 名称/价格/涨跌幅一并补上
+            scan_results, scan_status = build_daily_universe()
+            log(f"Universe(v4): status={scan_status}, records={len(scan_results)}")
+        except Exception as _du_err:
+            log(f"daily_universe failed: {_du_err}")
+            scan_results, scan_status = [], "missing"
+        if scan_status != "complete":
+            scanner.MAX_SCAN = 18
+            scan_results, scan_status = scanner.scan_market_batch(batch_size=9, top_n=100)
+            log(f"Scan initial(v3.1 fallback): {scan_status}, results={len(scan_results)}")
         # 如果 batch_size=batch_size 但未完成 (baostock socket 断开时), 分批续扫直到完成
         max_batch_loops = 5
         batch_loop = 0
@@ -414,8 +425,14 @@ try:
                         scan_results.append(s)
                         existing.add(s.get('symbol',''))
                 scan_results.sort(key=lambda x: x.get('score', 0), reverse=True)
-        scan_results = scan_results[:10]
-        log(f"Scan final: status={scan_status}, top10={len(scan_results)}")
+        # 主榜/代表榜只用 A 股 (港美股走独立链路, 不抢 A 股榜位)
+        try:
+            from engine.daily_universe import filter_market as _filter_market
+            _a_pool = _filter_market(scan_results, "A") or scan_results
+        except Exception:
+            _a_pool = scan_results
+        scan_top = _a_pool[:10]
+        log(f"Scan final: status={scan_status}, pool={len(scan_results)}, top10={len(scan_top)}")
 
         # 加载上次扫描快照 — 用于显示排名/分数变化
         prev_scores = {}
@@ -425,16 +442,21 @@ try:
                 if os.path.exists(SNAP_FILE):
                     with open(SNAP_FILE) as f:
                         snap = json.load(f)
-                    for s in snap.get("results", []):
-                        prev_scores[s.get("symbol", "")] = {
-                            "score": s.get("score", 0), "rank": s.get("rank", 0)}
+                    _cur_src = scan_top[0].get("source") if scan_top else "v3.1"
+                    if snap.get("source") in (None, _cur_src):
+                        for s in snap.get("results", []):
+                            prev_scores[s.get("symbol", "")] = {
+                                "score": s.get("score", 0), "rank": s.get("rank", 0)}
+                    else:
+                        log(f"snapshot source changed ({snap.get('source')}→{_cur_src}), 跳过排名对比")
             except Exception:
                 pass
-            # 保存本次快照供下次对比
+            # 保存本次快照供下次对比 (带数据源标记, 口径切换时不产生假排名变化)
             snap_data = {"date": today, "regime": regime,
+                         "source": (scan_top[0].get("source") if scan_top else "v3.1"),
                          "results": [{"symbol": s.get("symbol",""), "name": s.get("name",""),
                                       "score": s.get("score",0), "rank": i+1}
-                                     for i, s in enumerate(scan_results[:15])]}
+                                     for i, s in enumerate(scan_top[:15])]}
             try:
                 with open(SNAP_FILE, 'w') as f:
                     json.dump(snap_data, f)
@@ -443,7 +465,7 @@ try:
 
         if scan_status == "complete":
             # 信号质量评估
-            top_scores = [s.get('score', 0) for s in scan_results[:10]]
+            top_scores = [s.get('score', 0) for s in scan_top]
             score_range = max(top_scores) - min(top_scores) if top_scores else 0
             avg_score = sum(top_scores) / len(top_scores) if top_scores else 0
             
@@ -472,8 +494,8 @@ try:
                 delta = avg_score - prev_avg
                 quality_note += f" | vs前次{delta:+.1f}{'↑改善' if delta > 0.2 else ('↓退步' if delta < -0.2 else '→持平')}"
             
-            w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_results)} | 信号质量: {quality} — {quality_note}')])
-            for rank, s in enumerate(scan_results[:10], 1):
+            w.write(doc_id, [('bold', f'📊 今日TOP{len(scan_top)} | 信号质量: {quality} — {quality_note}')])
+            for rank, s in enumerate(scan_top, 1):
                 name = s.get("name", s.get("symbol", "?"))
                 sym = s.get("symbol", "?")
                 score = s.get("score", 0)
@@ -501,6 +523,27 @@ try:
                 w.write(doc_id, [('bullet',
                     f"#{rank} **{name}**({sym})  {chg_s} | 综合{score:.1f}分 | {sector}{delta}{' | '+r_str if r_str else ''}"
                 )])
+            try:
+                from domain.stock_universe import LDS_SECTORS as _LDS
+                _cov = {s.get('sector') for s in _a_pool}
+                _miss = sorted(set(_LDS) - _cov)
+                _cov_txt = f"覆盖{len(_cov & set(_LDS))}/{len(_LDS)}板块" + (f"(缺 {'/'.join(_miss)})" if _miss else "")
+            except Exception:
+                _cov_txt = ""
+            w.write(doc_id, [('text', f"口径: v4因子引擎全池{len(scan_results)}只·{_cov_txt}·分数=composite×10, 与Dashboard票池同源")])
+
+            # ── 板块代表榜: 每板块最高分 1 只, 防止消费/金融垄断榜单 ──
+            try:
+                from engine.daily_universe import sector_leaders
+                _leaders = sector_leaders(_a_pool, per_sector=1)
+                if _leaders:
+                    w.write(doc_id, [('bold', f"🧩 板块代表榜 ({len(_leaders)}个板块)")])
+                    _rows = []
+                    for _r in _leaders:
+                        _rows.append(f"{_r['sector']}: {_r['name']}({_r['symbol']}) {_r.get('score',0):.1f}分")
+                    w.write(doc_id, [('bullet', ' | '.join(_rows))])
+            except Exception as _le:
+                log(f"sector_leaders skipped: {_le}")
         elif scan_status.startswith("partial:"):
             prog = scan_status.split(":")[1]
             w.write(doc_id, [('text', f'⏳ 扫描进行中 ({prog}) — 下次cron续扫剩余批次')])
@@ -534,7 +577,7 @@ try:
     # ── 链外发现: 扫描评分≥6 或 ≥5%异动 且不在观察池 ──
     if scan_status == "complete":
         try:
-            outsiders = [s for s in scan_results
+            outsiders = [s for s in _a_pool
                          if s.get('score',0) >= 6.0
                          and str(s.get('symbol','')) not in _watchlist_codes]
             # 也从异动股中找
@@ -556,7 +599,7 @@ try:
     # ═══ 2.2 深度研究: Nick四问+四重确认 ═══
     if scan_results and scan_status == "complete":
         w.write(doc_id, [('divider', ''), ('h3', '🔬 2.2 深度研究')])
-        top3 = [s for s in scan_results[:3] if s.get('score', 0) > 0]
+        top3 = [s for s in _a_pool[:3] if s.get('score', 0) > 0]
         if top3:
             for rank, s in enumerate(top3, 1):
                 sym = s.get('symbol', '?')
@@ -603,13 +646,13 @@ try:
         try:
             from engine.factor_quality import save_snapshot, get_quality_report
             # 从扫描结果提取价格（scan_one自带的price字段）
-            _price_map = {str(s.get('symbol', '')): s.get('price') 
-                         for s in scan_results if s.get('price') is not None}
-            save_snapshot(scan_results, prices_map=_price_map)
+            _price_map = {str(s.get('symbol', '')): s.get('price')
+                         for s in _a_pool if s.get('price') is not None}
+            save_snapshot(_a_pool, prices_map=_price_map)
             log(f"Factor snapshot saved ({len(scan_results)} stocks, {len(_price_map)} prices)")
 
             # 保存今日最高分票 → 供明日报决策摘要「转绿第一优先级」
-            best = max(scan_results, key=lambda s: s.get('score', 0))
+            best = max(_a_pool, key=lambda s: s.get('score', 0))
             import json as _json
             try:
                 with open('/tmp/hermes_top_priority.json', 'w') as _f:
@@ -665,7 +708,7 @@ try:
     # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
     if scan_results and scan_status == "complete" and _chain_stocks:
         discoveries = []
-        for s in scan_results:
+        for s in _a_pool:
             sym = str(s.get('symbol', ''))
             if not sym or sym in _watchlist_codes: continue
             score = s.get('score', 0)
@@ -706,12 +749,12 @@ try:
             _sa_sum = _sa_summary()
             _hold = {p["symbol"] for p in _sa_sum.get("positions", [])}
             _hold_count = len(_hold)
-            _sc_map = {s.get("symbol", ""): s.get("score", 0) for s in scan_results}
+            _sc_map = {s.get("symbol", ""): s.get("score", 0) for s in _a_pool}
             MAX_POSITIONS = 8
 
             # ── 建仓：TOP5中非持仓+非冷却+非异动+评分≥5.0 + 趋势确认 ──
             _n = 0
-            for _i, _s in enumerate(scan_results[:5], 1):
+            for _i, _s in enumerate(_a_pool[:5], 1):
                 if _hold_count + _n >= MAX_POSITIONS:
                     log(f"  MAX_POSITIONS({MAX_POSITIONS}) reached, stop entry")
                     break

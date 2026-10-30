@@ -120,10 +120,18 @@ def main() -> int:
         for s in sec_syms:
             if len(str(s)) == 6:
                 all_syms.add(str(s))
-    a_symbols = [str(s) for s in ALL_CORE_STOCKS if len(str(s)) == 6]
-    for s in all_syms:
-        if s not in a_symbols:
-            a_symbols.append(s)
+    # 板块轮转: 保证 11 个 LDS 板块都有名额 (旧实现切前 80 只 → 地产/汽车整块丢失)
+    try:
+        from engine.daily_universe import round_robin_universe
+        a_symbols = round_robin_universe(
+            LDS_SECTORS, core=[str(s) for s in ALL_CORE_STOCKS],
+            limit=A_BATCHES * A_BATCH_SIZE)
+    except Exception as _e:  # noqa: BLE001 - 轮转失败退回旧顺序
+        logger.warning(f"[scan] round_robin failed ({_e}), fallback 顺序拼接")
+        a_symbols = [str(s) for s in ALL_CORE_STOCKS if len(str(s)) == 6]
+        for s in all_syms:
+            if s not in a_symbols:
+                a_symbols.append(s)
     logger.info(f"[scan] A股池: {len(a_symbols)} 只, 分 {A_BATCHES} 批(每批~{A_BATCH_SIZE})")
 
     batches = [a_symbols[i:i + A_BATCH_SIZE]
