@@ -312,7 +312,7 @@ def format_report_blocks(payload: dict, max_falling: int = 3) -> list[tuple]:
         for s in rev[:3]:
             rv = s.get("reversal") or {}
             blocks.append(("bullet",
-                f"🔄 **{s['key']}** 反转启动 | 评分{s['score']:.0f} | "
+                f"🔄 {s['key']} 反转启动 | 评分{s['score']:.0f} | "
                 f"5日{(s.get('ret_5d') or 0):+.2f}% 距高{(s.get('dd_60d') or 0):.1f}% | "
                 f"{rv.get('reason', '')}"))
     else:

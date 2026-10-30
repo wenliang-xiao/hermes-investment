@@ -176,6 +176,14 @@ td { padding:5px 4px; border-bottom:1px solid var(--border); }
         <div class="text-gray-400 text-sm">加载中...</div>
       </div>
     </div>
+    <!-- ======== 板块反转 (板块级/时序级信号 — 个股截面打分给不出的方向判断) ======== -->
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+      <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+        <h3 class="text-gray-100 font-semibold">🧭 板块反转 <span class="text-[10px] text-gray-500 font-normal">跌≥3%后收复50%失地+放量 · 跨市场传导缺口</span></h3>
+        <div id="sector-rev-meta" class="text-xs text-gray-400">—</div>
+      </div>
+      <div id="sector-rev-content"><div class="text-gray-400 text-sm">加载中...</div></div>
+    </div>
     <div id="v2-portfolio-overview" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
     
     <!-- ======== 策略信号日志 (默认折叠, 消除与执行决策区平铺冗余) ======== -->
@@ -996,6 +1004,55 @@ function renderNetValueChart(labels, series) {
     });
 }
 
+
+async function loadSectorReversal() {
+  const box = document.getElementById('sector-rev-content');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/v2/sector_reversal/rank');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const meta = document.getElementById('sector-rev-meta');
+    if (meta) meta.textContent = (d.date || '—') + ' · ' + (d.rows || []).length + '个板块';
+    const color = {'反转启动':'text-green-400 font-semibold','筑底抬升':'text-emerald-300','领涨':'text-blue-300','补跌':'text-gray-500','高位滞涨':'text-yellow-400','数据不足':'text-gray-600'};
+    const pct = v => (v === null || v === undefined) ? '—' : ((v > 0 ? '+' : '') + v.toFixed(2) + '%');
+    const dir = v => (v === null || v === undefined) ? 'text-gray-500' : (v > 0 ? 'text-red-400' : 'text-green-400');
+    let html = '<div class="overflow-x-auto"><table class="w-full text-xs text-left whitespace-nowrap">';
+    html += '<thead class="text-gray-400"><tr>' +
+      '<th class="px-2 py-1 font-medium">板块</th>' +
+      '<th class="px-2 py-1 font-medium">阶段</th>' +
+      '<th class="px-2 py-1 font-medium text-right">评分</th>' +
+      '<th class="px-2 py-1 font-medium text-right">5日</th>' +
+      '<th class="px-2 py-1 font-medium text-right">20日</th>' +
+      '<th class="px-2 py-1 font-medium text-right">距高</th>' +
+      '<th class="px-2 py-1 font-medium text-right">RS5</th>' +
+      '<th class="px-2 py-1 font-medium">反转证据</th></tr></thead><tbody>';
+    (d.rows || []).forEach(x => {
+      const c = color[x.stage] || 'text-gray-300';
+      html += '<tr class="border-t border-gray-700/50">' +
+        '<td class="px-2 py-1 text-gray-200">' + x.key + '<span class="text-gray-500 ml-1">' + x.symbol + '</span></td>' +
+        '<td class="px-2 py-1 ' + c + '">' + x.stage + '</td>' +
+        '<td class="px-2 py-1 text-right text-gray-100">' + (x.score ? x.score.toFixed(0) : '—') + '</td>' +
+        '<td class="px-2 py-1 text-right ' + dir(x.ret_5d) + '">' + pct(x.ret_5d) + '</td>' +
+        '<td class="px-2 py-1 text-right ' + dir(x.ret_20d) + '">' + pct(x.ret_20d) + '</td>' +
+        '<td class="px-2 py-1 text-right text-gray-400">' + pct(x.dd_60d) + '</td>' +
+        '<td class="px-2 py-1 text-right text-gray-400">' + (x.rs_5d === null || x.rs_5d === undefined ? '—' : x.rs_5d.toFixed(2)) + '</td>' +
+        '<td class="px-2 py-1 text-gray-500">' + (x.reversal_fired ? '✅ ' : '') + (x.reversal_reason || '') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if (d.transmission && d.transmission.length) {
+      html += '<div class="mt-2 text-xs text-gray-400">🌉 传导: ' +
+        d.transmission.slice(0, 3).map(t =>
+          t.leader + ' ' + pct(t.leader_5d) + ' → ' + t.follower + ' ' + pct(t.follower_5d) +
+          ' <span class="text-yellow-400">缺口' + (t.gap_pp > 0 ? '+' : '') + t.gap_pp.toFixed(1) + 'pp</span>' +
+          ' (领先' + t.lag + '日)').join(' · ') + '</div>';
+    }
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="text-red-400 text-sm">板块反转加载失败: ' + e.message + '</div>';
+  }
+}
+
 async function loadPoolV2() {
     try {
         const [poolRes, explainRes] = await Promise.all([
@@ -1146,7 +1203,7 @@ function switchTab(ev, tab) {
   const panel = document.getElementById('tab-'+tab);
   if (panel) panel.style.display = '';
 
-  if (tab === 'dashboard') { loadDashboardV2(); loadExecutionBoard(); }
+  if (tab === 'dashboard') { loadDashboardV2(); loadExecutionBoard(); loadSectorReversal(); }
   else if (tab === 'pool') loadPoolV2();
   else if (tab === 'etf') loadEtf();
   else if (tab === 'news') loadNews();
@@ -1542,8 +1599,8 @@ function toggleEvidence(symbol) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-window.onload = () => { initLayerDetail(); loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); };
-setInterval(() => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); }, 120000);
+window.onload = () => { initLayerDetail(); loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); loadSectorReversal(); };
+setInterval(() => { loadLayerBar(); loadDashboardV2(); loadExecutionBoard(); loadDataConsistency(); loadSectorReversal(); }, 120000);
 
 async function loadEtf() {
   const el = document.getElementById('etfBody');
