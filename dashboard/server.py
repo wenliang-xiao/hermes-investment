@@ -38,6 +38,7 @@ from dashboard.api_chain import router as chain_router
 from dashboard.api_gurus import router as gurus_router
 from dashboard.api_insights import router as insights_router
 from dashboard.api_consistency import router as consistency_router
+from dashboard.api_sector import router as sector_router
 
 app.include_router(portfolio_router)
 app.include_router(pool_router)
@@ -54,6 +55,7 @@ app.include_router(chain_router)
 app.include_router(gurus_router)
 app.include_router(insights_router)
 app.include_router(consistency_router)
+app.include_router(sector_router)
 
 # ─── HTML 模板 ─────────────────────────────────────
 

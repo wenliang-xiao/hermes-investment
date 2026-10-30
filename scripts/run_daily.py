@@ -641,6 +641,27 @@ try:
         except Exception as e:
             log(f"Factor quality skipped: {e}")
 
+    # ═══ 2.4 板块反转扫描 (板块级/时序级信号 — 与个股截面打分互补) ═══
+    w.write(doc_id, [('divider', ''), ('h3', '🧭 2.4 板块反转')])
+    try:
+        from engine.sector_reversal_engine import format_report_blocks
+        _sr_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                'data', 'sector_reversal.json')
+        with open(_sr_path, encoding='utf-8') as _f:
+            _sr = json.load(_f)
+        _sr_age_h = (time.time() - os.path.getmtime(_sr_path)) / 3600
+        if _sr_age_h > 96:
+            w.write(doc_id, [('text', f"⚠️ 板块反转数据过期 {_sr_age_h:.0f}h, 需重跑 run_sector_reversal.py")])
+        for _b in format_report_blocks(_sr):
+            w.write(doc_id, [_b])
+        w.write(doc_id, [('text', f"口径: 板块用ETF代理, 反转=跌≥3%后收复50%失地+量能≥1.2x | 数据日 {_sr.get('date','?')}")])
+        log("Sector reversal done")
+    except FileNotFoundError:
+        w.write(doc_id, [('text', '⚠️ 板块反转数据缺失 (data/sector_reversal.json 未生成)')])
+    except Exception as _e:
+        log(f"Sector reversal skipped: {_e}")
+        w.write(doc_id, [('text', f"⚠️ 板块反转加载失败: {str(_e)[:60]}")])
+
     # ═══ 链内新发现: 扫描结果中属于已知链但不处于WATCHLIST的标的 ═══
     if scan_results and scan_status == "complete" and _chain_stocks:
         discoveries = []
