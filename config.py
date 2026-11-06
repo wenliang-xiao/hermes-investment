@@ -258,15 +258,46 @@ NEWS_SOURCES = {
 }
 
 # ─── 风控参数（LDS纪律铁律）───
+# ADR-0005 (2026-11-03): 本表是风控数值的唯一来源，策略/检查器都从这里读。
+# 单票上限取三策略中最高的一档（tradingagents 12%），策略内部仍有各自上限：
+#   faceji 8% / silverquant 3% / tradingagents 12%
 RISK_PARAMS = {
-    "stop_loss_pct": 0.08,           # 8%硬止损—不可商量
+    "stop_loss_pct": 0.08,           # 8%硬止损底限（高波动标的按 2×ATR 放宽）
     "take_profit_tier1": 0.15,       # 15%减半仓
     "take_profit_tier2": 0.30,       # 30%清仓
-    "max_single_position": 0.02,     # 单笔最大2%
+    "max_single_position": 0.12,     # 组合层单票上限（=最高策略级上限）
     "max_total_positions": 8,        # 最多持有8只
     "rebalance_threshold": 0.05,     # 偏离5%再平衡
+    "max_a_share_position": 0.25,    # A股总仓位上限
     "max_drawdown_warn": 0.15,       # 回撤>15%警告
     "max_drawdown_liquidate": 0.25,  # 回撤>25%清仓—清盘线
+}
+
+# ─── 交易纪律（单一配置源，ADR-0005）───
+TRADING_DISCIPLINE = {
+    # 模拟盘（纸面账户，用于积累样本；与"人工执行纪律"区分）
+    "max_trades_per_week_per_strategy": 3,
+    "max_trades_per_week_total": 5,
+    # 给人工执行的建议信号（真人纪律：每周最多 1 次买入）
+    "max_advice_per_week": 1,
+    "trade_cooldown_days": 1,
+    # 四档 trailing stop：持仓 >= min_hold_days 后按峰值回撤分级止损
+    # 文档 docs/STRATEGY.md §5.4 的四档规则
+    "trailing_stop_min_hold_days": 10,
+    "trailing_stop_tiers": [
+        {"min_pnl": 0.30, "threshold_pct": -12.0, "label": "T3"},
+        {"min_pnl": 0.10, "threshold_pct": -15.0, "label": "T2"},
+        {"min_pnl": None, "threshold_pct": -20.0, "label": "T1"},
+    ],
+    # SilverQuant 固定槽位金额（¥/槽位）
+    "silverquant_slot_amount": 30000.0,
+    # 策略级上限（ADR-0005：策略 dataclass 默认值从这里读，不再硬编码）
+    # 所有单票上限都 <= RISK_PARAMS.max_single_position (0.12)
+    "strategy_limits": {
+        "faceji": {"max_positions": 8, "max_candidates": 5, "max_position_pct": 0.08},
+        "silverquant": {"max_positions": 8, "max_candidates": 5},
+        "tradingagents": {"max_positions": 6, "max_candidates": 3, "max_position_pct": 0.12},
+    },
 }
 
 # ─── LDS选股标准 ───

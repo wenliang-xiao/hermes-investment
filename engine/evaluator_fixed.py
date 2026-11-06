@@ -98,9 +98,9 @@ MIN_COMMISSION = 5.0          # 最低佣金5元
 # ──────────────────────────────────────────────
 # 缓存
 # ──────────────────────────────────────────────
-_SCRIPT_DIR = Path(__file__).parent.resolve()  # .../investment_system/
-_PROJECT_DIR = _SCRIPT_DIR
-_PARENT_DIR = _SCRIPT_DIR.parent                 # for investment_system package import
+_SCRIPT_DIR = Path(__file__).parent.resolve()   # .../investment_system/engine
+_PROJECT_DIR = _SCRIPT_DIR.parent                # 仓库根 .../investment_system
+_PARENT_DIR = _PROJECT_DIR.parent                # for investment_system package import
 CACHE_DIR = _PROJECT_DIR / "data" / "eval_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 HL_RUNS_DIR = _PROJECT_DIR / "data" / "hl_runs"
@@ -170,6 +170,26 @@ class WalkForwardSplit:
 # ──────────────────────────────────────────────
 # 数据层：拉取并缓存日线数据
 # ──────────────────────────────────────────────
+def _read_price_cache(cache_file: Path):
+    """读价格缓存 pickle，坏缓存按 cache miss 处理。
+
+    缓存可能由更高版本 numpy 写入（如 numpy 2.x 的 numpy._core），在当前环境
+    反序列化会抛 ModuleNotFoundError/UnpicklingError。此前无兜底，单个坏文件
+    会让整轮回测直接失败。这里统一丢弃坏缓存并返回 None，由调用方重新拉取覆盖。
+    """
+    import pandas as pd
+
+    try:
+        return pd.read_pickle(cache_file)
+    except Exception as exc:  # noqa: BLE001 - 缓存损坏/版本不兼容统一降级为 miss
+        print(f"  ⚠️ 缓存不可读，已丢弃重建: {cache_file.name} ({exc})")
+        try:
+            cache_file.unlink()
+        except OSError:
+            pass
+        return None
+
+
 def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | None:
     """从 data_router 获取日线收盘价，缓存到本地 pickle
 
@@ -181,10 +201,11 @@ def load_price_history(symbol: str, days: int = FIXED_DAYS) -> list[float] | Non
 
     cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
     if cache_file.exists():
-        df = pd.read_pickle(cache_file)
-        if "close" not in df.columns:
-            return None
-        return df["close"].tolist()
+        df = _read_price_cache(cache_file)
+        if df is not None:
+            if "close" not in df.columns:
+                return None
+            return df["close"].tolist()
 
     # 使用新的 data_router
     try:
@@ -235,29 +256,17 @@ def load_price_history_open(symbol: str, days: int = FIXED_DAYS) -> list[float] 
 
     缓存缺 open 列（旧缓存）时回退 close，保证不崩但无 T+1 能力。
     """
-    import pandas as pd
-
     cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
-    if cache_file.exists():
-        try:
-            df = pd.read_pickle(cache_file)
-            if "open" in df.columns:
-                return df["open"].tolist()
-            return df["close"].tolist()
-        except Exception:
-            return None
-
-    # 无缓存时与 load_price_history 同源拉取一次（触发缓存写入）
-    load_price_history(symbol, days)
-    if cache_file.exists():
-        try:
-            df = pd.read_pickle(cache_file)
-            if "open" in df.columns:
-                return df["open"].tolist()
-            return df["close"].tolist()
-        except Exception:
-            return None
-    return None
+    df = _read_price_cache(cache_file) if cache_file.exists() else None
+    if df is None:
+        # 无缓存/缓存损坏时与 load_price_history 同源拉取一次（触发缓存写入）
+        load_price_history(symbol, days)
+        df = _read_price_cache(cache_file) if cache_file.exists() else None
+    if df is None:
+        return None
+    if "open" in df.columns:
+        return df["open"].tolist()
+    return df["close"].tolist()
 
 
 def load_price_history_full(symbol: str, days: int = FIXED_DAYS) -> dict | None:
@@ -265,16 +274,13 @@ def load_price_history_full(symbol: str, days: int = FIXED_DAYS) -> dict | None:
 
     与 load_price_history 同缓存源; 缺字段时该键为空列表。
     """
-    import pandas as pd
-
     cache_file = CACHE_DIR / f"{symbol}_{days}d.pkl"
     if not cache_file.exists():
         load_price_history(symbol, days)
     if not cache_file.exists():
         return None
-    try:
-        df = pd.read_pickle(cache_file)
-    except Exception:
+    df = _read_price_cache(cache_file)
+    if df is None:
         return None
     out = {"close": df["close"].tolist()}
     for col in ("open", "volume", "amount", "pe", "date"):
@@ -282,6 +288,9 @@ def load_price_history_full(symbol: str, days: int = FIXED_DAYS) -> dict | None:
             out[col] = df[col].tolist()
         else:
             out[col] = []
+    # 缓存列名是 "date"(单数), 但 docstring/调用方都按 "dates" 取 — 两个键都给出,
+    # 避免调用方 fd.get("dates") 一直拿到空列表 (2026-11-06 实测坑)。
+    out["dates"] = out.get("date", [])
     return out
 
 
@@ -314,9 +323,6 @@ def load_dates_map(days: int = FIXED_DAYS, custom_symbols: list[str] | None = No
     与 preload_all_data 同一缓存来源 — 直接从缓存 pickle 读 date 列,
     无缓存时从 data_router get_history 拉取 (与价格同源, 保证日期-价格对齐).
     """
-    import numpy as np
-    import pandas as pd
-
     dates_map: dict[str, list[str]] = {}
     if custom_symbols:
         universe = [{"symbol": s, "name": s} for s in custom_symbols]
@@ -326,8 +332,8 @@ def load_dates_map(days: int = FIXED_DAYS, custom_symbols: list[str] | None = No
         sym = s["symbol"]
         try:
             cache_file = CACHE_DIR / f"{sym}_{days}d.pkl"
-            if cache_file.exists():
-                df = pd.read_pickle(cache_file)
+            df = _read_price_cache(cache_file) if cache_file.exists() else None
+            if df is not None:
                 if "date" in df.columns:
                     dts = [str(d)[:10] for d in df["date"].tolist()]
                 else:
@@ -431,6 +437,7 @@ def run_backtest(
     dates_map: dict[str, list[str]] | None = None,
     use_t1: bool = True,
     use_point_in_time: bool = False,
+    full_days: int | None = None,
 ) -> dict:
     """固定评估器的回测核心。
 
@@ -445,6 +452,9 @@ def run_backtest(
     use_point_in_time: True = 每 5 交易日用时点评分重算评分(消除评分前视);
             False = 固定 FIXED_SCORE_MAP(旧行为, 前视)。默认 False 保持向后兼容,
             供新旧评分并行对比(ADR-001 精神)。
+
+    full_days: 时点评分补充字段(open/volume/amount/pe)的缓存窗口天数。必须与
+            price_data 的取数窗口一致, 否则日期轴对不上 (2026-11-06)。默认 FIXED_DAYS。
     """
     from strategies.base import PositionData, Signal
 
@@ -505,6 +515,72 @@ def run_backtest(
     _rescore_every = 5
     _last_rescore = -10**9
     _full_data: dict = {}  # 惰性加载完整字段(close/open/volume/amount/pe/dates), 供时点评分注入
+    _val_data: dict = {}   # 惰性加载东财估值历史(date/pe/pb), 新浪源无 PE 时按 as_of 切片补充
+    _full_days = full_days or FIXED_DAYS
+
+    def _aligned_fields(fd: dict, win_dates: list[str], as_of: str) -> dict:
+        """把 load_price_history_full 的 open/volume/amount/pe 按日期轴对齐到回测窗口。
+
+        ⚠️ 2026-11-06 修复时间轴错位: 原实现 `_tail(seq) = seq[:n]` 取的是 fd 窗口
+        (固定 120 天, 从 05-19 起) 的**头部**, 而 close 是回测窗口 (如 199d, 从 05-06 起)
+        的头部 → pe 比 close 晚约 9 个交易日; 区间末段 n > len(fd) 时整段 113 根 PE
+        (含 as_of 之后最多 3 日) → 估值分位有轻微前视。
+        现以 close 的日期轴为准做 join, 且只取 date <= as_of 的行; 某日缺失时
+        open/volume/amount 沿用最近一条, pe/pb 保持 None (上层不注入就不会取实时源)。
+        覆盖不足 80% 时返回空列表 → 上层降级。
+        """
+        fd_dates = [str(d)[:10] for d in (fd.get("dates") or fd.get("date") or [])]
+        out: dict[str, list] = {k: [] for k in ("open", "volume", "amount", "pe", "pb")}
+        if not fd_dates or not win_dates:
+            return out
+        hist = {d: i for i, d in enumerate(fd_dates) if d <= as_of}  # 严格丢弃 as_of 之后
+        for key in out:
+            vals = fd.get(key) or []
+            if len(vals) != len(fd_dates):
+                continue
+            hit = sum(1 for d in win_dates if d in hist)
+            if hit < len(win_dates) * 0.8:
+                continue
+            seq, last = [], None
+            for d in win_dates:
+                i = hist.get(d)
+                v = vals[i] if i is not None else None
+                if v is not None:
+                    last = v
+                    seq.append(v)
+                else:
+                    seq.append(None if key in ("pe", "pb") else last)
+            out[key] = seq
+        return out
+
+    def _valuation_fields(sym: str, win_dates: list[str], as_of: str) -> dict:
+        """东财估值历史 (date/pe/pb) 按回测窗口日期轴对齐 — PIT 安全。
+
+        FACTOR_A_AKSHARE_PRIMARY=1 时新浪日线不带 PE/PB, 缓存里 pe 全 None →
+        value:pe_percentile / value:pb / risk:pe_excessive 恒中性 0.5。这里用
+        `stock_value_em` 的历史序列, 只取 date <= as_of 的行, 不引入未来数据。
+        每个标的每次回测只拉一次 (模块内缓存)。
+        """
+        rows = _val_data.get(sym)
+        if rows is None:
+            try:
+                from data.sources.akshare_source import get_valuation_history_ak
+                rows = get_valuation_history_ak(sym, days=max(_full_days * 2, 400)) or []
+            except Exception:
+                rows = []
+            _val_data[sym] = rows
+        if not rows:
+            return {}
+        m = {str(r.get("date"))[:10]: r for r in rows
+             if r.get("date") and str(r.get("date"))[:10] <= as_of}
+        if not m:
+            return {}
+        out: dict[str, list] = {}
+        for key in ("pe", "pb"):
+            seq = [(m.get(d) or {}).get(key) for d in win_dates]
+            if sum(1 for v in seq if v) >= len(win_dates) * 0.8:
+                out[key] = seq
+        return out
 
     def _rescore(day_idx: int):
         nonlocal score_map, _last_rescore, _full_data
@@ -518,22 +594,24 @@ def run_backtest(
                 continue
             if sym not in _full_data:
                 try:
-                    _full_data[sym] = load_price_history_full(sym, days=FIXED_DAYS) or {}
+                    _full_data[sym] = load_price_history_full(sym, days=_full_days) or {}
                 except Exception:
                     _full_data[sym] = {}
             fd = _full_data.get(sym, {})
 
-            def _tail(seq):
-                seq = seq or []
-                return list(seq[:n]) if len(seq) >= n else list(seq)
+            # close 与 dates 用回测窗口自身的前 n 根 (升序, 末位=as_of), 两者天然对齐
+            win_dates = [str(d)[:10] for d in dts[:n]] if dts else []
+
+            fields = _aligned_fields(fd, win_dates, as_of)
+            if not any(fields.get("pe") or []) or not any(fields.get("pb") or []):
+                for k, v in _valuation_fields(sym, win_dates, as_of).items():
+                    if not any(fields.get(k) or []):
+                        fields[k] = v
 
             injected[sym] = {
                 "close": list(closes[:n]),
-                "dates": _tail(fd.get("dates")) or _tail(dts) or [str(i) for i in range(n)],
-                "open": _tail(fd.get("open")),
-                "volume": _tail(fd.get("volume")),
-                "amount": _tail(fd.get("amount")),
-                "pe": _tail(fd.get("pe")),
+                "dates": win_dates,
+                **fields,
             }
         try:
             from engine.factor_engine import FactorEngine, convert_v4_to_v3
@@ -967,6 +1045,10 @@ def run_walk_forward(
                 "max_drawdown_pct": round(dd * 100, 2),
                 "trade_count": trade_count,
                 "win_count": win_count,
+                "window": {"test_start_idx": window.test_start,
+                           "test_end_idx": window.test_end},
+                "equity": [round(v, 2) for v in test_equity],
+                "trades": cycle_trades,
             }
         else:
             cycle_result = {
@@ -974,6 +1056,10 @@ def run_walk_forward(
                 "test_days": len(test_equity),
                 "return_pct": 0, "sharpe": 0, "sortino": 0,
                 "max_drawdown_pct": 0, "trade_count": 0, "win_count": 0,
+                "window": {"test_start_idx": window.test_start,
+                           "test_end_idx": window.test_end},
+                "equity": [round(v, 2) for v in test_equity],
+                "trades": cycle_trades,
             }
 
         cycle_results.append(cycle_result)
@@ -1096,12 +1182,42 @@ def save_to_run_log(strategy: str, result):
 # ──────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────
+def _slice_data_window(price_data: dict[str, list[float]],
+                       dates_map: dict[str, list[str]],
+                       start_date: str | None,
+                       end_date: str | None) -> tuple[dict[str, list[float]], dict[str, list[str]]]:
+    """按真实交易日把 close 序列与日期序列同步裁剪到 [start_date, end_date]。
+
+    只有 len(dates)==len(closes) 的标的确切裁剪；无法对齐的标的整体保留，
+    宁可多留数据也不制造错位（错位会直接污染回测）。
+    """
+    if not start_date and not end_date:
+        return price_data, dates_map
+
+    out_prices: dict[str, list[float]] = {}
+    out_dates: dict[str, list[str]] = {}
+    for sym, closes in price_data.items():
+        dts = (dates_map or {}).get(sym) or []
+        if len(dts) == len(closes):
+            pairs = [(d, c) for d, c in zip(dts, closes)
+                     if (not start_date or d >= start_date)
+                     and (not end_date or d <= end_date)]
+            if pairs:
+                out_dates[sym] = [p[0] for p in pairs]
+                out_prices[sym] = [p[1] for p in pairs]
+        else:
+            out_prices[sym] = closes
+    return out_prices, out_dates
+
+
 def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
                        cycles: int = 3, train_days: int = 252, test_days: int = 63,
                        custom_symbols: list[str] | None = None,
                        days: int | None = None,
                        use_point_in_time: bool = False,
-                       include_delisted: bool = False) -> BacktestResult | dict:
+                       include_delisted: bool = False,
+                       start_date: str | None = None,
+                       end_date: str | None = None) -> BacktestResult | dict:
     """评估单个策略
 
     Args:
@@ -1111,22 +1227,58 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
         train_days: WF 训练窗口天数
         test_days: WF 测试窗口天数
         custom_symbols: 自定义标的列表（None=使用 FIXED_UNIVERSE）
-        days: 回测交易日窗口（None=默认 FIXED_DAYS，WF 模式自动 ≥ train+test*cycles+100）
+        days: 回测交易日窗口（None/小于 FIXED_DAYS 一律按 FIXED_DAYS=120 处理；WF 模式自动 ≥ train+test*cycles+100）
         use_point_in_time: 时点评分模式 (True=每5日 rescore 消除前视, 慢~10x)
         include_delisted: 幸存者偏差补池 (True=纳入退市股到回测池)
+        start_date/end_date: 请求的 ISO 日期区间。会按真实交易日裁剪数据窗口
+            （ADR-0007：让 --from/--to 真正生效，而不是只打印不生效）。
     """
     if include_delisted and not custom_symbols:
         custom_symbols = build_universe_with_delisted()
     if walk_forward:
         data_days = max(FIXED_DAYS, train_days + test_days * cycles + 100)
     else:
-        data_days = days if days and days >= 60 else FIXED_DAYS
+        # 数据源按 days 返回的K线数会略少于请求值(请求60天只得54根), 低于
+        # load_price_history 的60根下限就会整轮"无有效数据"。故以 FIXED_DAYS 为下限:
+        # 面板传 60 等价于固定120天窗口, 只有传更大值才真正放大窗口。
+        data_days = max(days, FIXED_DAYS) if days and days >= 60 else FIXED_DAYS
+    # 请求区间早于默认窗口时，扩大预加载天数，否则 start_date 之前的历史根本不在内存里
+    # ⚠️ 2026-11-06: 原用 `today - start_date` 算窗口 → 同一条命令每过一天窗口 +1，
+    # 缓存键 `{sym}_{days}d.pkl` 跟着变、数据源重新拉取，导致同一区间跨天跑出不同收益率
+    # (faceji 2026-05-01~10-31: -6.02% → -7.77%)。改为以 end_date 为基准 → 结果可复现。
+    if start_date:
+        try:
+            from datetime import date as _date
+            _ref = _date.fromisoformat(end_date) if end_date else _date.today()
+            _start = _date.fromisoformat(start_date)
+            span = (_ref - _start).days + 10
+            # 数据源只能"取最近 N 天", 实际最早一天约 = today - (N+10)。所以 end_date
+            # 离今天越远, 以 end 为锚点的窗口越够不到 start_date
+            # (实测: 请求 06-01~09-30 只拿到 06-18 起的数据)。
+            # 仅在"确实覆盖不到"时补齐, 并对 90 天取整 —— 取整是为了缓存键
+            # `{sym}_{days}d.pkl` 稳定: 每天 +1 天会重新拉数、让同一区间跑出不同结果。
+            _today = _date.today()
+            if _ref < _today:
+                required = (_today - _start).days
+                if required > span + 10:  # span+10 = 现有取数能力覆盖到的天数
+                    need = ((required + 10 + 89) // 90) * 90
+                    print(f"📦 历史区间补齐: 窗口 {span} → {need} 天 (数据源按最近N天取数)")
+                    span = need
+            data_days = max(data_days, span)
+            print(f"📦 数据窗口 {data_days} 天 (基准日 {_ref.isoformat()}，同窗口内结果可复现)")
+        except ValueError:
+            print(f"⚠️ 非法 start_date/end_date: {start_date}/{end_date}，忽略区间裁剪")
 
     # 加载数据
     print(f"\n📦 加载数据{' (WF模式)' if walk_forward else ''}...")
     price_data = preload_all_data(days=data_days, custom_symbols=custom_symbols)
     if not price_data:
         return {"error": "无有效数据"}
+
+    dates_map = load_dates_map(days=data_days, custom_symbols=custom_symbols)
+    price_data, dates_map = _slice_data_window(price_data, dates_map, start_date, end_date)
+    if not price_data:
+        return {"error": f"请求区间 {start_date or '起点'}~{end_date or '最新'} 无有效数据"}
 
     # 导入策略
     decide_fn: Callable | None = None
@@ -1148,13 +1300,31 @@ def evaluate_strategy(strategy_name: str, walk_forward: bool = False,
 
     if walk_forward:
         print(f"🏃 Walk-Forward 评估: {strategy_name} ({cycles} cycles)")
-        return run_walk_forward(price_data, decide_fn, strategy_name,
-                                 train_days=train_days, test_days=test_days, cycles=cycles)
+        res = run_walk_forward(price_data, decide_fn, strategy_name,
+                               train_days=train_days, test_days=test_days, cycles=cycles)
     else:
         print(f"🏃 运行回测: {strategy_name} ({data_days}天窗口)")
-        dates_map = load_dates_map(days=data_days, custom_symbols=custom_symbols)
-        return run_backtest(price_data, decide_fn, strategy_name, dates_map=dates_map,
-                            use_point_in_time=use_point_in_time)
+        res = run_backtest(price_data, decide_fn, strategy_name, dates_map=dates_map,
+                           use_point_in_time=use_point_in_time, full_days=data_days)
+    # ADR-0007: 把实际数据窗口写回结果，报告不再只靠调用方口头声明区间
+    provenance = {
+        "requested_start": start_date,
+        "requested_end": end_date,
+        "data_window_days": data_days,
+        "use_point_in_time": use_point_in_time,
+        "include_delisted": include_delisted,
+        "survivorship_bias": ("delisted_pool" if include_delisted
+                              else "fixed_universe(仅当前在册标的)"),
+    }
+    if isinstance(res, BacktestResult):
+        res.extra["data_window"] = {
+            **provenance,
+            "actual_start": res.start_date,
+            "actual_end": res.end_date,
+        }
+    elif isinstance(res, dict) and "error" not in res:
+        res["data_window"] = provenance
+    return res
 
 
 def main():

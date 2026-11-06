@@ -251,30 +251,65 @@ def _a_code(symbol: str) -> str:
 
 def _akshare_prefix(symbol: str) -> str:
     """6位 A股代码 → 交易所前缀 (sh/sz)"""
-    if symbol.startswith(("60", "68", "51", "52", "53", "56", "58", "11")):
+    if symbol.startswith(("60", "68", "51", "52", "53", "55", "56", "58", "11")):
         return "sh"
     return "sz"
 
 
-def _fallback_akshare_hist(symbol: str):
+def _fallback_akshare_hist(symbol: str, days: int | None = None):
     """AKShare 历史降级 (baostock 无数据或挂死时)。
 
     ⚠️ P0 修复 (2026-10-20): 原实现只调 `fund_etf_hist_em`(ETF 专用接口),
     普通 A股(如 600030/300750)传进去返回空 → **A股完全没有可用降级源** →
     baostock 一挂, 因子引擎拿不到日线, 动量/波动率因子静默降级为 0.5。
     现按标的分流: A股 → stock_zh_a_daily(新浪, 稳定 1.8s/只), ETF → fund_etf_hist_em。
+
+    days: 只要最近 N 个自然日的日线（与 baostock 返回窗口对齐）。
+    ⚠️ 2026-11-06: 原来忽略 days 返回全历史（002179 实测 4601 行 / 2007 起），
+    回测按 days 建缓存 → 每天窗口不同、全历史无 PE，导致同一命令跨天结果漂移。
+    None = 保留全历史（老调用方语义）。
     """
     import akshare as ak
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
 
+    cutoff = None
+    if days:
+        cutoff = (_dt.now() - _td(days=days + 10)).strftime("%Y-%m-%d")
+
+    # 55xxxx = 沪市债券/货币 ETF (如 551550/511880)，必须归 ETF 分支 —
+    # 否则会落进 A股新浪分支, akshare 内部 df["date"] KeyError。
     is_etf = symbol.isdigit() and len(symbol) == 6 and symbol.startswith(
-        ("51", "52", "53", "56", "58", "15")
+        ("51", "52", "53", "55", "56", "58", "15")
     )
     if is_etf:
-        df = ak.fund_etf_hist_em(symbol=symbol, period="daily",
-                                  start_date="20180101",
-                                  end_date=_dt.now().strftime("%Y%m%d"),
-                                  adjust="qfq")
+        # 新浪 ETF 主源 (2026-11-06): 东财 fund_etf_hist_em 常 RemoteDisconnected,
+        # 债券 ETF(551xxx) 直接 KeyError: 'date' → 先走新浪, 失败再回东财(失败即 None 不抛)。
+        try:
+            from data.sources.akshare_source import get_history_etf
+            r = get_history_etf(symbol, days=days + 10 if days else 1200)
+            if r and r.get("dates"):
+                if not cutoff:
+                    return r
+                ds = [str(d)[:10] for d in r["dates"]]
+                keep = [i for i, d in enumerate(ds) if d >= cutoff]
+                if keep:
+                    return {
+                        **r,
+                        "dates": [ds[i] for i in keep],
+                        **{k: [r[k][i] for i in keep]
+                           for k in ("open", "high", "low", "close", "volume")
+                           if isinstance(r.get(k), list) and len(r[k]) == len(ds)},
+                    }
+        except Exception as e:
+            logger.warning(f"[akshare] {symbol} 新浪ETF历史失败: {e} → 东财")
+        try:
+            df = ak.fund_etf_hist_em(symbol=symbol, period="daily",
+                                      start_date=cutoff.replace("-", "") if cutoff else "20180101",
+                                      end_date=_dt.now().strftime("%Y%m%d"),
+                                      adjust="qfq")
+        except Exception as e:
+            logger.warning(f"[akshare] {symbol} 东财ETF历史失败: {e}")
+            return None
     else:
         # A股: 新浪源, 需 sh/sz 前缀
         df = ak.stock_zh_a_daily(symbol=_akshare_prefix(symbol) + symbol, adjust="qfq")
@@ -286,15 +321,22 @@ def _fallback_akshare_hist(symbol: str):
     if not dates:
         return None
 
+    date_strs = [str(d)[:10] for d in dates]
+    keep = [i for i, d in enumerate(date_strs) if cutoff is None or d >= cutoff]
+    if not keep:
+        return None
+    date_strs = [date_strs[i] for i in keep]
+
     def _col(*names):
         for n in names:
             if n in df.columns:
-                return [float(v) if v is not None else 0 for v in df[n]]
-        return [0] * len(dates)
+                vals = [float(v) if v is not None else 0 for v in df[n]]
+                return [vals[i] for i in keep]
+        return [0] * len(date_strs)
 
     return {
         "symbol": symbol,
-        "dates": [str(d)[:10] for d in dates],
+        "dates": date_strs,
         "open": _col("open", "开盘"),
         "high": _col("high", "最高"),
         "low": _col("low", "最低"),
@@ -332,7 +374,7 @@ def get_history_a(symbol: str, days: int = 1200):
     # ① akshare 主源模式: 先试新浪(稳定), 失败回落 baostock
     if a_primary:
         try:
-            r = _fallback_akshare_hist(symbol)
+            r = _fallback_akshare_hist(symbol, days)
             if r and r.get("dates"):
                 return r
         except Exception as fe:
@@ -341,7 +383,7 @@ def get_history_a(symbol: str, days: int = 1200):
     # ② 熔断打开: 跳过 baostock, 直接 akshare(新浪)
     if _breaker_open() or a_primary:
         try:
-            r = _fallback_akshare_hist(symbol)
+            r = _fallback_akshare_hist(symbol, days)
             if r:
                 return r
         except Exception as fe:
@@ -356,7 +398,7 @@ def get_history_a(symbol: str, days: int = 1200):
         _breaker_record(False)
         logger.warning(f"[baostock] {symbol} 挂死超时: {e} → 降级 akshare")
         try:
-            return _fallback_akshare_hist(symbol)
+            return _fallback_akshare_hist(symbol, days)
         except Exception as fe:
             logger.warning(f"[baostock] {symbol} akshare 降级失败: {fe}")
             return None
@@ -364,7 +406,7 @@ def get_history_a(symbol: str, days: int = 1200):
         _breaker_record(False)
         logger.warning(f"[baostock] {symbol} 获取失败: {e} → 降级 akshare")
         try:
-            return _fallback_akshare_hist(symbol)
+            return _fallback_akshare_hist(symbol, days)
         except Exception:
             return None
 
@@ -400,11 +442,11 @@ def _get_history_a_bs(symbol: str, days: int = 1200):
 
     if rs is None:
         # worker线程超时放弃 → 降级 akshare (锁外)
-        return _fallback_akshare_hist(symbol)
+        return _fallback_akshare_hist(symbol, days)
 
     if not rows:
         # baostock没数据 → AKShare ETF 历史 (锁外)
-        return _fallback_akshare_hist(symbol)
+        return _fallback_akshare_hist(symbol, days)
 
     # Build result dict with numpy arrays
     import numpy as np

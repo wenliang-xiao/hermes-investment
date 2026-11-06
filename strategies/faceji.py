@@ -6,7 +6,10 @@ strategies/faceji.py — 面基策略纯决策函数
 """
 from __future__ import annotations
 
-from .base import Signal, PositionData, FacejiConfig
+from .base import (
+    Signal, PositionData, FacejiConfig,
+    TRAILING_MIN_HOLD_DAYS, hold_days, trailing_stop_threshold,
+)
 
 
 def _kelly_size(score: float, cfg: FacejiConfig) -> float:
@@ -50,8 +53,11 @@ def decide(
         key=lambda s: score_map.get(s, 0), reverse=True
     )[:cfg.max_candidates]
 
+    # 剩余可建仓槽位（含本轮已生成的 BUY，修复静态快照越界）
+    slots_left = max(0, cfg.max_positions - len(positions))
+
     for sym in candidates:
-        if len(positions) >= cfg.max_positions:
+        if slots_left <= 0:
             break
         score = score_map.get(sym, 0)
         if score < cfg.entry_threshold:
@@ -67,11 +73,6 @@ def decide(
 
         # Kelly 仓位
         kelly_pct = _kelly_size(score, cfg)
-        qty = max(100, int(cash * kelly_pct / 100 / price / 100) * 100)
-        cost = price * qty
-        if cost > cash:
-            qty = max(100, int(cash / price / 100) * 100)
-
         signals.append(Signal(
             symbol=sym, action="BUY", price=price,
             reason=f"评分{score:.1f}+MA趋势ok",
@@ -79,6 +80,7 @@ def decide(
             size_pct=round(kelly_pct * 100, 1),
             score=score,
         ))
+        slots_left -= 1
 
     # ─── 清仓信号（4层风控）───
     for sym, pos in positions.items():
@@ -86,6 +88,10 @@ def decide(
         if not price or price <= 0:
             continue
         score = score_map.get(sym, 0)
+        # P0 修复 (ADR-0002, 2026-11-03): 缺评分 ≠ 0 分。
+        # 因子计算失败/行情缺失时 run_trading 会把该标的移出 score_map，
+        # 旧逻辑 `score_map.get(sym, 0)` 会当成 0 分触发"评分下滑"误卖。
+        has_score = score > 0
         entry = pos.entry_price
         peak = pos.peak or entry
         pnl_pct = (price - entry) / entry * 100
@@ -103,17 +109,22 @@ def decide(
             ))
             continue
 
-        # 2. FallSeller
-        if dd <= cfg.trailing_stop_pct:
-            signals.append(Signal(
-                symbol=sym, action="SELL", price=price,
-                reason=f"回落止盈{dd:.1f}%",
-                priority="HIGH", pnl_pct=pnl_pct, score=score,
-            ))
-            continue
+        # 2. FallSeller：四档 trailing（docs/STRATEGY.md §5.4）
+        #    持仓满 TRAILING_MIN_HOLD_DAYS 天后启用；entry_date 缺失时
+        #    hold_days=None，不得据此放宽风控，仍按四档执行。
+        hd = hold_days(pos.entry_date)
+        if hd is None or hd >= TRAILING_MIN_HOLD_DAYS:
+            trail_pct, tier = trailing_stop_threshold(pnl_pct)
+            if dd <= trail_pct:
+                signals.append(Signal(
+                    symbol=sym, action="SELL", price=price,
+                    reason=f"回落止盈{tier}{dd:.1f}%",
+                    priority="HIGH", pnl_pct=pnl_pct, score=score,
+                ))
+                continue
 
-        # 3. ScoreDropSeller
-        if score < cfg.exit_threshold:
+        # 3. ScoreDropSeller（降级为 0 分的情况不卖，避免误触发）
+        if has_score and score < cfg.exit_threshold:
             signals.append(Signal(
                 symbol=sym, action="SELL", price=price,
                 reason=f"评分下滑{score:.1f}",
@@ -122,7 +133,7 @@ def decide(
             continue
 
         # 4. MASeller: MA死叉(MA20<MA60 ⟺ ma20d>ma60d)
-        if score < 5.0:
+        if has_score and score < 5.0:
             tech = tech_map.get(sym, {})
             ma20d = tech.get("ma20_dev", 0) or 0
             ma60d = tech.get("ma60_dev", 0) or 0

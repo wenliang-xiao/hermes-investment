@@ -43,27 +43,40 @@ class TestBuildChecklist:
         assert result["action"] in ("BUY", "WAIT")
         assert "build_checklist" in result
 
+    def test_single_stock_limit(self):
+        """单票 20% > 12% 上限 → single_stock_limit 不通过（修复恒 True）"""
+        checker = ExecutionChecker(portfolio_config={"total_value": 1000000})
+        result = checker.check(
+            "600519",
+            score_data={"composite": 0.72, "scores": {"quality": 0.82, "momentum": 0.65}},
+            current_positions=[{"symbol": "600519", "market_value": 200000}],
+        )
+        cl = result["build_checklist"]
+        assert cl["single_stock_limit"]["status"] is False
+        assert cl["position_limit"]["status"] is True  # A股 20% ≤ 25%
+
 
 class TestTrailStop:
     def test_profit_high_bucket(self):
-        """盈利≥30% → 峰值×0.88"""
+        """盈利≥30% → T3 峰值-12%"""
         pos = {"entry_price": 100, "current_price": 140, "quantity": 100}
         pos["_peak_price"] = 150
         checker = ExecutionChecker()
         result = checker.check("TEST", position=pos)
         trail = result["trail_stop"]
-        assert trail["bucket"] == "盈利≥30%"
+        assert trail["bucket"] == "T3"
         assert trail["stop_price"] == round(150 * 0.88, 2)
         assert trail["status"] == "warning"  # distance=5.7% < 8% warning threshold
 
     def test_profit_med_bucket(self):
-        """盈利10-30% → 峰值×0.85"""
+        """盈利10-30% → T2 峰值-15%"""
         pos = {"entry_price": 100, "current_price": 120, "quantity": 100}
         pos["_peak_price"] = 125
         checker = ExecutionChecker()
         result = checker.check("TEST", position=pos)
         trail = result["trail_stop"]
-        assert trail["bucket"] == "盈利10-30%"
+        assert trail["bucket"] == "T2"
+        assert trail["stop_price"] == round(125 * 0.85, 2)
         assert trail["status"] == "safe"
 
     def test_triggered(self):

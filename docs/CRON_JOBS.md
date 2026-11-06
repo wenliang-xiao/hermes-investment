@@ -45,6 +45,48 @@
 
 ---
 
+## 1.5 本地开发机 crontab（2026-11-05 新增 / 2026-11-06 补齐采集）
+
+生产机走上面的 Hermes cron；本地克隆 `/home/work/wangshihan/hermes-investment` 没有 Hermes，
+用系统 crontab 跑数据闭环（否则 `data/*.json` 全部停更 → 面板快照过期 + 执行层 fail-closed 禁 BUY）。
+
+```cron
+# 事件风险影子记录（缺失/非当天会让执行层 fail-closed 禁 BUY）
+0 8 * * 1-5 cd /home/work/wangshihan/hermes-investment && FACTOR_A_AKSHARE_PRIMARY=1 /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_event_shadow.py >> logs/cron_event_shadow.log 2>&1
+# 三策略模拟盘 + 建议信号（重评分 → data/trading_signals.json，约 15-25 分钟）
+5 19 * * 1-5 cd /home/work/wangshihan/hermes-investment && FACTOR_A_AKSHARE_PRIMARY=1 /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_trading.py >> logs/cron_trading.log 2>&1
+# 板块反转层日更（排在 run_trading 之后）
+10 20 * * 1-5 cd /home/work/wangshihan/hermes-investment && FACTOR_A_AKSHARE_PRIMARY=1 /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_sector_reversal.py >> logs/cron_sector_reversal.log 2>&1
+# 新闻多源采集（快讯/电报每 2h；quick 模式保留个股新闻/公告缓存）：data/news_cache.json
+15 */2 * * 1-5 cd /home/work/wangshihan/hermes-investment && /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_news_pipeline.py --mode quick >> logs/cron_news.log 2>&1
+# 因子日扫 + 回测快照累积（07:00 盘前，产出 data/scan_snapshots/scan_snapshot_YYYY-MM-DD.json，约 20-30 分钟）
+0 7 * * 1-5 cd /home/work/wangshihan/hermes-investment && FACTOR_A_AKSHARE_PRIMARY=1 /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/daily_factor_scan.py >> logs/cron_factor_scan.log 2>&1
+# ETF 动态发现：data/etf_discovery.json（全量 ETF 扫描，较慢）
+0 20 * * 1-5 cd /home/work/wangshihan/hermes-investment && /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_etf_discovery.py --top-n 10 --per-category 2 >> logs/cron_etf.log 2>&1
+# 行为诊断：data/behavior_diagnosis.json（读 strategy_states，排在 run_trading 之后）
+20 20 * * 1-5 cd /home/work/wangshihan/hermes-investment && /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_behavior.py >> logs/cron_behavior.log 2>&1
+```
+
+要点:
+- **解释器必须写绝对路径** `py310-langchain-faq/bin/python`（cron PATH 里没有 py3.10）。
+- **`FACTOR_A_AKSHARE_PRIMARY=1` 必需**（评分类任务）：baostock 批量评分有 C 层 `double free` 崩，新浪源可完整跑通。
+  该开关同时让 `data_layer.get_stock_daily()`（run_trading 技术面 Step 4）新浪先行，
+  避免 baostock flapping 时逐只 25s 超时（52 只 ≈ 21min）且全池拿不到日线。
+- 日志落 `logs/cron_*.log`；备份恢复用 `crontab -l > /tmp/crontab_backup.txt`。
+- 与生产机 Hermes cron 的差异：本地**没有**日报/周报/飞书推送、没有龙虎榜采集；
+  数据类采集已对齐（新闻/ETF/因子快照/行为诊断）。
+- 时间排布：07:00 因子日扫 → 08:00 事件影子 → 19:05 模拟盘 → 20:00 ETF → 20:10 板块反转 → 20:20 行为诊断；新闻每 2h。
+- **面板新鲜度 TTL 必须跟着调度周期走**：`dashboard/api_evidence.py` 的 `files_to_check` 用
+  `_TTL_DAILY`(26h, 日更任务) / `_TTL_2H`(3h, 新闻)；改 cron 频率时同步改这里，
+  否则正常数据会被 `/api/v2/evidence/data-quality` 误报 expired。
+- `shadow_strategy4.json`（策略四账本）由 `run_daily` 产出，本地不跑日报链路，该文件保持缺失属预期。
+- **面板启动一律用 `scripts/start_dashboard.sh [端口]`**（内含 `FACTOR_A_AKSHARE_PRIMARY=1`
+  + 绝对路径解释器）。直接 `python dashboard/server.py` 时点回测会触发 baostock C 层
+  `corrupted double-linked list`，进程还在但 HTTP 全部超时，只能 kill -9。
+  后台：`nohup ./scripts/start_dashboard.sh 8686 > /tmp/hermes_dashboard.log 2>&1 &`。
+
+---
+
 ## 2. 任务详解
 
 ### 2.1 面基日报·盘前简报 (`ec73ef6de848`)
@@ -145,7 +187,9 @@ A股历史日线**主源改走新浪** (`stock_zh_a_daily`, ~1.9s/只, 含当日
 **为何必须接 cron（2026-08-27 补齐）:**
 - `run_daily` 的 dual_closed 叠加事件避险、`trading_engine` 的 BUY 拦截都依赖
   `shadow_event_history.json`（读最新一条，日期校验非当天返回 None）。
-- 若影子脚本不跑，该文件不存在 → `event_blocks_buy` 返回 False → 事件拦截静默失效。
+- 若影子脚本不跑，该文件不存在/非当天 → **严格 fail-closed**（ADR-0006）：
+  `run_daily` 直接关闭开仓（只研究不开仓），`trading_engine` 拦截全部 BUY。
+  即"影子断更"不会再静默失效，而是明确停止开新仓。
 - 详见 `docs/plans/event-risk-switch-pre-launch-checklist.md`。
 
 ### 2.7 collect-dragon-tiger (`8699718a1e8c`) 🐉 龙虎榜每日采集
@@ -240,6 +284,8 @@ done
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-11-06 | **本地 crontab 补齐 4 个采集任务**：新闻每 2h、因子日扫 07:00（快照累积）、ETF 发现 20:00、行为诊断 20:20；`get_stock_daily` 加新浪兜底后 Step 4 恢复取数 | 面板新闻为空 / ETF 过期 7 天 / 行为诊断缺失 / 回测快照 0 天 |
+| 2026-11-05 | **新增 §1.5 本地开发机 crontab**：event-shadow 08:00 / run_trading 19:05 / sector-reversal 20:10（系统 crontab，非 Hermes） | 快照停更导致 fail-closed 禁 BUY |
 | 2026-09-02 | **时间表调整：因子日扫 09:30→07:00**（盘前完成扫描+快照，供 08:30 盘前日报读当日因子分）；**日报盘后 18:00→19:00**（错开 watchdog/龙虎榜，日报能读当日龙虎榜）；新增 `scripts/cron_health_check.py` 一键健康检查入口 | cron 规范化 (用户指令) |
 | 2026-09-02 | **因子日扫/event-shadow 改 watchdog 静默**（成功不发摘要/JSON，仅失败或高危提醒）；**script_timeout 1800→5400s**（全量扫描 50-60min 需 90min 预算）；**collect-news 12:15 首跑静默验证通过** | 日报/自动消息降噪 + 因子日扫超时修复 |
 | 2026-09-02 | **日报×2+周报 从 agent-mode 改 no_agent**（`report_daily.sh`/`report_weekly.sh`），脱离 spanagent LLM 网关（503/429 连续 3 天杀任务）；**新建采集三件套 cron**：龙虎榜 17:20、新闻每2h、ETF 20:00（此前均无调度，数据陈旧 20-55 天） | 数据管线可靠性 (2026-09-02 评审) |

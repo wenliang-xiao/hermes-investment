@@ -79,15 +79,16 @@ def check_all_alerts() -> list[dict]:
     """检查所有持仓报警"""
     alerts = []
 
-    # 从模拟盘读取持仓
-    shadow_path = DATA_DIR / "shadow_account.json"
-    if not shadow_path.exists():
-        return []
-
-    with open(shadow_path) as f:
-        book = json.load(f)
-
-    positions = book.get("positions", {})
+    # 从模拟盘读取持仓（ADR-0004: 三策略账本 + 策略四账本都要监控）
+    positions = {}
+    for _p in (DATA_DIR / "shadow_account.json", DATA_DIR / "shadow_strategy4.json"):
+        if not _p.exists():
+            continue
+        try:
+            with open(_p) as f:
+                positions.update(json.load(f).get("positions", {}))
+        except (json.JSONDecodeError, OSError):
+            continue
     if not positions:
         return []
 

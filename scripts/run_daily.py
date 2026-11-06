@@ -166,13 +166,32 @@ try:
     trend_icon = "🔴" if trend_gate in ("红灯","黄灯") else "🟢"
     dual_closed = macro_gate in ("红灯","黄灯") and trend_gate in ("红灯","黄灯")
 
+    # 数据源自检 fail-closed (ADR-0006): CRITICAL/自检异常 → 只研究不开仓
+    try:
+        from scripts.data_source_healthcheck import run_checks as _ds_check
+        _dh = _ds_check()
+        if _dh.get("status") == 2:
+            dual_closed = True
+            log("数据源 CRITICAL → 严格 fail-closed：只研究不开仓")
+        elif _dh.get("status") == 1:
+            log("数据源 DEGRADED → 允许研究，仓位精度可能下降")
+    except Exception as _e:  # noqa: BLE001
+        dual_closed = True
+        log(f"数据源自检异常 → 严格 fail-closed：只研究不开仓 ({_e})")
+
     # 事件避险叠加: 事件脉冲 level≥high 也关闭（只研究不开仓）
+    # ADR-0006 严格 fail-closed: 影子缺失/非当天/读取异常 = 无法证明无风险 → 关闭
     try:
         from engine.event_risk_engine import load_latest_event_risk, event_blocks_buy
-        if event_blocks_buy(load_latest_event_risk()):
+        _er = load_latest_event_risk()
+        if _er is None:
             dual_closed = True
-    except Exception:  # noqa: BLE001 - 影子记录缺失时不拦截
-        pass
+            log("事件影子缺失/非当天 → 严格 fail-closed：只研究不开仓")
+        elif event_blocks_buy(_er):
+            dual_closed = True
+    except Exception as _e:  # noqa: BLE001
+        dual_closed = True
+        log(f"事件影子读取异常 → 严格 fail-closed：只研究不开仓 ({_e})")
 
     # ═══════════════════════════════════════════════
     #  面基·LDS·桥水 三源融合量化投研日报 v7

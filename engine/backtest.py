@@ -550,9 +550,19 @@ def run_macro_driven_allweather(
     benchmark: pd.Series,
     stock_symbols: List[str],
 ) -> BacktestResult:
-    from investment_system.analysis.score_history import (
-        _get_historical_cpi, _get_index_ma_series, _get_latest_known_value
-    )
+    """策略四回测：宏观象限 + 跨资产配置 + 双门。
+
+    成本模型（ADR-0007）：个股调仓/止损/趋势止盈按名义目标权重 × `_trade_cost`
+    单边费率计入当日组合净值；ETF 权重按目标恒定处理，不建模其再平衡成本。
+    """
+    # ADR-0007: 私有 helper 不走 analysis/score_history.py 的 `import *` 桥
+    # （`*` 不导出下划线函数，本地/生产都会 ImportError）。优先从定义模块导入。
+    try:
+        from engine.score_history import (
+            _get_historical_cpi, _get_index_ma_series, _get_latest_known_value)
+    except ImportError:
+        from investment_system.engine.score_history import (
+            _get_historical_cpi, _get_index_ma_series, _get_latest_known_value)
     dates = pd.date_range(start, end, freq="B")
     portfolio_value = pd.Series(index=dates, dtype=float)
     portfolio_value.iloc[0] = 1.0
@@ -577,6 +587,9 @@ def run_macro_driven_allweather(
                     dev_val = index_ma[d]
                     break
         gate_val = _relaxed_gate_val(cpi_val, dev_val)
+        turnover_cost = 0.0          # 当日调仓成本（占组合净值比例）
+        costed_syms: set[str] = set()  # 已在调仓中计过成本的标的，避免止损重复计
+        exit_price_map: Dict[str, float] = {}
 
         if date in rebalance_dates:
             last_regime = _get_regime_for_date(date, cpi_history, index_ma)
@@ -587,6 +600,7 @@ def run_macro_driven_allweather(
             valid = {s: date_scores[s] for s in stock_symbols if s in date_scores and s in price_data}
             top_stocks = sorted(valid.items(), key=lambda x: x[1], reverse=True)[:5]
             new_stock_syms = {s for s, _ in top_stocks}
+            old_holdings = dict(stock_holdings)
 
             for sym in list(stock_holdings.keys()):
                 if sym not in new_stock_syms and sym in price_data:
@@ -607,6 +621,21 @@ def run_macro_driven_allweather(
                         stock_peak[sym] = ep
             stock_holdings = {s: stock_target / max(len(top_stocks), 1) for s, _ in top_stocks}
 
+            # 调仓成本：按 |目标权重 - 旧权重| 计单边成本（名义权重口径）
+            new_w = stock_target / max(len(top_stocks), 1)
+            for sym in set(old_holdings) | new_stock_syms:
+                ow = old_holdings.get(sym, 0.0)
+                nw = new_w if sym in new_stock_syms else 0.0
+                delta = nw - ow
+                if abs(delta) < 1e-12:
+                    continue
+                px = stock_entry.get(sym, 0.0)
+                if not px and sym in price_data:
+                    idx = price_data[sym].index[price_data[sym].index <= date]
+                    px = float(price_data[sym].loc[idx[-1], "close"]) if len(idx) else 0.0
+                turnover_cost += abs(delta) * _trade_cost(sym, px or 1.0, is_sell=delta < 0)
+                costed_syms.add(sym)
+
         exit_set = set()
         for sym in list(stock_holdings.keys()):
             if sym not in price_data:
@@ -621,13 +650,19 @@ def run_macro_driven_allweather(
             dd = (curr_p - stock_peak[sym]) / stock_peak[sym] if stock_peak[sym] > 0 else 0
             if pnl <= -STOP_LOSS:
                 exit_set.add(sym)
+                exit_price_map[sym] = curr_p
                 trades.append(Trade(sym, stock_entry.get(sym + "_date", ""), entry_p,
                                     date_str, curr_p, "stop_loss", pnl))
             elif pnl >= 0.15 and dd <= -0.20:
                 exit_set.add(sym)
+                exit_price_map[sym] = curr_p
                 trades.append(Trade(sym, stock_entry.get(sym + "_date", ""), entry_p,
                                     date_str, curr_p, "trend_stop", pnl))
         for sym in exit_set:
+            # 止损/趋势止盈也是卖出，按持仓权重计单边成本；调仓日已计过则不重复
+            if sym not in costed_syms:
+                w = stock_holdings.get(sym, 0.0)
+                turnover_cost += w * _trade_cost(sym, exit_price_map.get(sym, 1.0), is_sell=True)
             stock_holdings.pop(sym, None)
             stock_entry.pop(sym, None)
             stock_peak.pop(sym, None)
@@ -659,7 +694,7 @@ def run_macro_driven_allweather(
                 cp = float(df.loc[ci[-1], "close"])
                 daily_ret += class_w * (cp / pp - 1) if pp > 0 else 0
 
-        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret)
+        portfolio_value.iloc[i] = portfolio_value.iloc[i - 1] * (1 + daily_ret - turnover_cost)
 
     equity = portfolio_value.dropna()
     metrics = _calc_metrics(equity, benchmark)
@@ -994,6 +1029,9 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
                   benchmark: pd.Series,
                   gate_series: Optional[pd.Series] = None) -> BacktestResult:
     """
+    ⚠️ DEPRECATED（ADR-0007）：本函数未被任何入口调用，实际策略四回测走
+    `run_macro_driven_allweather`。保留仅为兼容历史导入，请勿新增依赖。
+
     策略四：宏观象限驱动的跨资产配置 + 多因子链内选股 + 双门乘数控制
 
     流程：
@@ -1009,7 +1047,10 @@ def run_strategy4(price_data: Dict[str, pd.DataFrame],
     rebalance_dates = pd.date_range(start, end, freq="4W-FRI")
 
     try:
-        from investment_system.analysis.score_history import _get_historical_cpi
+        try:
+            from engine.score_history import _get_historical_cpi
+        except ImportError:
+            from investment_system.engine.score_history import _get_historical_cpi
         cpi_dict = _get_historical_cpi(start, end)
     except Exception:
         cpi_dict = {}

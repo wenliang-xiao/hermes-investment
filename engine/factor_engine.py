@@ -519,7 +519,8 @@ class ICWeightSystem:
         """追加当期IC到滚动序列 ic_history.json（根治IC死代码的核心写路径）。
 
         snapshot: {factor: ic_value}（含 style factor 的当期 Spearman IC）。
-        snap_date: 可选，指定该期IC的日期（回算历史IC时传入评分日，默认今天）。
+        snap_date: 可选，指定该期IC的日期（回算历史IC时传收益已实现日，默认今天）。
+            不要传评分日 — 那会让 IC 历史序列提前泄露未来信息（ADR-0007）。
         生产路径每轮评分后调用本方法累积历史，rolling_ic_weights 据此滚动出真实权重。
         """
         seq = self.get_ic_history()
@@ -718,6 +719,9 @@ class FactorEngine:
         self._fin_hist_cache: dict[str, list] = {}
         self.as_of: str | None = None  # point-in-time 评分时点 (None=实盘用当前数据)
         self._injected_hist: dict | None = None  # 注入的价格时序(回测 point-in-time 用)
+        # 行业因子横截面兜底: {sub_key: {symbol: score[0,1]}} — 直接作为标准化分,
+        # 不再走链内二次标准化(否则与 value:pe_ttm / quality:roe 完全同序)
+        self._proxy_factors: dict[str, dict[str, float]] = {}
         # 并发安全 (2026-08-18): score_batch 线程池并发采集 → 缓存双检锁
         self._cache_lock = threading.RLock()
 
@@ -753,12 +757,61 @@ class FactorEngine:
         from data.data_router import get_history
         try:
             df = get_history(symbol, days)
+            df = self._enrich_valuation(symbol, df, days)
             with self._cache_lock:
                 self._price_cache[cache_key] = df
             return df
         except Exception as e:
             logger.warning(f"[factor_engine] get_history({symbol}) failed: {e}")
             return {}
+
+    def _enrich_valuation(self, symbol: str, hist: dict, days: int) -> dict:
+        """日线缺 PE/PB 时, 用 akshare(东财 stock_value_em) 历史按日期对齐补齐。
+
+        baostock 主路径带 peTTM, 但 FACTOR_A_AKSHARE_PRIMARY=1 走新浪无 PE/PB;
+        缺失会让 value:pe_percentile / risk:pe_excessive / value:pb 三个子因子覆盖率归零。
+        仅实盘(as_of is None)使用 — 回测 PIT 下注入当日估值属于未来数据。
+        """
+        if not hist or self.as_of is not None:
+            return hist
+        if not (symbol.isdigit() and len(symbol) == 6):
+            return hist
+
+        def _has(key: str) -> bool:
+            for v in hist.get(key) or []:
+                try:
+                    if v is not None and float(v) > 0:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+            return False
+
+        need = [k for k in ("pe", "pb") if not _has(k)]
+        if not need:
+            return hist
+        try:
+            from data.sources.akshare_source import get_valuation_history_ak
+
+            rows = get_valuation_history_ak(symbol, days=max(days, 250))
+        except Exception:
+            return hist
+        if not rows:
+            return hist
+
+        by_date = {r["date"]: r for r in rows}
+        dates = hist.get("dates") or []
+        enriched = dict(hist)
+        if dates:
+            for key in need:
+                enriched[key] = [
+                    (by_date.get(str(d)[:10]) or {}).get(key) for d in dates
+                ]
+        else:
+            n = len(hist.get("close") or [])
+            tail = rows[-n:] if n else rows
+            for key in need:
+                enriched[key] = [r.get(key) for r in tail]
+        return enriched
 
     def _get_fin(self, symbol: str) -> dict:
         """获取财务数据（带缓存；as_of 模式下从财务历史 point-in-time 取）"""
@@ -811,14 +864,32 @@ class FactorEngine:
         from data.data_layer import get_financial_history
         try:
             fh = get_financial_history(symbol, quarters=4, as_of_date=as_of) or []
-            with self._cache_lock:
-                self._fin_hist_cache[cache_key] = fh
-            return fh
         except Exception:
-            return []
+            fh = []
+        if not fh:
+            # baostock 季频财务并发时经常登录取不到数 → 用东财免费源兜底,
+            # as_of 模式仍按披露截止日过滤, 不引入前视。
+            try:
+                from data.sources.akshare_source import get_financial_history_ak
+
+                fh = get_financial_history_ak(symbol, quarters=4) or []
+                if as_of and fh:
+                    from domain.financial_calendar import financial_report_available_date
+
+                    fh = [h for h in fh
+                          if financial_report_available_date(h["period"]) <= as_of]
+            except Exception:
+                fh = []
+        with self._cache_lock:
+            self._fin_hist_cache[cache_key] = fh
+        return fh
 
     def _get_pe_from_hist_or_rt(self, symbol: str, hist: dict) -> float | None:
-        """从历史数据或实时数据获取 PE，作为 fin_report fallback"""
+        """从历史数据或实时数据获取 PE，作为 fin_report fallback
+
+        ⚠️ PIT 回测(as_of 已设)禁止回退实时源: get_rt/yfinance 拿到的是"今天"的 PE，
+        对 as_of 在过去的截面就是前视数据 (2026-11-06 修正)。历史里没有就返回 None。
+        """
         # 先尝试从 hist 的 pe 字段获取
         pe_arr = hist.get("pe", [])
         if pe_arr:
@@ -830,6 +901,8 @@ class FactorEngine:
                             return fp
                     except (ValueError, TypeError):
                         pass
+        if getattr(self, "as_of", None) is not None:
+            return None
         # 再尝试从实时数据获取
         try:
             from data.data_router import get_rt
@@ -906,7 +979,16 @@ class FactorEngine:
                     return float(pe_val)
                 return None
             elif sub_def["field"] == "pb":
-                # PB fallback: try from get_rt if available
+                # 优先用日线估值历史(akshare 兜底已对齐), 再退实时快照
+                pb_arr = hist.get("pb") or []
+                for p in reversed(pb_arr):
+                    try:
+                        if p is not None and float(p) > 0:
+                            return float(p)
+                    except (TypeError, ValueError):
+                        continue
+                if getattr(self, "as_of", None) is not None:
+                    return None  # PIT: 不回退实时快照 (前视)
                 try:
                     from data.data_router import get_rt
                     rt = get_rt(symbol)
@@ -1075,11 +1157,59 @@ class FactorEngine:
                 self._qt_inst = None
             return self._qt_inst
 
+    def _fill_industry_fallbacks(self, raw_values: dict, symbols: list) -> None:
+        """无蜻蜓 key(或接口失败)时, 用评分池内横截面分位兜底行业因子。
+
+        蜻蜓行业排名需要 CSC_API_KEY, 缺失时 industry:pe_rank / industry:roe_rank /
+        industry:margin_rank / sentiment:industry_heat 覆盖率恒为 0%, 直接触发
+        ADR-0006 覆盖率门禁(禁 BUY)。这里改用同批标的的横截面相对位置代理:
+
+          industry:pe_rank      ← PE-TTM 池内分位(低 PE → 小值, higher_is_better=False)
+          industry:roe_rank     ← ROE 池内分位
+          industry:margin_rank  ← 毛利率池内分位
+          sentiment:industry_heat ← 20 日动量池内分位(量价热度代理, 与 QT 口径同向)
+
+        已有有效值的标的保持不动(QT 可用时优先专业源)。
+        注意: 这是「池内相对强弱」而非真实行业排名, 仅在免费数据源下作降级。
+        """
+        self._proxy_factors = {}
+        spec = {
+            "industry:pe_rank": "value:pe_ttm",
+            "industry:roe_rank": "quality:roe",
+            "industry:margin_rank": "quality:gross_margin",
+            "sentiment:industry_heat": "momentum:20d",
+        }
+        for target, source in spec.items():
+            current = raw_values.get(target) or {}
+            missing = [s for s in symbols if current.get(s) is None]
+            if not missing:
+                continue
+            src = raw_values.get(source) or {}
+            valid = {}
+            for s in symbols:
+                v = src.get(s)
+                if v is None:
+                    continue
+                try:
+                    valid[s] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if len(valid) < 3:  # 样本太少, 分位无意义
+                continue
+            pct = standardize_cross_section(valid, higher_is_better=True)
+            for s in missing:
+                if s in pct:
+                    current[s] = pct[s]
+            raw_values[target] = current
+            if target != "sentiment:industry_heat":
+                # heat 保持链内标准化(与蜻蜓口径一致, higher_is_better=None);
+                # 三个 rank 因子直接采用横截面分位, 避免与 PE/ROE 同序重复计权
+                self._proxy_factors[target] = {s: pct[s] for s in missing if s in pct}
+
     def _get_industry_value(self, sub_key: str, symbol: str) -> float | None:
         """获取行业排名/情绪因子值"""
         qt = self._get_qt_source()
-        if not qt or not qt.api_key:
-            return None
+        has_qt = bool(qt and qt.api_key)
         sub_def = SUB_FACTOR_DEFS.get(sub_key)
         if not sub_def:
             return None
@@ -1089,25 +1219,28 @@ class FactorEngine:
         if metric == "heat":
             # 行业热度/主线热度: 综合 (PE热度 + 量价主线热度), 捕捉科技主线启动期
             heat_pe = 0.5  # 默认中性
-            try:
-                hist = self._get_hist(symbol, 10)
-                cur_pe = None
-                if hist and hist.get("pe"):
-                    pe_arr = [float(p) for p in hist["pe"] if p is not None and float(p) > 0]
-                    if pe_arr:
-                        cur_pe = pe_arr[-1]
-                if cur_pe is None:
-                    cur_pe = self._get_pe_from_hist_or_rt(symbol, hist or {})
-                if cur_pe and cur_pe > 0:
-                    rank_data = qt.get_industry_rank(clean_code, metric="pe")
-                    if rank_data:
-                        avg_pe = rank_data.get("industryAvg")
-                        if avg_pe and float(avg_pe) > 0:
-                            heat = cur_pe / float(avg_pe)
-                            # 归一化: 0.5~2x → [0,1], 1x=0.5(中性)
-                            heat_pe = max(0.0, min(1.0, (heat - 0.5) / 1.5))
-            except Exception:
-                pass
+            if has_qt:
+                # PE 热度需要行业平均 PE(专业源); 无 key 时留给纯量价热度
+                try:
+                    hist = self._get_hist(symbol, 10)
+                    cur_pe = None
+                    if hist and hist.get("pe"):
+                        pe_arr = [float(p) for p in hist["pe"]
+                                  if p is not None and float(p) > 0]
+                        if pe_arr:
+                            cur_pe = pe_arr[-1]
+                    if cur_pe is None:
+                        cur_pe = self._get_pe_from_hist_or_rt(symbol, hist or {})
+                    if cur_pe and cur_pe > 0:
+                        rank_data = qt.get_industry_rank(clean_code, metric="pe")
+                        if rank_data:
+                            avg_pe = rank_data.get("industryAvg")
+                            if avg_pe and float(avg_pe) > 0:
+                                heat = cur_pe / float(avg_pe)
+                                # 归一化: 0.5~2x → [0,1], 1x=0.5(中性)
+                                heat_pe = max(0.0, min(1.0, (heat - 0.5) / 1.5))
+                except Exception:
+                    pass
             # 量价主线热度: 用20日动量和量比捕捉"主线启动"信号
             # 独立于PE估值(PE可能缺失/估值低不代表不热), 解决科技主线启动期被低估
             heat_mom = 0.5
@@ -1126,7 +1259,9 @@ class FactorEngine:
                 return heat_mom
             return 0.6 * heat_pe + 0.4 * heat_mom
 
-        # 行业排名指标 (pe/jzcsyl/mll)
+        # 行业排名指标 (pe/jzcsyl/mll) — 需蜻蜓专业源; 无 key 时由批量横截面兜底
+        if not has_qt:
+            return None
         rank_data = qt.get_industry_rank(clean_code, metric=metric)
         if not rank_data:
             return None
@@ -1352,6 +1487,9 @@ class FactorEngine:
                     if done % 20 == 0:
                         logger.info(f"  [factor_engine] {done}/{n} symbols collected")
 
+        # Phase 1.5: 行业因子横截面兜底 (无蜻蜓 key / 接口失败时)
+        self._fill_industry_fallbacks(raw_values, symbols)
+
         # Phase 2: 对每个子因子做产业链内截面分位数标准化（行业中性化）
         # ── P0 数据质量守门 (2026-10-20) ──────────────────────────────────
         # 此前若数据源瞬时故障 → 子因子原始值大面积 None → 标准化静默降级为 0.5,
@@ -1378,6 +1516,12 @@ class FactorEngine:
         for sk, sub_def in SUB_FACTOR_DEFS.items():
             higher = sub_def.get("higher_is_better", True)
             std_values[sk] = standardize_by_chain(raw_values[sk], chain_map, higher)
+        # 行业因子横截面兜底值已是 [0,1] 分位, 直接作为标准化分:
+        # 若再做链内二次标准化会与 value:pe_ttm / quality:roe 完全同序(同一 chain 内单调变换),
+        # 造成 PE/ROE 在风格聚合里被重复计权。
+        for sk, scores in (self._proxy_factors or {}).items():
+            if sk in std_values:
+                std_values[sk].update(scores)
 
         # Phase 3: 聚合风格因子分（含链景气修正）
         style_scores: dict[str, dict[str, float]] = {}
@@ -1470,12 +1614,16 @@ class FactorEngine:
         return payload
 
     def compute_ic_from_realized(self, score_date: str,
-                                 realized_returns: dict[str, float]) -> dict[str, float]:
+                                 realized_returns: dict[str, float],
+                                 realized_date: Optional[str] = None) -> dict[str, float]:
         """用某一期的因子分 + 当期已实现收益回算该期 Spearman IC，并累积入历史。
 
         Args:
             score_date: 评分日期（对应 factor_scores/{date}.json）
             realized_returns: {symbol: 该期的已实现收益} (下期收益)
+            realized_date: 收益实际实现的日期（默认今天）。IC 快照以此日期入库 —
+                评分日当时不可能知道下期收益，用评分日打时间戳会让按日回放的
+                历史分析产生前视偏差（ADR-0007）。
 
         Returns:
             {style_factor: ic_value}（并已 append 到 ic_history.json）
@@ -1509,10 +1657,16 @@ class FactorEngine:
             except Exception:
                 ics[style_name] = 0.0
 
-        # 用评分日作为该期IC的时间戳
-        entry = {"date": score_date, **{k: round(v, 4) for k, v in ics.items()}}
-        self.ic.append_ic_snapshot({k: v for k, v in entry.items() if k != "date"}, snap_date=score_date)
-        logger.info(f"[ic-loop] IC@{score_date} 已累积: "
+        # ADR-0007: 用「收益已实现日」而非评分日作为 IC 快照时间戳。
+        # 评分日只能看到当期因子分，下期收益要在 realized_date 才可知；
+        # 用评分日入库会让历史回放提前看到未来 IC（前视偏差）。
+        snap_date = realized_date or date.today().isoformat()
+        entry = {"date": snap_date, "score_date": score_date,
+                 **{k: round(v, 4) for k, v in ics.items()}}
+        self.ic.append_ic_snapshot({k: v for k, v in entry.items()
+                                    if k not in ("date", "score_date")},
+                                   snap_date=snap_date)
+        logger.info(f"[ic-loop] IC@{snap_date}(score={score_date}) 已累积: "
                     f"{ {k: round(v,3) for k,v in ics.items()} }")
         return entry
 

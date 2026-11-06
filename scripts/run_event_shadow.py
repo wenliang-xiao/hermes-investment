@@ -40,17 +40,26 @@ def save_history(entries: list):
 
 
 def _load_actual_snapshot() -> dict:
+    # ADR-0004: 事件影子要反映「整体模拟盘」，读 run_trading 主账（shadow_account.json）。
+    # 不能走 output.shadow_account（那已是策略四账本 shadow_strategy4.json）。
     try:
-        from output.shadow_account import get_shadow_summary, load_shadow
-
-        summary = get_shadow_summary()
-        book = load_shadow()
+        import json as _json
+        from pathlib import Path as _Path
+        path = _Path(__file__).resolve().parent.parent / "data" / "shadow_account.json"
+        with open(path) as f:
+            book = _json.load(f)
+        positions = book.get("positions", {}) or {}
+        cash = book.get("cash", 0) or 0
+        total_value = cash + sum(
+            (p.get("current_price") or p.get("entry_price") or 0) * (p.get("quantity") or 0)
+            for p in positions.values()
+        )
         return {
-            "total_value": summary.get("total_value"),
-            "position_count": summary.get("count", 0),
+            "total_value": round(total_value, 2),
+            "position_count": len(positions),
             "realized_pnl": book.get("realized_pnl", 0),
         }
-    except Exception as exc:  # noqa: BLE001 - 本地缺 investment_system 包时降级为缺失标记
+    except Exception as exc:  # noqa: BLE001 - 缺文件时降级为缺失标记
         logger.warning("[event_shadow] shadow_account 读取失败（数据缺失）: %s", exc)
         return {"total_value": None, "position_count": 0, "realized_pnl": 0}
 

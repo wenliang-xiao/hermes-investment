@@ -96,6 +96,21 @@ class NewsPipeline:
         telegraph_items = []
         stock_news = []
         announcements = []
+        # quick 模式只刷新快讯/电报；个股新闻/公告沿用旧缓存,
+        # 否则面板点「刷新」会把 150 条个股新闻 + 90 条公告整体覆盖为 0
+        prev_stock_updated = prev_ann_updated = None
+        if self.mode == "quick" and CACHE_FILE.exists():
+            try:
+                prev = json.loads(CACHE_FILE.read_text())
+                prev_cats = prev.get("categories", {}) or {}
+                stock_news = prev_cats.get("个股新闻", []) or []
+                announcements = prev_cats.get("公告", []) or []
+                prev_sources = prev.get("sources", {}) or {}
+                prev_stock_updated = (prev_sources.get("eastmoney_stock_news") or {}).get("updated")
+                prev_ann_updated = (prev_sources.get("cninfo_announcements") or {}).get("updated")
+                print(f"\n↺ quick 模式保留旧缓存: 个股新闻 {len(stock_news)} · 公告 {len(announcements)}")
+            except Exception:
+                pass
 
         # ── 7×24 快讯 ──
         print(f"\n📡 东方财富 7×24 快讯 ...")
@@ -141,7 +156,8 @@ class NewsPipeline:
 
             print(f"   ✅ 个股新闻 {stock_count} 条 · 公告 {ann_count} 条")
         else:
-            print(f"\n⏩ quick mode: 跳过个股新闻/公告")
+            print(f"\n⏩ quick mode: 跳过个股新闻/公告抓取"
+                  f"（沿用缓存 {len(stock_news)} + {len(announcements)} 条）")
 
         # ── 去重 ──
         flash_items = _deduplicate(flash_items)
@@ -177,11 +193,11 @@ class NewsPipeline:
                     "count": len(telegraph_items),
                 },
                 "eastmoney_stock_news": {
-                    "updated": datetime.now().isoformat(),
+                    "updated": prev_stock_updated or datetime.now().isoformat(),
                     "count": len(stock_news),
                 },
                 "cninfo_announcements": {
-                    "updated": datetime.now().isoformat(),
+                    "updated": prev_ann_updated or datetime.now().isoformat(),
                     "count": len(announcements),
                 },
             },

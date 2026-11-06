@@ -12,15 +12,22 @@ from typing import Optional
 from datetime import datetime, date
 import logging
 
+try:
+    from investment_system import config as _config
+except ImportError:
+    import config as _config
+
+from strategies.base import (
+    TRAILING_MIN_HOLD_DAYS, hold_days, trailing_stop_threshold,
+)
+
 logger = logging.getLogger(__name__)
 
-# 默认TrailingStop参数
-DEFAULT_TRAIL_PARAMS = {
-    "profit_high_bucket": {"threshold": 0.30, "multiplier": 0.88},      # 盈利≥30%
-    "profit_med_bucket": {"threshold": 0.10, "multiplier": 0.85},       # 盈利10-30%
-    "profit_low_bucket": {"threshold": 0.00, "multiplier": 0.92},       # 盈利<10%
-    "loss_bucket": {"multiplier": 0.92},                                 # 亏损
-}
+_RISK = getattr(_config, "RISK_PARAMS", {}) or {}
+_DISC = getattr(_config, "TRADING_DISCIPLINE", {}) or {}
+
+# 无组合总资产信息时的兜底（模拟盘初始资金）
+DEFAULT_TOTAL_VALUE = 1000000.0
 
 
 class ExecutionChecker:
@@ -37,11 +44,11 @@ class ExecutionChecker:
         )
     """
 
-    def __init__(self, trail_params: Optional[dict] = None,
-                 weekly_trade_limit: int = 3,
+    def __init__(self, weekly_trade_limit: Optional[int] = None,
                  portfolio_config: Optional[dict] = None):
-        self.trail_params = trail_params or DEFAULT_TRAIL_PARAMS
-        self.weekly_trade_limit = weekly_trade_limit
+        self.weekly_trade_limit = weekly_trade_limit or int(
+            _DISC.get("max_trades_per_week_per_strategy", 3)
+        )
         self.portfolio_config = portfolio_config or {}
 
     # ════════════════════════════════════════════
@@ -84,7 +91,7 @@ class ExecutionChecker:
                 result["action_reason"] = f"建仓检查 {passed}/{total} 通过, 评分{composite:.2f}"
         # 2. TrailStop（持仓）
         else:
-            trail = self._calc_trail_stop(position, self.trail_params)
+            trail = self._calc_trail_stop(position)
             result["trail_stop"] = trail
             if trail["status"] == "triggered":
                 result["action"] = "SELL"
@@ -161,28 +168,42 @@ class ExecutionChecker:
             "detail": f"质量={quality:.2f}{'(≥0.55)' if quality_ok else '(<0.55)'}",
         }
 
-        # 5. 仓位上限
+        # 5. 仓位上限（ADR-0005：从 RISK_PARAMS 读，按比率比较）
         total_a = 0
-        held_count = 0
         if current_positions:
             total_a = sum(p.get("market_value", 0) for p in current_positions
                          if p.get("symbol", "").isdigit() or p.get("position_type") == "a_stock")
-            held_count = len([p for p in current_positions
-                             if p.get("symbol", "").isdigit()])
-        total_value = 1000000  # 假定总资金（从config获取最佳）
+        total_value = float(
+            self.portfolio_config.get("total_value")
+            or self.portfolio_config.get("capital")
+            or 0
+        )
+        if total_value <= 0 and current_positions:
+            total_value = sum(p.get("market_value", 0) for p in current_positions)
+        if total_value <= 0:
+            total_value = DEFAULT_TOTAL_VALUE
         a_pct = (total_a / total_value * 100) if total_value > 0 else 0
-        pos_limit = 0.25
-        pos_ok = a_pct < pos_limit * total_value
+        pos_limit_pct = float(_RISK.get("max_a_share_position", 0.25)) * 100
+        pos_ok = a_pct <= pos_limit_pct
         checklist["position_limit"] = {
             "status": pos_ok,
-            "detail": f"A股{a_pct:.1f}%{'<上限' if pos_ok else '≥上限'}",
+            "detail": f"A股{a_pct:.1f}%{'≤' if pos_ok else '>'}上限{pos_limit_pct:.1f}%",
         }
 
-        # 6. 单一标的上限（每只≤2%）
-        single_ok = True
+        # 6. 单一标的上限（取 RISK_PARAMS.max_single_position，默认 12%）
+        single_limit = float(_RISK.get("max_single_position", 0.12))
+        max_single = max(
+            (p.get("market_value", 0) for p in (current_positions or [])),
+            default=0,
+        )
+        single_pct = (max_single / total_value * 100) if total_value > 0 else 0
+        single_ok = single_pct <= single_limit * 100
         checklist["single_stock_limit"] = {
             "status": single_ok,
-            "detail": f"最大2%=¥{total_value*0.02:.0f}",
+            "detail": (
+                f"最大单票{single_pct:.2f}%{'≤' if single_ok else '>'}上限"
+                f"{single_limit*100:.0f}% (¥{total_value*single_limit:.0f})"
+            ),
         }
 
         return checklist
@@ -191,16 +212,14 @@ class ExecutionChecker:
     # TrailingStop
     # ════════════════════════════════════════════
 
-    def _calc_trail_stop(self, position: dict,
-                         params: Optional[dict] = None) -> dict:
+    def _calc_trail_stop(self, position: dict) -> dict:
         """
-        计算TrailingStop状态
+        计算TrailingStop状态（ADR-0005：与策略层共用一套四档规则）
 
-        规则:
-          盈利≥30% → 峰值×0.88
-          盈利10-30% → 峰值×0.85
-          盈利<10% → 峰值×0.92
-          亏损 → 成本×0.92
+        规则(docs/STRATEGY.md §5.4):
+          持仓 < TRAILING_MIN_HOLD_DAYS 天 → 仅成本价 -8% 硬止损
+          持仓满后：盈利≥30% → 峰值-12%；10-30% → 峰值-15%；其余 → 峰值-20%
+        最终止损线取「硬止损线」与「四档 trailing 线」中更紧（更高）的一条。
 
         返回:
         {
@@ -209,10 +228,9 @@ class ExecutionChecker:
             "stop_price": 162.8,
             "peak_price": 185.0,
             "current_price": 182.0,
-            "bucket": "盈利>30%",
+            "bucket": "T3",
         }
         """
-        params = params or DEFAULT_TRAIL_PARAMS
         entry = position.get("entry_price", 0)
         current = position.get("current_price", entry)
         peak = max(position.get("_peak_price", entry), current)
@@ -221,24 +239,30 @@ class ExecutionChecker:
         if entry <= 0 or qty <= 0:
             return {"status": "unknown", "stop_price": 0, "distance_pct": 0}
 
-        # 盈利%
         profit_pct = (current - entry) / entry
-        # 按盈利区间选参数
-        if profit_pct >= params["profit_high_bucket"]["threshold"]:
-            mul = params["profit_high_bucket"]["multiplier"]
-            bucket = "盈利≥30%"
-        elif profit_pct >= params["profit_med_bucket"]["threshold"]:
-            mul = params["profit_med_bucket"]["multiplier"]
-            bucket = "盈利10-30%"
-        elif profit_pct >= params["profit_low_bucket"]["threshold"]:
-            mul = params["profit_low_bucket"]["multiplier"]
-            bucket = "盈利<10%"
-        else:
-            mul = params["loss_bucket"]["multiplier"]
-            bucket = "亏损"
+        stop_loss_pct = abs(float(_RISK.get("stop_loss_pct", 0.08))) * 100
+        hard_stop_price = entry * (1 - stop_loss_pct / 100)
 
-        # 止损价 = 峰值 × 系数
-        stop_price = round(peak * mul, 2)
+        hold = hold_days(position.get("entry_date", ""))
+        if hold is not None and hold < TRAILING_MIN_HOLD_DAYS:
+            stop_price = round(hard_stop_price, 2)
+            bucket = f"持仓<{TRAILING_MIN_HOLD_DAYS}天"
+            rule = f"持仓{hold}天→硬止损{stop_loss_pct:.0f}%:成本{entry}×{-stop_loss_pct:.0f}%={stop_price}"
+        else:
+            trail_pct, tier = trailing_stop_threshold(profit_pct * 100)
+            trail_stop_price = peak * (1 + trail_pct / 100)
+            bucket = tier
+            # 硬止损与 trailing 取更紧的一条（止损价更高者先触发）
+            if hard_stop_price >= trail_stop_price:
+                stop_price = round(hard_stop_price, 2)
+                rule = (
+                    f"盈利{profit_pct*100:.1f}%→{tier}:峰值{peak}×{1+trail_pct/100:.2f}="
+                    f"{trail_stop_price:.2f}，硬止损{hard_stop_price:.2f}更紧"
+                )
+            else:
+                stop_price = round(trail_stop_price, 2)
+                rule = f"盈利{profit_pct*100:.1f}%→{tier}:峰值{peak}×{1+trail_pct/100:.2f}={stop_price}"
+
         distance_pct = round((current - stop_price) / current * 100, 2) if current > 0 else 0
 
         # 状态判定
@@ -259,7 +283,7 @@ class ExecutionChecker:
             "current_price": current,
             "entry_price": entry,
             "bucket": bucket,
-            "rule_description": f"盈利{profit_pct*100:.1f}%→{bucket}:峰值{peak}×{mul}={stop_price}",
+            "rule_description": rule,
         }
 
     # ════════════════════════════════════════════

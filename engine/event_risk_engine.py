@@ -162,10 +162,10 @@ def _pct_change(closes: list, lookback: int) -> float | None:
 
 def get_market_moves() -> dict:
     """获取避险异动（黄金单日/5日、纳指单日、A股映射链单日涨跌幅%）。限频/失败静默降级为空 dict。"""
-    import yfinance as yf
-
     moves: dict = {}
     try:
+        import yfinance as yf
+
         df = yf.Ticker("GC=F").history(period="1mo")
         if df is not None and not df.empty:
             closes = df["Close"].tolist()
@@ -179,6 +179,8 @@ def get_market_moves() -> dict:
         logger.warning("[event_risk] 黄金异动获取失败: %s", exc)
 
     try:
+        import yfinance as yf
+
         df = yf.Ticker("^IXIC").history(period="5d")
         if df is not None and not df.empty:
             nasdaq_1d = _pct_change(df["Close"].tolist(), 1)
@@ -200,7 +202,11 @@ def get_market_moves() -> dict:
 
 
 def load_latest_event_risk(path=None) -> dict | None:
-    """读 shadow_event_history.json 最新一条影子记录，无记录或非当天返回 None。"""
+    """读 shadow_event_history.json 最新一条影子记录。
+
+    无记录 / 读取失败 / 非当天 一律返回 None。调用方必须把 None 视为
+    "无法证明无风险"，按 ADR-0006 严格 fail-closed 处理（禁用 BUY）。
+    """
     import json
     import os
     from pathlib import Path
@@ -208,25 +214,29 @@ def load_latest_event_risk(path=None) -> dict | None:
     if path is None:
         path = Path(__file__).parent.parent / "data" / "shadow_event_history.json"
     if not os.path.exists(path):
-        logger.warning("[event_risk] 影子记录不存在: %s（run_event_shadow.py 未运行，事件拦截不生效）", path)
+        logger.warning("[event_risk] 影子记录不存在: %s（run_event_shadow.py 未运行 → 按 fail-closed 禁 BUY）", path)
         return None
     try:
         with open(path) as f:
             history = json.load(f)
     except (json.JSONDecodeError, OSError):
-        logger.warning("[event_risk] 影子记录读取失败: %s", path)
+        logger.warning("[event_risk] 影子记录读取失败: %s → 按 fail-closed 禁 BUY", path)
         return None
     if not history or not isinstance(history, list):
         return None
     latest = history[-1]
     if latest.get("date") != datetime.now().strftime("%Y-%m-%d"):
-        logger.warning("[event_risk] 影子记录非当天(%s)，事件拦截不生效", latest.get("date"))
+        logger.warning("[event_risk] 影子记录非当天(%s) → 按 fail-closed 禁 BUY", latest.get("date"))
         return None
     return latest
 
 
 def event_blocks_buy(event_risk: dict | None) -> bool:
-    """事件风险是否禁用 BUY（level ≥ high）。"""
+    """事件风险是否禁用 BUY（level ≥ high）。
+
+    注意：None 表示"未知"，本函数返回 False 仅为兼容旧调用；
+    新调用方必须先判断 None（未知 = 无法证明无风险），按 ADR-0006 自行禁 BUY。
+    """
     if not event_risk:
         return False
     return event_risk.get("level") in ("high", "extreme")

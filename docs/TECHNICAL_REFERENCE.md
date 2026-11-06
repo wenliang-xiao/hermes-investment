@@ -97,7 +97,7 @@ hermes-investment/
 │   ├── concept_engine.py       # 面基概念引擎 (881行)
 │   ├── full_asset_scanner.py   # 全资产扫描 (1780行)
 │   ├── fund_tracker.py         # 基金追踪 (317行)
-│   ├── shadow_account.py       # 影子账户 (388行)
+│   ├── shadow_account.py       # 策略四账本 shadow_strategy4.json (ADR-0004)
 │   ├── strategy4_portfolio.py  # 策略4组合
 │   └── __init__.py
 │
@@ -343,11 +343,15 @@ class PositionData:
 
 | 策略 | 建仓条件 | 卖出组件 | 仓位/风控 |
 |------|---------|---------|----------|
-| faceji | 评分≥5.0 + MA趋势过滤 + Kelly | HardSeller(-8%) / FallSeller(-12%) / ScoreDrop(<4.5) / MASeller(死叉) | Kelly动态, 上限8%, 最多8只 |
-| silverquant | 评分≥5.0, 最多5候选 | HardSeller(-8%) / FallSeller(-12%) / MASeller / ScoreDrop(<4.5) | 固定¥30K/槽, 最多8只 |
-| tradingagents | 辩论分≥5.5, TOP3候选 + Kelly | 辩论分<4.0 / 止损(-8%) / 弱持仓(<5.0+亏损) | Kelly动态, 上限12%, 最多6只 |
+| faceji | 评分≥5.0 + MA趋势过滤 + Kelly | HardSeller(-8%) / 四档Trailing(-12/-15/-20%) / ScoreDrop(<4.5) / MASeller(死叉) | Kelly动态, 上限8%, 最多8只 |
+| silverquant | 评分≥5.0, 最多5候选 | HardSeller(-8%) / 四档Trailing(-12/-15/-20%) / MASeller / ScoreDrop(<4.5) | 固定¥30K/槽, 最多8只 |
+| tradingagents | 辩论分≥5.5, TOP3候选 + Kelly | 辩论分<4.0 / 止损(-8%) / 四档Trailing(-12/-15/-20%) / 弱持仓(<5.0+亏损) | Kelly动态, 上限12%, 最多6只 |
 
-**策略参数默认值**:
+> 四档 Trailing（ADR-0005）：持仓 <10 天只走成本价 -8% 硬止损；满 10 天后按浮盈
+> ≥30%→峰值-12%、10~30%→-15%、其余→-20%。阈值统一来自
+> `config.TRADING_DISCIPLINE.trailing_stop_tiers`，策略层/检查器/shadow 账本共用。
+
+**策略参数默认值**（ADR-0005：默认值来自 `config.TRADING_DISCIPLINE` / `config.RISK_PARAMS`）:
 
 | 参数 | faceji | silverquant | tradingagents |
 |------|--------|-------------|---------------|
@@ -356,7 +360,7 @@ class PositionData:
 | `max_positions` | 8 | 8 | 6 |
 | `max_candidates` | 5 | 5 | 3 |
 | `hard_stop_loss_pct` | -8.0 | -8.0 | -8.0 |
-| `trailing_stop_pct` | -12.0 | -12.0 | — |
+| `slot_amount` | — | 30000.0 | — |
 | `kelly_odds` | 2.0 | — | 1.8 |
 | `kelly_fraction` | 0.5 | — | 0.5 |
 | `max_position_pct` | 0.08 | — | 0.12 |
@@ -441,7 +445,12 @@ class PaperTradingEngine:
 | `api_risk.py` | 192 | 实时行情/绩效 |
 | `api_dragon_tiger.py` | 79 | 龙虎榜 |
 
-**服务器启动**: `python3 dashboard/server.py 8686` → `uvicorn.run(app, host="0.0.0.0", port=8686)`
+**服务器启动**: `./scripts/start_dashboard.sh 8686`（内部 `uvicorn.run(app, host="0.0.0.0", port=8686)`）
+
+> ⚠️ 启动脚本会 `export FACTOR_A_AKSHARE_PRIMARY=1`。直接 `python dashboard/server.py 8686`
+> 启动时，面板回测会走 baostock 批量取数 → C 层 `corrupted double-linked list`，
+> 进程仍在但事件循环死亡（全部 HTTP 10s 超时），只能 kill -9。
+> 后台运行：`nohup ./scripts/start_dashboard.sh 8686 > /tmp/hermes_dashboard.log 2>&1 &`
 
 ### 2.5 data/ — 数据层
 
@@ -739,7 +748,8 @@ class PaperTradingEngine:
 
 | 文件路径 | 格式 | 生产者 | 消费者 | 更新频率 |
 |---------|------|--------|--------|---------|
-| `data/shadow_account.json` | JSON | `output/shadow_account.py` | `/api/portfolio`, `/api/metrics` | 每笔交易 |
+| `data/shadow_account.json` | JSON | `scripts/run_trading.py`（聚合）/ `trading/bridge.py` | `/api/portfolio`, `/api/metrics` | 每日（ADR-0004 主账） |
+| `data/shadow_strategy4.json` | JSON | `output/shadow_account.py` | 策略四/日报/价格告警 | 每笔交易（ADR-0004 策略四账本） |
 | `data/trading_signals.json` | JSON | `scripts/run_trading.py` | `/api/simulated`, `/api/signals` | 每日 |
 | `data/behavior_diagnosis.json` | JSON | `engine/behavior.py` | `/api/behavior` | 每日 |
 | `data/news_cache.json` | JSON | `news/pipeline.py` | `/api/v2/news` | 30分钟 |

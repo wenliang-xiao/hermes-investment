@@ -1385,8 +1385,10 @@ async function loadExecutionBoard() {
     window._boardData = data;   // 供弹窗深钻
     const m = data.macro || {};
     const dg = m.dual_gate || {};
-    const counts = { buy: (board.buy||[]).length, sell: (board.sell||[]).length, hold: (board.hold||[]).length, wait: (board.wait||[]).length, excluded: (board.excluded||[]).length };
-    const total = counts.buy + counts.sell + counts.hold + counts.wait;
+    const counts = { buy: (board.buy||[]).length, sell: (board.sell||[]).length, hold: (board.hold||[]).length, wait: (board.wait||[]).length, excluded: (board.excluded||[]).length, blocked: (board.blocked||[]).length };
+    const total = counts.buy + counts.sell + counts.hold + counts.wait + counts.blocked;
+    const snapshot = data.snapshot || {};
+    const buyVeto = data.buy_veto || [];
 
     // ── 今日决策结论条 (置顶一句话) ──
     try {
@@ -1431,6 +1433,7 @@ async function loadExecutionBoard() {
           parts.push(`组合平均收益 <b class="${cls}">${overall >= 0 ? '+' : ''}${overall.toFixed(2)}%</b>`);
         }
         if (counts.excluded) parts.push(`<b class="text-gray-400">${counts.excluded} 只禁反手</b>`);
+        if (counts.blocked) parts.push(`<b class="text-orange-400">${counts.blocked} 只建议买入被风控拦截</b>`);
         txt.innerHTML = '📌 ' + parts.join(' · ');
         banner.classList.remove('hidden');
       }
@@ -1443,8 +1446,10 @@ async function loadExecutionBoard() {
       <span class="px-2.5 py-1 rounded-lg bg-red-900/40 text-red-400">🔴 卖出 ${counts.sell}</span>
       <span class="px-2.5 py-1 rounded-lg bg-yellow-900/40 text-yellow-400">🟡 持有 ${counts.hold}</span>
       <span class="px-2.5 py-1 rounded-lg bg-gray-700 text-gray-300">◻️ 等待 ${counts.wait}</span>
+      ${counts.blocked ? `<span class="px-2.5 py-1 rounded-lg bg-orange-900/40 text-orange-400 border border-orange-700/50 cursor-help" title="${buyVeto.join('；')}">⛔ 建议买入被拦截 ${counts.blocked}</span>` : ''}
       ${counts.excluded ? `<span class="px-2.5 py-1 rounded-lg bg-gray-800 text-gray-500 border border-gray-700">⛔ 禁反手 ${counts.excluded}</span>` : ''}
       <span class="px-2.5 py-1 rounded-lg bg-gray-800 text-gray-400 border border-gray-700">🌐 ${m.quadrant||'?'} · 双门 ${dg.macro_gate||dg.macro||'?'}/${dg.trend_gate||dg.trend||'?'}</span>
+      ${snapshot.date ? `<span class="px-2.5 py-1 rounded-lg ${snapshot.stale ? 'bg-yellow-900/40 text-yellow-400 border border-yellow-700/50' : 'bg-gray-800 text-gray-400 border border-gray-700'} cursor-help" title="评分快照日期；非当日说明 run_trading.py 未重跑">📅 快照 ${snapshot.date}${snapshot.stale ? ` (${snapshot.stale_days}天前)` : ''}</span>` : ''}
       ${eventRiskHtml}
       ${total === 0 ? '<span class="text-gray-500 self-center">今日无待处理信号</span>' : ''}
     </div>`;
@@ -1452,6 +1457,7 @@ async function loadExecutionBoard() {
     // ── 分组决策表 ──
     const groups = [
       ['buy', '🟢 建议买入', 'text-green-400'],
+      ['blocked', '⛔ 建议买入·风控拦截', 'text-orange-400'],
       ['sell', '🔴 建议卖出', 'text-red-400'],
       ['hold', '🟡 继续持有', 'text-yellow-400'],
       ['wait', '◻️ 等待/未达建仓', 'text-gray-400'],
@@ -1508,7 +1514,7 @@ function showBoardModal(sym) {
   const bd = window._boardData || {};
   const board = bd.board || {};
   let entry = null;
-  for (const k of ['buy', 'sell', 'hold', 'wait']) {
+  for (const k of ['buy', 'blocked', 'sell', 'hold', 'wait', 'excluded']) {
     const hit = (board[k] || []).find(x => x.symbol === sym);
     if (hit) { entry = hit; break; }
   }

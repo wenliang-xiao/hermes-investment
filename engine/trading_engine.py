@@ -16,7 +16,7 @@ sys.path.insert(0, _PROJECT_DIR)
 
 from data.data_layer import get_stock_daily
 from domain import WATCHLIST
-from config import FACTOR_WEIGHTS
+from config import FACTOR_WEIGHTS, TRADING_DISCIPLINE
 from strategies.base import PositionData, FacejiConfig, SilverQuantConfig, TradingAgentsConfig
 from engine.cost_model import calc_adjusted_price
 from strategies import faceji as _faceji_pure, silverquant as _sq_pure, tradingagents as _ta_pure
@@ -24,18 +24,18 @@ from utils.atomic_io import atomic_write_json
 import functools
 print = functools.partial(print, flush=True)
 
-# ═══════════════════════════════════════════
-# 交易纪律常量
-# ═══════════════════════════════════════════
-MAX_TRADES_PER_WEEK_PER_STRATEGY = 3
-MAX_TRADES_PER_WEEK_TOTAL = 5
-TRADE_COOLDOWN_DAYS = 1  # 同一标的买卖后冷却天数
+# 交易纪律常量（ADR-0005：唯一来源 config.TRADING_DISCIPLINE）
+MAX_TRADES_PER_WEEK_PER_STRATEGY = int(
+    TRADING_DISCIPLINE.get("max_trades_per_week_per_strategy", 3)
+)
+MAX_TRADES_PER_WEEK_TOTAL = int(TRADING_DISCIPLINE.get("max_trades_per_week_total", 5))
+TRADE_COOLDOWN_DAYS = int(TRADING_DISCIPLINE.get("trade_cooldown_days", 1))
 
 # 建议信号预算 — 与模拟盘预算完全隔离。
 # 原因: 模拟盘自动执行会调用 record_trade() 占用 week_count, 导致"给用户的建议信号"
 # 被模拟盘的交易吃光, 连续多周输出 0 条 (W28-W44 每周一 08:1x 即打满 5/5)。
 # 人工交易纪律为"周最多 1 次", 故建议层单独计数。
-MAX_ADVICE_TRADES_PER_WEEK = 1
+MAX_ADVICE_TRADES_PER_WEEK = int(TRADING_DISCIPLINE.get("max_advice_per_week", 1))
 
 # 避险资产（事件风险 extreme 清仓时保留）: 黄金/白银/债券类对冲资产
 _HAVEN_SYMBOLS = {"518880", "GLD", "SLV", "GC=F", "SI=F", "511260"}
@@ -248,6 +248,11 @@ class BaseStrategy:
         adj_price, cost_detail = calc_adjusted_price(price, qty, "buy", sym)
         total_cost = adj_price * qty
         if total_cost > self.cash:
+            print(
+                f"  ⚠️ 跳过 buy({sym}): 现金不足 need={total_cost:.2f} "
+                f"cash={self.cash:.2f}",
+                flush=True,
+            )
             return False
         self.cash -= total_cost
         self.positions[sym] = {
@@ -545,13 +550,18 @@ class TradingEngine:
                 print(f"  📋 建议周频过滤: [{sig.strategy}] {sig.action} {sig.symbol} - {msg}", flush=True)
         return filtered
 
-    def _get_event_risk_level(self) -> str:
+    def _get_event_risk(self) -> dict | None:
+        """读取当日事件风险影子记录。
+
+        严格 fail-closed (ADR-0006): 缺失/非当天/读取异常一律返回 None，
+        由调用方据此禁用 BUY —— 无法证明"今天没有事件风险"时，不得开新仓。
+        """
         try:
             from engine.event_risk_engine import load_latest_event_risk
-            er = load_latest_event_risk()
-            return er.get("level") if er else "none"
-        except Exception:  # noqa: BLE001 - 影子记录缺失时视为无风险
-            return "none"
+            return load_latest_event_risk()
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠️ 事件影子读取异常: {e}", flush=True)
+            return None
 
     def _liquidate_on_extreme(self, price_map) -> int:
         """extreme 时清仓全部权益类持仓，保留黄金/白银/债券避险资产。"""
@@ -605,15 +615,25 @@ class TradingEngine:
                 print(f"  📉降仓: [{name}] SELL {sym} @{price:.2f}", flush=True)
         return sold
 
-    def run_daily(self, date_str, score_map, tech_map, price_map, save=True):
-        """每日运行全部策略"""
+    def run_daily(self, date_str, score_map, tech_map, price_map, save=True,
+                  buy_block_reason: str | None = None):
+        """每日运行全部策略。
+
+        buy_block_reason: 上游严格 fail-closed 门（数据源自检/因子覆盖率）给出的
+        禁买原因；非空时只禁 BUY，SELL 仍照常执行。
+        """
         print(f"\n{'='*50}", flush=True)
         print(f"🏃 TradingEngine 运行: {date_str}", flush=True)
         print(f"{'='*50}", flush=True)
 
-        event_level = self._get_event_risk_level()
-        event_blocked = event_level in ("high", "extreme")
-        if event_blocked:
+        event_risk = self._get_event_risk()
+        event_level = (event_risk or {}).get("level") or "none"
+        event_data_missing = event_risk is None
+        # ADR-0006: 影子缺失/非当天 → 无法证明无风险 → 严格禁 BUY
+        event_blocked = event_data_missing or event_level in ("high", "extreme")
+        if event_data_missing:
+            print("  🛡️ 事件影子缺失/非当天 → 严格 fail-closed，禁用 BUY", flush=True)
+        elif event_blocked:
             print(f"  🛡️事件避险: level={event_level}，禁用BUY", flush=True)
 
         # LDS 双门/宏观策略开关 → 仓位乘数 (P0-4 2026-09-03: 立项核心依据落地)
@@ -637,11 +657,16 @@ class TradingEngine:
                 macro_blocked = True
             macro_detail += f" | 双门 {_mg}/{_tg}"
         except Exception as _e:
-            print(f"  [trading_engine] macro gate load failed (non-blocking): {_e}", flush=True)
+            # ADR-0006: 宏观引擎异常 → 严格 fail-closed，仓位乘数降到 0.4 并告警
+            macro_factor = 0.4
+            macro_detail = f"macro_engine 异常: {_e}"
+            print(f"  🌐 宏观引擎异常 → 严格 fail-closed: 仓位乘数降至 0.4: {_e}", flush=True)
         if macro_blocked:
             print(f"  🌐 宏观双门关闭: {macro_detail} → 禁用BUY", flush=True)
         else:
             print(f"  🌐 宏观双门: {macro_detail}", flush=True)
+        if buy_block_reason:
+            print(f"  ⛔ 上游风控门: {buy_block_reason} → 禁用BUY", flush=True)
 
         all_signals = []
         for name, strategy in self.strategies.items():
@@ -672,6 +697,10 @@ class TradingEngine:
                     if macro_blocked:
                         print(f"  🌐双门关闭拦截: [{sig.strategy}] BUY {sig.symbol}", flush=True)
                         continue
+                    # 上游严格 fail-closed 门（数据源/因子覆盖率）
+                    if buy_block_reason:
+                        print(f"  ⛔上游风控拦截: [{sig.strategy}] BUY {sig.symbol} - {buy_block_reason}", flush=True)
+                        continue
                     # 周频检查: BUY信号受每周交易次数限制
                     ok, msg = self.calendar.can_trade(sig.strategy, sig.symbol)
                     if not ok:
@@ -700,10 +729,13 @@ class TradingEngine:
         resolved = self._resolve_conflicts(all_signals)
         print(f"\n  🔄 冲突解决后: {len(resolved)} 个建议信号", flush=True)
 
-        # 周频过滤（仅用于给用户的建议信号）
-        final = self._filter_by_weekly_rule(resolved)
-        if event_blocked:
-            final = [s for s in final if s.action != "BUY"]
+        # 严格 fail-closed：任一上游门禁触发时不给出 BUY 建议。
+        # 必须先剔除再走周频预算 —— 旧顺序先 record_advice 再剔除, 被门禁拦掉的
+        # BUY 会白吃本周唯一建议额度 (advice_week_count 递增但最终信号为 0)。
+        advice_pool = resolved
+        if event_blocked or macro_blocked or buy_block_reason:
+            advice_pool = [s for s in resolved if s.action != "BUY"]
+        final = self._filter_by_weekly_rule(advice_pool)
         print(f"\n  📋 周频过滤后: {len(final)} 个最终建议", flush=True)
 
         output = {
@@ -716,6 +748,15 @@ class TradingEngine:
             "signals": [s.to_dict() for s in final],
             "all_signals": [s.to_dict() for s in all_signals],
             "simulated_trades": sim_trades,
+            "risk_gates": {
+                "event_level": event_level,
+                "event_data_missing": event_data_missing,
+                "event_blocked": event_blocked,
+                "macro_blocked": macro_blocked,
+                "macro_factor": macro_factor,
+                "macro_detail": macro_detail,
+                "upstream_block_reason": buy_block_reason,
+            },
             "positions": {
                 name: {
                     sym: self._build_position_detail(sym, pos, strategy, score_map, price_map)

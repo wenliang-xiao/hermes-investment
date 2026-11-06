@@ -229,13 +229,15 @@ class TestICLoop:
         eng.record_factor_scores_for_ic(results, "2026-07-08")
         realized = {s: (0.2 * results[i]["scores"]["quality"] - 0.1)
                     for i, s in enumerate(symbols)}
-        entry = eng.compute_ic_from_realized("2026-07-08", realized)
+        entry = eng.compute_ic_from_realized("2026-07-08", realized,
+                                             realized_date="2026-07-09")
 
         assert entry["quality"] > 0.8, "quality IC 应为强正"
         assert entry["risk"] < -0.8, "risk IC 应为强负"
-        # 已累积入历史
+        assert entry["score_date"] == "2026-07-08"
+        # IC 以收益实现日入库（ADR-0007，避免前视）
         hist = icw.get_ic_history()
-        assert any(h.get("date") == "2026-07-08" for h in hist), "IC应累积入历史"
+        assert any(h.get("date") == "2026-07-09" for h in hist), "IC应按收益实现日累积"
         shutil.rmtree(tmp, ignore_errors=True)
 
     def test_low_sample_not_dead_equal(self):

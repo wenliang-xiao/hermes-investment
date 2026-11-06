@@ -5,7 +5,10 @@ strategies/tradingagents.py — TradingAgents 策略纯决策函数
 """
 from __future__ import annotations
 
-from .base import Signal, PositionData, TradingAgentsConfig
+from .base import (
+    Signal, PositionData, TradingAgentsConfig,
+    TRAILING_MIN_HOLD_DAYS, hold_days, trailing_stop_threshold,
+)
 
 
 def _debate_score(score: float, tech: dict | None, cfg: TradingAgentsConfig) -> float:
@@ -59,8 +62,11 @@ def decide(
         key=lambda x: x[1], reverse=True
     )[:cfg.max_candidates]
 
+    # 剩余可建仓槽位（含本轮已生成的 BUY，修复静态快照越界）
+    slots_left = max(0, cfg.max_positions - len(positions))
+
     for sym, ds in candidates:
-        if len(positions) >= cfg.max_positions:
+        if slots_left <= 0:
             break
         if ds < cfg.debate_entry_threshold:
             continue
@@ -81,6 +87,7 @@ def decide(
             size_pct=round(size_pct, 1),
             score=round(ds, 1),
         ))
+        slots_left -= 1
 
     # ─── 清仓 ───
     for sym, pos in positions.items():
@@ -112,7 +119,22 @@ def decide(
             ))
             continue
 
-        # 3. 弱持仓
+        # 3. FallSeller: 四档 trailing（docs/STRATEGY.md §5.4）
+        #    持仓满 TRAILING_MIN_HOLD_DAYS 天后启用；日期缺失时不放宽风控。
+        peak = pos.peak or entry
+        dd = (price - peak) / peak * 100 if peak else 0
+        hd = hold_days(pos.entry_date)
+        if hd is None or hd >= TRAILING_MIN_HOLD_DAYS:
+            trail_pct, tier = trailing_stop_threshold(pnl_pct)
+            if dd <= trail_pct:
+                signals.append(Signal(
+                    symbol=sym, action="SELL", price=price,
+                    reason=f"回落止盈{tier}{dd:.1f}%",
+                    priority="HIGH", pnl_pct=pnl_pct, score=round(ds, 1),
+                ))
+                continue
+
+        # 4. 弱持仓
         if ds < cfg.debate_weak_sell and pnl_pct < 0:
             signals.append(Signal(
                 symbol=sym, action="SELL", price=price,

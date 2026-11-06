@@ -7,7 +7,7 @@
     python3 scripts/run_backtest.py silverquant --walk-forward --cycles 3
     python3 scripts/run_backtest.py --list
 """
-import sys, os, argparse, json, uuid
+import sys, os, argparse, json
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_DIR not in sys.path:
     sys.path.insert(0, _PROJECT_DIR)
@@ -18,8 +18,6 @@ try:
         load_dotenv(_env_path)
 except Exception:
     pass
-
-from datetime import datetime, date
 
 
 def do_list():
@@ -45,14 +43,21 @@ def do_run(args):
     from engine.evaluator_fixed import evaluate_strategy
 
     strategy = args.strategy
+    use_pit = not args.fixed_score
     print(f"🚀 运行回测: {strategy}")
     print(f"   日期: {args.from_date} → {args.to_date}")
     print(f"   Walk-Forward: {'是' if args.walk_forward else '否'} ({args.cycles} cycles)")
+    print(f"   评分模式: {'时点(point-in-time)' if use_pit else '固定评分(fixed, 含前视)'}")
+    print(f"   退市股补池: {'是' if args.include_delisted else '否'}")
 
     result = evaluate_strategy(
         strategy_name=strategy,
         walk_forward=args.walk_forward,
         cycles=args.cycles,
+        use_point_in_time=use_pit,
+        include_delisted=args.include_delisted,
+        start_date=args.from_date,
+        end_date=args.to_date,
     )
 
     if result is None or (isinstance(result, dict) and "error" in result):
@@ -63,52 +68,28 @@ def do_run(args):
     from engine.backtest_types import BacktestResult
     if isinstance(result, BacktestResult):
         br = result
-        avg_sortino = br.sortino_ratio if not args.walk_forward else br.extra.get("avg_sortino", 0)
-        avg_return = br.total_return_pct if not args.walk_forward else br.extra.get("avg_return_pct", 0)
-        avg_mdd = br.max_drawdown_pct if not args.walk_forward else br.extra.get("avg_max_drawdown_pct", 0)
-        total_trades = br.trade_count if not args.walk_forward else br.extra.get("total_trades", 0)
-        stocks_data = br.extra.get("stocks_with_data", 0)
-        cycle_details = br.extra.get("cycle_details", [])
-        sortino_raw = br.sortino_ratio
-        score_raw = br.sortino_ratio
+        avg_sortino = br.extra.get("avg_sortino", br.sortino_ratio) if args.walk_forward else br.sortino_ratio
+        avg_return = br.extra.get("avg_return_pct", br.total_return_pct) if args.walk_forward else br.total_return_pct
     else:
         avg_sortino = result.get("avg_sortino", result.get("score", 0))
         avg_return = result.get("avg_return_pct", result.get("total_return_pct", 0))
-        avg_mdd = result.get("avg_max_drawdown_pct", result.get("max_drawdown_pct", 0))
-        total_trades = result.get("total_trades", result.get("trade_count", 0))
-        stocks_data = result.get("stocks_with_data", 0)
-        cycle_details = result.get("cycle_details", [])
-        sortino_raw = result.get("sortino_ratio") or result.get("score", 0)
-        score_raw = result.get("score", 0)
 
     print(f"\n✅ 回测完成!")
     print(f"   Sortino: {avg_sortino:.4f}" if isinstance(avg_sortino, (int, float)) else f"   Sortino: {avg_sortino}")
     print(f"   收益率: {avg_return:.2f}%" if isinstance(avg_return, (int, float)) else f"   收益率: {avg_return}")
 
-    # 转换为标准 schema 并保存
-    from engine.backtest_storage import save_result
-    standard = {
-        "meta": {
-            "strategy": strategy,
-            "symbols": [],
-            "date_range": {"from": args.from_date, "to": args.to_date},
-            "days": 0,
-            "walk_forward_cycles": args.cycles if args.walk_forward else 0,
-            "run_id": f"bt_{strategy}_{date.today().strftime('%Y%m%d')}_{uuid.uuid4().hex[:4]}",
-            "generated_at": datetime.now().isoformat(),
-        },
-        "cycles": cycle_details if args.walk_forward else [],
-        "aggregate": {
-            "avg_sortino": round(avg_sortino, 4) if isinstance(avg_sortino, (int, float)) else 0,
-            "avg_return_pct": avg_return,
-            "avg_max_dd_pct": avg_mdd,
-            "total_trades": total_trades,
-            "total_symbols_traded": stocks_data,
-        },
-        "cost_model": {"commission_rate": 0.00015, "stamp_tax_rate": 0.001},
-    }
+    # 转换为标准 schema 并保存 (含 equity_curve/trades/benchmark, 单次回测也保留明细)
+    from engine.backtest_storage import save_result, build_result
+    standard = build_result(
+        strategy, result,
+        from_date=args.from_date, to_date=args.to_date,
+        walk_forward=args.walk_forward, cycles=args.cycles,
+        include_delisted=args.include_delisted,
+        source="cli",
+    )
     path = save_result(strategy, standard)
-    print(f"   💾 已保存: {path}")
+    print(f"   💾 已保存: {path} "
+          f"(净值{len(standard['equity_curve'])}点/交易{len(standard['trades'])}笔)")
 
 
 def main():
@@ -121,6 +102,10 @@ def main():
                         help="结束日期 (默认 2025-12-31)")
     parser.add_argument("--walk-forward", action="store_true", help="启用 Walk-Forward")
     parser.add_argument("--cycles", type=int, default=3, help="Walk-Forward 轮数")
+    parser.add_argument("--fixed-score", action="store_true",
+                        help="关闭时点评分（ADR-0007: 默认时点评分；此开关仅用于复现旧的前视结果）")
+    parser.add_argument("--include-delisted", action="store_true",
+                        help="纳入退市股补池，缓解幸存者偏差（会显著变慢）")
     parser.add_argument("--list", action="store_true", help="列出已有结果")
     parser.add_argument("--save", action="store_true", default=True,
                         help="保存结果到 data/backtest/ (默认: true)")

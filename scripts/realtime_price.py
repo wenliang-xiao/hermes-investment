@@ -28,16 +28,23 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
 
+def _load_shadow_positions() -> dict:
+    """读取全部模拟盘持仓（ADR-0004: 三策略账本 + 策略四账本）。"""
+    positions = {}
+    for _p in (DATA_DIR / "shadow_account.json", DATA_DIR / "shadow_strategy4.json"):
+        if not _p.exists():
+            continue
+        try:
+            with open(_p) as f:
+                positions.update(json.load(f).get("positions", {}))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return positions
+
+
 def get_holding_symbols() -> list[dict]:
     """从模拟盘读取当前持仓标的"""
-    shadow_path = DATA_DIR / "shadow_account.json"
-    if not shadow_path.exists():
-        return []
-
-    with open(shadow_path) as f:
-        book = json.load(f)
-
-    positions = book.get("positions", {})
+    positions = _load_shadow_positions()
     symbols = []
     for sym, pos in positions.items():
         symbols.append({
@@ -163,14 +170,10 @@ def get_realtime_summary() -> dict:
     """获取包含组合快照的实时行情汇总"""
     rt_data = get_all_realtime()
 
-    shadow_path = DATA_DIR / "shadow_account.json"
-    if not shadow_path.exists():
+    positions = _load_shadow_positions()
+    if not positions:
         return {"realtime": rt_data, "error": "no shadow account"}
 
-    with open(shadow_path) as f:
-        book = json.load(f)
-
-    positions = book.get("positions", {})
     total_market_value = 0
     total_cost = 0
     position_details = []

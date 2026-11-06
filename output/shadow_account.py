@@ -1,6 +1,13 @@
 """
 Shadow Account（Vibe-Trading概念）
 模拟盘追踪：记录信号→模拟建仓→跟踪盈亏→纪律执行
+
+⚠️ 账本归属 (ADR-0004, 2026-11-03)
+────────────────────────────────
+- data/shadow_account.json    归 scripts/run_trading.py 独占（三策略聚合账本）。
+                              本模块只读、绝不写，避免两套逻辑互相覆盖。
+- data/shadow_strategy4.json 归本模块独占（run_daily 的"策略四"账本）。
+首次运行时若新账本不存在，会把旧 shadow_account.json 整体迁移过来并打标记。
 """
 import json, os
 from datetime import datetime, timedelta
@@ -9,22 +16,75 @@ try:
 except ImportError:
     import config as config              # 本地源码形态(无安装投资包时兜底)
 
-SHADOW_FILE = config.DATA_DIR / "shadow_account.json"
+try:
+    from utils.atomic_io import atomic_write_json
+except ImportError:  # 包形态下路径不同
+    from investment_system.utils.atomic_io import atomic_write_json
+
+try:
+    from strategies.base import (
+        TRAILING_MIN_HOLD_DAYS, hold_days as _hold_days, trailing_stop_threshold,
+    )
+except ImportError:  # 包形态
+    from investment_system.strategies.base import (
+        TRAILING_MIN_HOLD_DAYS, hold_days as _hold_days, trailing_stop_threshold,
+    )
+
+_STOP_LOSS_PCT = abs(float(getattr(config, "RISK_PARAMS", {}).get("stop_loss_pct", 0.08)))
+_MAX_POSITIONS = int(getattr(config, "RISK_PARAMS", {}).get("max_total_positions", 8))
+
+SHADOW_FILE = config.DATA_DIR / "shadow_strategy4.json"
+LEGACY_SHADOW_FILE = config.DATA_DIR / "shadow_account.json"
+SHADOW_OWNER = "strategy4"
+
+
+def _migrate_legacy():
+    """一次性迁移：旧 shadow_account.json → shadow_strategy4.json。
+
+    只在旧文件存在、且不是 run_trading 的新聚合账本(owner=run_trading)时迁移，
+    迁移后写 `migrated_from` 标记，重复调用无副作用。
+    """
+    if os.path.exists(SHADOW_FILE) or not os.path.exists(LEGACY_SHADOW_FILE):
+        return None
+    try:
+        with open(LEGACY_SHADOW_FILE) as f:
+            legacy = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(legacy, dict):
+        return None
+    if legacy.get("owner") == "run_trading":
+        # 新聚合账本：属于三策略，不能当作策略四历史迁移
+        return None
+    if not (legacy.get("positions") or legacy.get("history")):
+        return None
+    legacy["owner"] = SHADOW_OWNER
+    legacy["migrated_from"] = "shadow_account.json"
+    legacy["migrated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    atomic_write_json(SHADOW_FILE, legacy)
+    logger_msg = "[shadow_account] 已迁移旧账本 → %s" % SHADOW_FILE
+    print(logger_msg, flush=True)
+    return legacy
 
 
 def load_shadow():
+    if not os.path.exists(SHADOW_FILE):
+        migrated = _migrate_legacy()
+        if migrated is not None:
+            return migrated
     if os.path.exists(SHADOW_FILE):
         try:
             with open(SHADOW_FILE) as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             pass
-    return {"positions": {}, "history": [], "capital": 1000000, "cash": 1000000}
+    return {"positions": {}, "history": [], "capital": 1000000, "cash": 1000000,
+            "owner": SHADOW_OWNER}
 
 
 def save_shadow(data):
-    with open(SHADOW_FILE, "w") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    data["owner"] = SHADOW_OWNER
+    atomic_write_json(SHADOW_FILE, data)
 
 
 def entry(symbol: str, name: str, action: str, price: float, reason: str,
@@ -103,45 +163,34 @@ def check_stops() -> list:
             continue
 
         entry_date_str = pos.get("entry_date", "")
-        hold_days = 0
-        try:
-            entry_dt = datetime.strptime(entry_date_str, "%Y-%m-%d")
-            hold_days = (datetime.now() - entry_dt).days
-        except:
-            pass
+        hd = _hold_days(entry_date_str)
 
         pnl_pct = (current - entry_price) / entry_price
         dd_from_peak = (current - peak_price) / peak_price if peak_price else 0
 
-        if hold_days < 10:
-            if pnl_pct <= -0.08:
+        # ADR-0005: 与策略层共用同一套四档规则；日期缺失时不放宽风控。
+        if hd is not None and hd < TRAILING_MIN_HOLD_DAYS:
+            if pnl_pct <= -_STOP_LOSS_PCT:
                 alerts.append({
                     "symbol": sym, "name": pos.get("name", ""),
                     "type": "STOP_LOSS_HARD",
                     "entry": entry_price, "current": current,
                     "loss": round(pnl_pct * 100, 1),
-                    "note": f"持仓{hold_days}天<10天，触发-8%硬止损"
+                    "note": f"持仓{hd}天<{TRAILING_MIN_HOLD_DAYS}天，触发-{_STOP_LOSS_PCT*100:.0f}%硬止损"
                 })
         else:
-            if pnl_pct >= 0.30:
-                threshold = -0.12
-                label = "T3(-12%)"
-            elif pnl_pct >= 0.10:
-                threshold = -0.15
-                label = "T2(-15%)"
-            else:
-                threshold = -0.20
-                label = "T1(-20%)"
+            threshold_pct, label = trailing_stop_threshold(pnl_pct * 100)
+            threshold = threshold_pct / 100
 
             if dd_from_peak <= threshold:
                 alerts.append({
                     "symbol": sym, "name": pos.get("name", ""),
-                    "type": f"TRAILING_STOP_{label}",
+                    "type": f"TRAILING_STOP_{label}({threshold_pct:.0f}%)",
                     "entry": entry_price, "current": current,
                     "peak": peak_price,
                     "dd_from_peak": round(dd_from_peak * 100, 1),
                     "pnl": round(pnl_pct * 100, 1),
-                    "note": f"持仓{hold_days}天，峰值回撤{abs(dd_from_peak)*100:.1f}%触发trailing stop"
+                    "note": f"持仓{hd if hd is not None else '?'}天，峰值回撤{abs(dd_from_peak)*100:.1f}%触发trailing stop"
                 })
     return alerts
 
@@ -275,7 +324,7 @@ def clean_cooldown(max_days: int = 30):
 
 def get_no_trade_reasons(symbol: str, score: float, scan_results: list,
                            positions: list, dual_closed: bool,
-                           cool_func=None, max_positions=8) -> list:
+                           cool_func=None, max_positions=_MAX_POSITIONS) -> list:
     """返回该标的不建仓的所有原因列表"""
     reasons = []
     
@@ -304,7 +353,7 @@ def get_no_trade_reasons(symbol: str, score: float, scan_results: list,
 
 def get_all_no_trade_reasons(scan_results: list, positions: list,
                               dual_closed: bool, cool_func=None,
-                              max_positions=8) -> dict:
+                              max_positions=_MAX_POSITIONS) -> dict:
     """返回所有未建仓标的的完整不交易原因"""
     held_symbols = {p.get("symbol", "") for p in positions}
     reasons = {}
@@ -323,7 +372,7 @@ def get_all_no_trade_reasons(scan_results: list, positions: list,
     return reasons
 
 def init_portfolio(capital: float = 1000000.0) -> dict:
-    """初始化策略四投资组合。仅在 shadow_account.json 不存在或为空仓时调用。
+    """初始化策略四投资组合。仅在 shadow_strategy4.json 不存在或为空仓时调用。
 
     ⚠️ P0 防护 (2026-10-20): 绝不因缺 initialized 字段就清空已建仓账户 ——
     run_trading._aggregate_shadow 写出的主账户曾缺 initialized, 导致每日
@@ -396,7 +445,7 @@ def get_portfolio_metrics() -> dict:
         "trade_count": trade_count,
         "days_alive": days_alive,
         "position_count": summary.get("count", 0),
-        "max_positions": 8,
+        "max_positions": _MAX_POSITIONS,
         "edge_active": unrealized > 0 or realized > 0,
         "traversal_ok": total > capital * 0.75,  # 遍历性: 不爆仓
     }

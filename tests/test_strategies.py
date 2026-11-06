@@ -143,14 +143,47 @@ class TestFacejiDecide:
         assert "止损" in sells[0].reason or "硬止损" in sells[0].reason
 
     def test_trailing_stop(self):
-        """峰值回落-12% → FallSeller"""
-        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=120)}
+        """四档 trailing: 盈利 10-30% → 峰值回撤 -15% 触发"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=130)}
         signals = faceji.decide(
-            {}, {}, {"000001": 105},  # -12.5% from peak
+            {}, {}, {"000001": 110},  # 盈利 10%, 峰值回撤 -15.4%
             pos, 100000
         )
         sells = [s for s in signals if s.action == "SELL"]
-        assert len(sells) >= 1
+        assert any("T2" in s.reason for s in sells)
+
+    def test_trailing_relaxed_below_10pct_profit(self):
+        """四档 trailing: 盈利 <10% → 阈值 -20%，-12.5% 回撤不卖"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=120)}
+        signals = faceji.decide(
+            {}, {}, {"000001": 105},  # 盈利 5%, 峰值回撤 -12.5% > -20%
+            pos, 100000
+        )
+        sells = [s for s in signals if s.action == "SELL"]
+        assert not any("回落止盈" in s.reason for s in sells)
+
+    def test_trailing_disabled_within_min_hold_days(self):
+        """持仓 <10 天：只走硬止损，不启用 trailing"""
+        from datetime import datetime, timedelta
+        entry_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100,
+                                      entry_date=entry_date, peak=130)}
+        signals = faceji.decide(
+            {}, {}, {"000001": 110},  # 盈利 10%, 峰值回撤 -15.4%（若启用会触发 T2）
+            pos, 100000
+        )
+        assert not any("回落止盈" in s.reason for s in signals)
+
+    def test_max_positions_counts_new_buys(self):
+        """持仓 7 + 5 个候选 → 最多补 1 只，不得越界到 12 只"""
+        score_map = {f"00000{i}": 9.0 for i in range(1, 6)}
+        tech_map = {s: make_tech(ma20=1, ma60=5) for s in score_map}
+        price_map = {s: 10.0 for s in score_map}
+        held = {f"60000{i}": PositionData(f"60000{i}", 10, 100) for i in range(7)}
+        signals = faceji.decide(score_map, tech_map, price_map, held, 1000000)
+        buys = [s for s in signals if s.action == "BUY"]
+        assert len(buys) == 1
+        assert len(held) + len(buys) <= FacejiConfig().max_positions
 
     def test_score_drop_sell(self):
         """评分<4.5 → 卖出"""
@@ -215,6 +248,17 @@ class TestSilverQuantDecide:
         buys = [s for s in signals if s.action == "BUY"]
         assert len(buys) == 1
 
+    def test_fixed_slot_amount(self):
+        """固定 ¥30k 槽位：100 万现金 → 3%，30 万现金 → 10%"""
+        buys = [s for s in silverquant.decide(
+            {"000001": 6.0}, {}, {"000001": 10.0}, {}, 1000000
+        ) if s.action == "BUY"]
+        assert buys[0].size_pct == pytest.approx(3.0)
+        buys = [s for s in silverquant.decide(
+            {"000001": 6.0}, {}, {"000001": 10.0}, {}, 300000
+        ) if s.action == "BUY"]
+        assert buys[0].size_pct == pytest.approx(10.0)
+
     def test_score_too_low(self):
         """评分<5.0 → 不买入"""
         signals = silverquant.decide(
@@ -234,9 +278,10 @@ class TestSilverQuantDecide:
         assert any("HardSeller" in s.reason for s in sells)
 
     def test_trailing_seller(self):
-        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=120)}
+        """四档 trailing: 盈利 10-30% → 峰值回撤 -15% 触发"""
+        pos = {"000001": PositionData("000001", entry_price=100, quantity=100, peak=130)}
         signals = silverquant.decide(
-            {}, {}, {"000001": 105},
+            {}, {}, {"000001": 110},  # 盈利 10%, 峰值回撤 -15.4%
             pos, 100000
         )
         sells = [s for s in signals if s.action == "SELL"]

@@ -296,6 +296,10 @@ def to_shadow_account_format(engine: PaperTradingEngine) -> dict:
         ],
         "realized_pnl": round(engine.account.realized_pnl, 2),
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # ADR-0004: 本导出属主账（run_trading 家族），不是策略四账本；
+        # 缺此标记会被 output.shadow_account._migrate_legacy 误迁移。
+        "owner": "run_trading",
+        "schema_version": 2,
     }
 
 

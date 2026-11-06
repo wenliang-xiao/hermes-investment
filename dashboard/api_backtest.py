@@ -141,24 +141,24 @@ def _backtest_result_to_frontend(br, strategy_label: str = "") -> dict:
     }
 
 
-def _persist_backtest_result(br, strategy: str, symbols) -> None:
-    """把 BacktestResult 落盘到 data/backtest/，供历史列表读取。失败静默（不影响回测返回）。"""
-    try:
-        from engine.backtest_storage import save_result
+def _persist_backtest_result(br, strategy: str, symbols, start_date: str = "",
+                             end_date: str = "", walk_forward: bool = False,
+                             cycles: int = 0) -> None:
+    """把 BacktestResult 落盘到 data/backtest/，供历史列表读取。失败静默（不影响回测返回）。
 
-        result = {
-            "meta": {
-                "run_id": f"{strategy}_{_dt.now().strftime('%Y%m%d_%H%M%S')}",
-                "strategy": strategy,
-                "date_range": {"start": br.start_date, "end": br.end_date},
-                "symbols": symbols or [],
-            },
-            "aggregate": {
-                "avg_sortino": br.sortino_ratio,
-                "avg_return_pct": br.total_return_pct,
-                "total_trades": br.trade_count,
-            },
-        }
+    ⚠️ 2026-11-06: 原来这里另写一套精简 schema (`date_range:{start,end}`，且丢掉
+    equity_curve/trades) → 面板跑的回测在历史列表里只有 4 个聚合数，无法复核。
+    现统一走 `backtest_storage.build_result`，与 CLI 完全同构。
+    """
+    try:
+        from engine.backtest_storage import save_result, build_result
+
+        result = build_result(
+            strategy, br,
+            from_date=start_date, to_date=end_date,
+            walk_forward=walk_forward, cycles=cycles,
+            symbols=symbols or [], source="dashboard",
+        )
         save_result(strategy, result)
     except Exception:  # noqa: BLE001 - 落盘失败不影响回测返回
         pass
@@ -176,11 +176,16 @@ def _run_single_backtest(strategy: str, start_date: str, end_date: str,
     result = evaluate_strategy(strategy_name=strategy, custom_symbols=sym_list,
                                walk_forward=walk_forward, cycles=cycles,
                                train_days=train_days, test_days=test_days,
-                               use_point_in_time=True)  # P0-3 (2026-09-03): API 驱动回测强制时点评分, 消除 FIXED_SCORE_MAP 前视
+                               use_point_in_time=True,  # P0-3 (2026-09-03): API 驱动回测强制时点评分, 消除 FIXED_SCORE_MAP 前视
+                               start_date=start_date or None,
+                               end_date=end_date or None,
+                               days=days or None)
     if isinstance(result, dict) and "error" in result:
         return {"error": result["error"], "name": strategy, "daily_values": [], "trades": []}
     if isinstance(result, BacktestResult):
-        _persist_backtest_result(result, strategy, sym_list)
+        _persist_backtest_result(result, strategy, sym_list, start_date=start_date,
+                                 end_date=end_date, walk_forward=walk_forward,
+                                 cycles=cycles)
         label_map = {
             "faceji": "faceji (面基)",
             "silverquant": "silverquant (组件化)",

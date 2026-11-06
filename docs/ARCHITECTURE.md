@@ -93,11 +93,41 @@
 
 ## 五、关键架构决策 (ADRs)
 
+> **2026-11-03 起**：新决策统一记录在 [`docs/adr/`](adr/README.md)（四位数编号），
+> 包含背景/决策/代价/验证/回滚。本次交易系统加固涉及 ADR-0001～ADR-0008。
+> 下表三位数编号为历史遗留（未迁移），与 `docs/adr/` 不冲突。
+
 - **ADR-001**: 固定评估标尺，禁止为提分修改 — `evaluator_fixed.py`
 - **ADR-002**: HL 循环只改 `strategies/` 下的策略文件
 - **ADR-003**: GitHub 是唯一源码真理，本地修改必须立即 push
 - **ADR-004**: 所有改动必须过飞书文档评审流程 (OpenSpec)
 - **ADR-005**: 采用 Calendar Versioning (vYYYY.MM.DD)
+
+### 2026-11 交易系统加固（详见 `docs/adr/`）
+
+| ADR | 主题 |
+|-----|------|
+| 0002 | 持仓缺失现价不得静默删除 |
+| 0003 | 聚合账本必须保留峰值 peak |
+| 0004 | 账本收权：主账 vs 策略四账本（拆文件 + 迁移） |
+| 0005 | 风控数值单一来源 + 四档 Trailing + 固定槽位 |
+| 0006 | 风控严格 fail-closed |
+| 0007 | 回测可信度口径 |
+| 0008 | 暂缓项与后续路线 |
+
+### 账本拓扑
+
+```
+strategy_states.json   (三策略内部状态)
+        │ aggregate (run_trading)
+        ▼
+shadow_account.json    (主账, owner=run_trading)
+shadow_strategy4.json  (策略四账, owner=strategy4)
+```
+
+**写者唯一**：主账只由 `scripts/run_trading.py` / `trading/bridge.py` 写；
+策略四账只由 `output/shadow_account.py` 写。旧 `shadow_account.json` 在首次运行
+`output.shadow_account.load_shadow()` 时一次性迁移到新账本（见 ADR-0004）。
 
 ## 六、相关文档
 

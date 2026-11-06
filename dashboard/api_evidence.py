@@ -108,17 +108,22 @@ def evidence_data_quality():
     data_dir = ROOT / "data"
     now = datetime.now()
 
-    # 检查关键数据文件的新鲜度
+    # TTL 必须按实际调度周期给（见 docs/CRON_JOBS.md §1.5），否则正常数据会被误报 expired。
+    # 2026-11-06 对齐：run_trading 工作日 19:05 一次、新闻工作日每 2h 一次，
+    # 原来的 1h/30min 让 trading_signals/strategy_states/shadow_account/news 长期显示过期。
+    _TTL_DAILY = 26 * 3600   # 每日一跑 + 一次失败重试余量（也覆盖 23h40m 的龙虎榜间隔）
+    _TTL_2H = 3 * 3600       # 每 2h 一跑 + 1h 余量（容忍单次失败不立刻翻红）
     files_to_check = [
-        ("trading_signals.json", "模拟盘快照", 3600, "交易信号、持仓、组合净值"),
-        ("strategy_states.json", "策略状态", 3600, "各策略持仓/现金/交易历史"),
-        ("signal_accuracy_history.json", "信号验证历史", 86400, "信号表现跟踪"),
-        ("news_cache.json", "新闻缓存", 1800, "新闻多源聚合"),
-        ("dragon_tiger.json", "龙虎榜", 86400, "龙虎榜当日数据"),
-        ("etf_discovery.json", "ETF发现", 86400, "全市场ETF扫描"),
-        ("etf_portfolio.json", "ETF组合", 86400, "ETF组合配置"),
-        ("behavior_diagnosis.json", "行为诊断", 86400, "行为偏误分析"),
-        ("shadow_account.json", "影子账户", 3600, "模拟盘总账"),
+        ("trading_signals.json", "模拟盘快照", _TTL_DAILY, "交易信号、持仓、组合净值（run_trading 19:05）"),
+        ("strategy_states.json", "策略状态", _TTL_DAILY, "各策略持仓/现金/交易历史（run_trading 19:05）"),
+        ("signal_accuracy_history.json", "信号验证历史", _TTL_DAILY, "信号表现跟踪（run_trading 19:05 追加）"),
+        ("news_cache.json", "新闻缓存", _TTL_2H, "新闻多源聚合（工作日每 2h）"),
+        ("dragon_tiger.json", "龙虎榜", _TTL_DAILY, "龙虎榜当日数据"),
+        ("etf_discovery.json", "ETF发现", _TTL_DAILY, "全市场ETF扫描"),
+        ("etf_portfolio.json", "ETF组合", _TTL_DAILY, "ETF组合配置"),
+        ("behavior_diagnosis.json", "行为诊断", _TTL_DAILY, "行为偏误分析"),
+        ("shadow_account.json", "影子账户(三策略)", _TTL_DAILY, "模拟盘总账—三策略聚合，run_trading 独占写"),
+        ("shadow_strategy4.json", "影子账户(策略四)", _TTL_DAILY, "模拟盘总账—run_daily 策略四账本"),
         ("pool/watch.json", "发现层票池", 86400, "三层票池—发现层"),
         ("pool/monitor.json", "盯住层票池", 86400, "三层票池—盯住层"),
         ("pool/deep.json", "深度层票池", 86400, "三层票池—深度层"),

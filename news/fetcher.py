@@ -11,7 +11,7 @@ import time
 import urllib.request
 import urllib.parse
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -21,6 +21,7 @@ UA = (
 REQUEST_DELAY = 1.0  # 请求间隔（秒）
 TIMEOUT = 15
 _LAST_REQUEST_TIME = 0.0
+_SSL_CTX = None  # 见 _ssl_context()
 
 
 def _rate_limit():
@@ -33,6 +34,24 @@ def _rate_limit():
     _LAST_REQUEST_TIME = time.time()
 
 
+def _ssl_context():
+    """urllib 的 HTTPS 上下文 — 复用 requests 同款 certifi 信任库。
+
+    本机出网经内网代理，系统 CA 库不含该自签名链 → urllib 默认上下文
+    抛 `CERTIFICATE_VERIFY_FAILED`（requests 用 certifi 则正常）。
+    2026-11-06: 此前所有源恒返回 0 条，面板显示「暂无新闻数据」的根因。
+    """
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        import ssl
+        try:
+            import certifi
+            _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            _SSL_CTX = ssl.create_default_context()
+    return _SSL_CTX
+
+
 def _http_get(url, referer=None, timeout=TIMEOUT):
     """HTTP GET → 解码文本，失败返回 None"""
     _rate_limit()
@@ -41,7 +60,7 @@ def _http_get(url, referer=None, timeout=TIMEOUT):
         headers["Referer"] = referer
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
             raw = resp.read()
             return raw.decode("utf-8", errors="replace")
     except Exception as e:
@@ -84,6 +103,31 @@ def fetch_eastmoney_stock_news(symbol, limit=10):
     Returns:
         [{title, content, link, source, published, sentiment_hint}]
     """
+    # 1) akshare 东财新闻 (2026-11 起 search-api-web 的 type 参数被忽略,
+    #    恒返回 passportWeb 用户搜索 → 原 jsonp 路径拿不到文章, 由 akshare 兜住)
+    try:
+        import akshare as ak
+        df = ak.stock_news_em(symbol=str(symbol).zfill(6))
+        if df is not None and not df.empty:
+            out = []
+            for _, r in df.head(limit).iterrows():
+                title = str(r.get("新闻标题") or "").strip()
+                if not title:
+                    continue
+                out.append({
+                    "title": title[:200],
+                    "content": str(r.get("新闻内容") or "").strip()[:300],
+                    "link": str(r.get("新闻链接") or ""),
+                    "source": str(r.get("文章来源") or "东方财富"),
+                    "published": str(r.get("发布时间") or "")[:19],
+                    "sentiment_hint": "",
+                })
+            if out:
+                return out
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).info(f"akshare 个股新闻失败 {symbol}: {e}")
+
     param_dict = {
         "uid": "",
         "keyword": str(symbol),
@@ -303,6 +347,34 @@ def fetch_cninfo_announcements(symbol, limit=5):
     """
     code = str(symbol).zfill(6)
 
+    # 1) akshare 巨潮披露（稳定, 2026-11-06 新增主路径）
+    try:
+        import akshare as ak
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=120)).strftime("%Y%m%d")
+        df = ak.stock_zh_a_disclosure_report_cninfo(
+            symbol=code, market="沪深京", start_date=start, end_date=end
+        )
+        if df is not None and not df.empty:
+            out = []
+            for _, r in df.head(limit).iterrows():
+                title = str(r.get("公告标题") or "").strip()
+                if not title:
+                    continue
+                out.append({
+                    "title": title[:200],
+                    "content": title[:300],
+                    "link": str(r.get("公告链接") or ""),
+                    "source": "巨潮资讯",
+                    "published": str(r.get("公告时间") or "")[:10],
+                    "sentiment_hint": "",
+                })
+            if out:
+                return out
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).info(f"akshare 公告失败 {code}: {e}")
+
     results = _fetch_eastmoney_announcements(symbol, limit)
     if results:
         return results
@@ -375,7 +447,8 @@ def _fetch_cninfo_direct(code, limit=5):
     try:
         cookie_jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(cookie_jar)
+            urllib.request.HTTPSHandler(context=_ssl_context()),
+            urllib.request.HTTPCookieProcessor(cookie_jar),
         )
 
         _rate_limit()

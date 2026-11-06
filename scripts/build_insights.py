@@ -44,10 +44,15 @@ DATA_DIR = os.path.join(_PROJECT_DIR, "data")
 SIGNALS_PATH = os.path.join(DATA_DIR, "trading_signals.json")
 OUT_PATH = os.path.join(DATA_DIR, "insights.json")
 
-# 与 engine/trading_engine.py 保持一致
-MAX_TRADES_PER_WEEK_PER_STRATEGY = 3
-MAX_TRADES_PER_WEEK_TOTAL = 5
-TRADE_COOLDOWN_DAYS = 1
+# 与 engine/trading_engine.py 保持一致（ADR-0005：唯一来源 config.TRADING_DISCIPLINE）
+sys.path.insert(0, _PROJECT_DIR)
+from config import TRADING_DISCIPLINE  # noqa: E402
+
+MAX_TRADES_PER_WEEK_PER_STRATEGY = int(
+    TRADING_DISCIPLINE.get("max_trades_per_week_per_strategy", 3)
+)
+MAX_TRADES_PER_WEEK_TOTAL = int(TRADING_DISCIPLINE.get("max_trades_per_week_total", 5))
+TRADE_COOLDOWN_DAYS = int(TRADING_DISCIPLINE.get("trade_cooldown_days", 1))
 PRIORITY_W = {"HIGH": 0, "MED": 1, "LOW": 2}
 STRAT_ORDER = {"faceji": 0, "silverquant": 1, "tradingagents": 2}
 

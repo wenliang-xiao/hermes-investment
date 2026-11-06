@@ -184,8 +184,73 @@ def get_stock_codes() -> list:
 # ═══════════════════════════════════════════
 # 2. 个股日线行情（baostock）
 # ═══════════════════════════════════════════
+_DAILY_AK_COLS = ["date", "open", "high", "low", "close", "volume", "amount", "pe", "pb", "symbol"]
+
+
+def _akshare_primary_enabled() -> bool:
+    """A股日线是否以新浪为主源 — 与 data/sources/baostock_source.py 同约定。
+
+    置 FACTOR_A_AKSHARE_PRIMARY=1（本地 cron 已设）时先走新浪，规避 baostock
+    flapping 时每只 25s 超时（52 只 ≈ 21min）。
+    """
+    return os.environ.get("FACTOR_A_AKSHARE_PRIMARY", "0") == "1"
+
+
+def _is_etf_code(symbol: str) -> bool:
+    # 55xxxx = 沪市债券/货币 ETF (如 551550/511880)；与 baostock_source/_data_router 同口径
+    return (symbol.isdigit() and len(symbol) == 6
+            and symbol.startswith(("51", "52", "53", "55", "56", "58", "15")))
+
+
+def _hist_dict_to_daily(raw: dict, symbol: str, days: int) -> pd.DataFrame:
+    """akshare 返回的 {dates,open,high,low,close,volume[,amount]} → 日线 DataFrame。
+
+    与 baostock 路径同口径: 只保留最近 days+10 个自然日 (新浪返回全量历史,
+    若直接 tail 会多给 30%+ 的 K 线, 回测窗口/缓存文件名 days 语义会失真)。
+    """
+    if not raw or not raw.get("dates"):
+        return pd.DataFrame()
+    start_ts = pd.Timestamp(datetime.now() - timedelta(days=days + 10))
+    n = len(raw["dates"])
+
+    def _col(key: str):
+        vals = raw.get(key)
+        return list(vals) if isinstance(vals, list) and len(vals) == n else [None] * n
+
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw["dates"]),
+        "open": _col("open"), "high": _col("high"), "low": _col("low"),
+        "close": _col("close"), "volume": _col("volume"), "amount": _col("amount"),
+    })
+    df = df[df["date"] >= start_ts].reset_index(drop=True)
+    df["pe"] = None
+    df["pb"] = None
+    df["symbol"] = symbol
+    return df[_DAILY_AK_COLS]
+
+
 def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
-    """baostock不可达时的AKShare回退（无PE/PB，降级运行）"""
+    """baostock 不可达时的 AKShare 日线兜底（无 PE/PB，降级运行）。
+
+    A股 → 新浪 `stock_zh_a_daily`（~1.8s/只、稳定）；ETF → 新浪 `fund_etf_hist_sina`；
+    最后东财 `stock_zh_a_hist` 二次兜底。无 PE/PB 时由 factor_engine._enrich_valuation
+    用 stock_value_em 补齐估值因子。
+    """
+    # 1) 新浪（A股 stock_zh_a_daily / ETF fund_etf_hist_sina）
+    try:
+        if _is_etf_code(symbol):
+            from data.sources.akshare_source import get_history_etf
+            raw = get_history_etf(symbol, days=days + 10)
+        else:
+            from data.sources.baostock_source import _fallback_akshare_hist
+            raw = _fallback_akshare_hist(symbol, days=days)
+        df = _hist_dict_to_daily(raw, symbol, days)
+        if not df.empty:
+            return df
+    except Exception as e:
+        print(f"[data] {symbol} 新浪日线兜底失败: {e}")
+
+    # 2) 东财二次兜底（2026-09 起常被 RemoteDisconnected 限流，仅作最后尝试）
     try:
         import akshare as ak
         end_d = datetime.now().strftime("%Y%m%d")
@@ -208,9 +273,9 @@ def _get_stock_daily_akshare(symbol: str, days: int) -> pd.DataFrame:
         df["pe"] = None
         df["pb"] = None
         df["symbol"] = symbol
-        return df[["date", "open", "high", "low", "close", "volume", "amount", "pe", "pb", "symbol"]]
+        return df[_DAILY_AK_COLS]
     except Exception as e:
-        print(f"[data] {symbol} AKShare回退失败: {e}")
+        print(f"[data] {symbol} 东财日线兜底失败: {e}")
         return pd.DataFrame()
 
 
@@ -259,7 +324,19 @@ def _bs_iter_results(rs, timeout=30):
 
 
 def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
-    """获取个股日线数据（含PE/PB）。baostock主力，失败直接返回空(不试AKShare以免挂死)。"""
+    """获取个股日线数据（含PE/PB）。
+
+    主源 baostock（带 peTTM/pbMRQ）；拿不到 → 新浪(akshare)兜底（无 PE/PB，降级运行）。
+    FACTOR_A_AKSHARE_PRIMARY=1 时新浪先行，避免 baostock flapping 的逐只 25s 超时。
+    2026-11-06 修复: 原来 baostock 失败直接返回空（从未调用 AKShare 兜底）→
+    run_trading Step 4 全池 0 只有历史数据，技术面因子静默退化为默认值。
+    """
+    if _akshare_primary_enabled():
+        df = _get_stock_daily_akshare(symbol, days)
+        if not df.empty:
+            return df
+        print(f"[data] {symbol} 新浪主源无数据 → 回落 baostock")
+
     _bs_login()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
@@ -272,11 +349,11 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
             start_date=start, end_date=end,
             frequency="d", adjustflag="2")
         if rs.error_code != "0":
-            return pd.DataFrame()
+            return _get_stock_daily_akshare(symbol, days)
 
         raw_rows = _bs_iter_results(rs, timeout=30)
         if not raw_rows:
-            return pd.DataFrame()
+            return _get_stock_daily_akshare(symbol, days)
 
         rows = []
         for r in raw_rows:
@@ -293,14 +370,14 @@ def get_stock_daily(symbol: str, days: int = 365) -> pd.DataFrame:
                 continue
 
         if not rows:
-            return pd.DataFrame()
+            return _get_stock_daily_akshare(symbol, days)
         df = pd.DataFrame(rows)
         df["symbol"] = symbol
         return df
     except Exception as e:
-        print(f"[data] {symbol} baostock失败({str(e)[:40]})")
+        print(f"[data] {symbol} baostock失败({str(e)[:40]}) → 新浪兜底")
         _bs_logout()  # 重置连接，下次重连
-        return pd.DataFrame()
+        return _get_stock_daily_akshare(symbol, days)
 
 
 # ═══════════════════════════════════════════
@@ -406,15 +483,70 @@ def _get_qt_source():
         _QT_SOURCE = QTSource()
     return _QT_SOURCE
 
+# 东财免费源只能覆盖部分字段; 无 CSC_API_KEY 时这四个字段恒缺失 → 因子覆盖率门禁拦 BUY
+_FIN_AK_FALLBACK_FIELDS = ("资产负债率", "净利率", "每股经营现金流", "股息率")
+
+
+def _fill_fin_fallbacks(symbol: str, result: dict) -> dict:
+    """用 akshare(东财) 免费接口补齐缺失的财务字段, 仅补缺失键、不覆盖已有值。
+
+    CSC/东财/baostock 主路径均不带 资产负债率/净利率/每股经营现金流/股息率,
+    无 key 时这四项覆盖率恒为 0% (ADR-0006 覆盖率门禁 → 永久禁 BUY)。
+    兜底源失败/非A股时原样返回。
+    """
+    if not (symbol.isdigit() and len(symbol) == 6):
+        return result
+    missing = [f for f in _FIN_AK_FALLBACK_FIELDS if f not in result]
+    if not missing:
+        return result
+    try:
+        from data.sources.akshare_source import (
+            get_dividend_yield_ak,
+            get_financial_indicators_ak,
+        )
+    except Exception:
+        return result
+
+    merged = dict(result)
+    need_ind = [f for f in missing if f != "股息率"]
+    if need_ind:
+        try:
+            ind = get_financial_indicators_ak(symbol) or {}
+        except Exception:
+            ind = {}
+        for field in need_ind:
+            if field in ind:
+                merged[field] = ind[field]
+    if "股息率" in missing:
+        try:
+            dy = get_dividend_yield_ak(symbol)
+        except Exception:
+            dy = None
+        if dy is not None:
+            merged["股息率"] = dy
+    filled = [f for f in missing if f in merged]
+    if filled:
+        logger.info(f"[data] akshare 兜底补全 {symbol}: {filled}")
+    return merged
+
+
 def get_financial_report(symbol: str) -> dict:
-    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。蜻蜓CSC→东方财富→baostock。同进程内缓存 + 当日磁盘缓存。"""
+    """获取财务指标：ROE, 营收增速, 利润增速, 毛利率。蜻蜓CSC→东方财富→baostock。同进程内缓存 + 当日磁盘缓存。
+
+    缺失字段(资产负债率/净利率/每股经营现金流/股息率)统一由 akshare 免费源兜底补齐,
+    保证无 CSC_API_KEY 时因子覆盖率不因数据源缺口而跌破 50%。
+    """
     if symbol in _FIN_CACHE:
         return _FIN_CACHE[symbol]
     # 当日磁盘缓存 (跨进程复用, 蜻蜓日频数据当日有效)
     disk_cache = _fin_disk_load()
     if symbol in disk_cache:
-        _FIN_CACHE[symbol] = disk_cache[symbol]
-        return disk_cache[symbol]
+        cached = disk_cache[symbol]
+        result = _fill_fin_fallbacks(symbol, cached) if isinstance(cached, dict) else cached
+        _FIN_CACHE[symbol] = result
+        if result != cached:  # 旧缓存缺兜底字段 → 回写, 避免每次重建
+            _fin_disk_save(symbol, result)
+        return result
     # ① 蜻蜓 CSC Skill 广场（专业券商API，A股全量，T+2~3h）
     if not symbol.endswith(".HK"):  # 蜻蜓仅覆盖A股
         try:
@@ -422,6 +554,7 @@ def get_financial_report(symbol: str) -> dict:
             if qt.api_key:
                 result = qt.get_financial_report(symbol)
                 if result:
+                    result = _fill_fin_fallbacks(symbol, result)
                     logger.info(f"[data] 蜻蜓CSC → {symbol}: {len(result)} 个字段")
                     _FIN_CACHE[symbol] = result
                     _fin_disk_save(symbol, result)
@@ -432,6 +565,7 @@ def get_financial_report(symbol: str) -> dict:
     try:
         result = _get_financial_em(symbol)
         if result:
+            result = _fill_fin_fallbacks(symbol, result)
             _FIN_CACHE[symbol] = result
             _fin_disk_save(symbol, result)
             return result
@@ -487,6 +621,7 @@ def get_financial_report(symbol: str) -> dict:
         if result:
             break
 
+    result = _fill_fin_fallbacks(symbol, result)
     _FIN_CACHE[symbol] = result
     _fin_disk_save(symbol, result)
     return result

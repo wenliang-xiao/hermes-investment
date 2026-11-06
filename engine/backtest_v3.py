@@ -465,6 +465,117 @@ def build_status_from_decisions(
 # ──────────────────────────────────────────────
 # WS3: 报告引擎 — NAV → quantstats HTML 落盘
 # ──────────────────────────────────────────────
+def _local_metrics(nav: pd.Series) -> dict:
+    """quantstats 缺失时的内置指标 (pandas/numpy 本地实现)。
+
+    ⚠️ 2026-11-06: quantstats 未安装且其依赖 yfinance 会撞 websockets<13 (共享环境
+    不可升级) → v3 跑完 84s 引擎后报 `No module named 'quantstats'`, 整个报告不可用。
+    这里用本地实现兜底, 字段与 quantstats 版本一一对应 (口径近似, 会在报告里标注)。
+    """
+    import numpy as np
+
+    empty = {"sharpe": 0.0, "sortino": 0.0, "cagr": 0.0, "max_drawdown": 0.0,
+             "calmar": 0.0, "volatility": 0.0, "win_rate": 0.0, "best_day": 0.0,
+             "worst_day": 0.0, "avg_return": 0.0, "skew": 0.0, "kurtosis": 0.0,
+             "var_95": 0.0, "cvar_95": 0.0, "n_days": 0}
+    if nav is None or len(nav) < 2:
+        return empty
+    rets = nav.pct_change().dropna()
+    n = int(len(rets))
+    if n == 0:
+        return empty
+    ann = 252
+    mean = float(rets.mean())
+    std = float(rets.std(ddof=1)) if n > 1 else 0.0
+    downside = rets[rets < 0]
+    dstd = float(downside.std(ddof=1)) if len(downside) > 1 else 0.0
+    start, end = float(nav.iloc[0]), float(nav.iloc[-1])
+    periods = max(len(nav) - 1, 1)
+    cagr = ((end / start) ** (ann / periods) - 1) if start > 0 and end > 0 else 0.0
+    mdd = float((nav / nav.cummax() - 1).min())
+    var95 = float(np.percentile(rets.values, 5))
+    tail = rets[rets <= var95]
+    return {
+        "sharpe": round(mean / std * np.sqrt(ann), 4) if std > 0 else 0.0,
+        "sortino": round(mean / dstd * np.sqrt(ann), 4) if dstd > 0 else 0.0,
+        "cagr": round(cagr * 100, 2),
+        "max_drawdown": round(mdd * 100, 2),
+        "calmar": round(cagr / abs(mdd), 4) if mdd < 0 else 0.0,
+        "volatility": round(std * np.sqrt(ann) * 100, 2),
+        "win_rate": round(float((rets > 0).mean()) * 100, 2),
+        "best_day": round(float(rets.max()) * 100, 2),
+        "worst_day": round(float(rets.min()) * 100, 2),
+        "avg_return": round(mean * 100, 4),
+        "skew": round(float(rets.skew()), 4) if n > 2 else 0.0,
+        "kurtosis": round(float(rets.kurt()), 4) if n > 3 else 0.0,
+        "var_95": round(var95 * 100, 2),
+        "cvar_95": round(float(tail.mean()) * 100, 2) if len(tail) else 0.0,
+        "n_days": n,
+    }
+
+
+def _builtin_html_report(report_path, nav: pd.Series, benchmark_nav, strategy_name: str,
+                         metrics: dict, params: dict, degrade_reason: str) -> None:
+    """quantstats 缺失时生成简易 HTML 报告 (净值曲线 + 指标表)。
+
+    风格与 generate_compare_report 的深色模板一致; 明确标注"降级报告"。
+    """
+    import base64
+    import io
+
+    img_html = '<p class="meta">（matplotlib 不可用，仅出指标表）</p>'
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(12, 5))
+        norm = nav / nav.iloc[0]
+        # 图表用英文标签: 本机缺 CJK 字体 (DejaVu 无中文) → 中文会渲染成方块
+        plt.plot(norm.index, norm.values, label=strategy_name, linewidth=1.5, color="#58a6ff")
+        if benchmark_nav is not None and len(benchmark_nav) >= 2:
+            bm = benchmark_nav / benchmark_nav.iloc[0]
+            plt.plot(bm.index, bm.values, label="CSI300", linewidth=1.2,
+                     linestyle="--", color="#e3b341")
+        plt.title("NAV (normalized to 1.0)")
+        plt.legend()
+        plt.grid(alpha=0.3)
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close()
+        img_html = (f'<img src="data:image/png;base64,'
+                    f'{base64.b64encode(buf.getvalue()).decode()}" alt="净值曲线">')
+    except Exception:
+        pass
+
+    rows = "".join(
+        f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in metrics.items()
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>{strategy_name} 回测报告</title>
+<style>
+body {{ font-family: -apple-system, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; }}
+h1 {{ font-size: 20px; }} h2 {{ font-size: 16px; color: #8b949e; margin-top: 24px; }}
+table {{ border-collapse: collapse; width: 100%; margin-top: 12px; }}
+th, td {{ border: 1px solid #30363d; padding: 8px 12px; text-align: right; font-size: 13px; }}
+th {{ background: #161b22; color: #58a6ff; }} td:first-child {{ text-align: left; }}
+img {{ max-width: 100%; border-radius: 8px; margin-top: 12px; }}
+.meta {{ color: #8b949e; font-size: 12px; }}
+.warn {{ color: #f0b429; font-size: 12px; padding: 12px 0; }}
+</style></head><body>
+<h1>📊 {strategy_name} 回测报告（内置引擎）</h1>
+<p class="meta">生成: {datetime.now().isoformat(timespec='seconds')} · 参数: {json.dumps(params or {}, ensure_ascii=False)}</p>
+<p class="warn">⚠️ 降级报告：{degrade_reason}。以下指标由内置 pandas 实现计算（口径与 quantstats 近似），
+月度热力图/滚动夏普/收益分布等专业图表不可用。</p>
+<h2>净值曲线</h2>
+{img_html}
+<h2>核心指标</h2>
+<table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody>{rows}</tbody></table>
+</body></html>"""
+    report_path.write_text(html, encoding="utf-8")
+
+
 def _strip_empty_rolling_charts(report_path: str):
     """移除 quantstats 短窗口报告中的空滚动图 (rolling vol/sharpe/sortino/beta)。
 
@@ -511,9 +622,17 @@ def generate_report(
 ) -> dict:
     """NAV 序列 → quantstats HTML 报告，落盘 data/backtest_v3_reports/{run_id}/.
 
+    quantstats 缺失时自动降级为内置指标 + 简易 HTML（2026-11-06: 之前直接抛
+    `No module named 'quantstats'`，引擎跑完 1-2 分钟才失败，报告完全不可用）。
+
     returns: {run_id, report_path, metrics}
     """
-    import quantstats as qs
+    try:
+        import quantstats as qs
+        degrade_reason = ""
+    except Exception as e:  # noqa: BLE001 - 未安装/依赖冲突都走降级
+        qs = None
+        degrade_reason = f"quantstats 不可用（{type(e).__name__}: {e}）"
 
     run_id = run_id or f"{strategy_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir = REPORT_ROOT / run_id
@@ -524,46 +643,53 @@ def generate_report(
         # 数据不足仍出报告但带 warning
         rets = rets  # 继续
 
-    metrics = {
-        "sharpe": round(float(qs.stats.sharpe(rets)), 4),
-        "sortino": round(float(qs.stats.sortino(rets)), 4),
-        "cagr": round(float(qs.stats.cagr(rets)) * 100, 2),
-        "max_drawdown": round(float(qs.stats.max_drawdown(rets)) * 100, 2),
-        "calmar": round(float(qs.stats.calmar(rets)), 4),
-        "volatility": round(float(qs.stats.volatility(rets)) * 100, 2),
-        "win_rate": round(float(qs.stats.win_rate(rets)) * 100, 2),
-        "best_day": round(float(qs.stats.best(rets)) * 100, 2),
-        "worst_day": round(float(qs.stats.worst(rets)) * 100, 2),
-        "avg_return": round(float(qs.stats.avg_return(rets)) * 100, 4),
-        "skew": round(float(qs.stats.skew(rets)), 4),
-        "kurtosis": round(float(qs.stats.kurtosis(rets)), 4),
-        "var_95": round(float(qs.stats.var(rets, 0.05)) * 100, 2),
-        "cvar_95": round(float(qs.stats.cvar(rets, 0.05)) * 100, 2),
-        "n_days": int(len(rets)),
-    }
+    if qs is not None:
+        metrics = {
+            "sharpe": round(float(qs.stats.sharpe(rets)), 4),
+            "sortino": round(float(qs.stats.sortino(rets)), 4),
+            "cagr": round(float(qs.stats.cagr(rets)) * 100, 2),
+            "max_drawdown": round(float(qs.stats.max_drawdown(rets)) * 100, 2),
+            "calmar": round(float(qs.stats.calmar(rets)), 4),
+            "volatility": round(float(qs.stats.volatility(rets)) * 100, 2),
+            "win_rate": round(float(qs.stats.win_rate(rets)) * 100, 2),
+            "best_day": round(float(qs.stats.best(rets)) * 100, 2),
+            "worst_day": round(float(qs.stats.worst(rets)) * 100, 2),
+            "avg_return": round(float(qs.stats.avg_return(rets)) * 100, 4),
+            "skew": round(float(qs.stats.skew(rets)), 4),
+            "kurtosis": round(float(qs.stats.kurtosis(rets)), 4),
+            "var_95": round(float(qs.stats.var(rets, 0.05)) * 100, 2),
+            "cvar_95": round(float(qs.stats.cvar(rets, 0.05)) * 100, 2),
+            "n_days": int(len(rets)),
+        }
+    else:
+        metrics = _local_metrics(nav)
 
     report_path = out_dir / "report.html"
-    try:
-        # P0-13: quantstats 内部 rolling 指标硬编码 half-year(≈126交易日) 窗口,
-        # 短窗口(<126天)会产出空图/坏日期(01-01-00)。方案: 生成后清理空 rolling 子图。
-        short_window = int(len(rets)) < 126
-        qs.reports.html(
-            rets,
-            benchmark=benchmark_nav.pct_change().dropna() if benchmark_nav is not None else None,
-            output=str(report_path),
-            title=f"{strategy_name} 回测报告",
-        )
-        if short_window:
-            _strip_empty_rolling_charts(str(report_path))
-            # 追加短窗口说明到报告末尾
-            with open(report_path, "a", encoding="utf-8") as f:
-                f.write('<div style="color:#f0b429;font-size:12px;padding:16px;'
-                        'border-top:1px solid #30363d">⚠️ 回测窗口过短'
-                        f'（{len(rets)} 交易日 ≈ {len(rets)/252*12:.1f} 个月），'
-                        '6 个月滚动指标不可用，滚动图已被移除。'
-                        '建议使用 ≥250 交易日窗口获取完整滚动指标。</div>')
-    except Exception as e:  # 报告生成失败不阻断
-        report_path.write_text(f"<html><body><h1>报告生成失败</h1><p>{e}</p></body></html>")
+    if qs is None:
+        _builtin_html_report(report_path, nav, benchmark_nav, strategy_name,
+                             metrics, params or {}, degrade_reason)
+    else:
+        try:
+            # P0-13: quantstats 内部 rolling 指标硬编码 half-year(≈126交易日) 窗口,
+            # 短窗口(<126天)会产出空图/坏日期(01-01-00)。方案: 生成后清理空 rolling 子图。
+            short_window = int(len(rets)) < 126
+            qs.reports.html(
+                rets,
+                benchmark=benchmark_nav.pct_change().dropna() if benchmark_nav is not None else None,
+                output=str(report_path),
+                title=f"{strategy_name} 回测报告",
+            )
+            if short_window:
+                _strip_empty_rolling_charts(str(report_path))
+                # 追加短窗口说明到报告末尾
+                with open(report_path, "a", encoding="utf-8") as f:
+                    f.write('<div style="color:#f0b429;font-size:12px;padding:16px;'
+                            'border-top:1px solid #30363d">⚠️ 回测窗口过短'
+                            f'（{len(rets)} 交易日 ≈ {len(rets)/252*12:.1f} 个月），'
+                            '6 个月滚动指标不可用，滚动图已被移除。'
+                            '建议使用 ≥250 交易日窗口获取完整滚动指标。</div>')
+        except Exception as e:  # 报告生成失败不阻断
+            report_path.write_text(f"<html><body><h1>报告生成失败</h1><p>{e}</p></body></html>")
 
     meta = {
         "run_id": run_id,
@@ -572,6 +698,8 @@ def generate_report(
         "params": params or {},
         "metrics": metrics,
         "report_file": "report.html",
+        "report_engine": "quantstats" if qs is not None else "builtin",
+        "degrade_reason": degrade_reason or None,
         "n_trades": len(trades or []),
         "n_days": int(len(nav)),
     }
@@ -596,6 +724,11 @@ def run_backtest_v3_xalpha(
     NOTE: xalpha 的 AStockInfo 适配层已在 WS1 验证单标的正确; 多标的用
     mul 引擎 + build_status_from_decisions(多标的 pivot 版).
     """
+    # xalpha/quantstats 均未安装时直接给明确提示, 不要跑到一半抛 ImportError
+    try:
+        import xalpha  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"xalpha 未安装，无法使用 engine=xalpha（{type(e).__name__}: {e}）"}
     import quantstats as qs
 
     from engine.backtest_v3 import (
@@ -725,10 +858,16 @@ def generate_compare_report(
     """
     import base64
     import io
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import quantstats as qs
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        plt = None
+    try:
+        import quantstats as qs
+    except Exception:
+        qs = None
 
     from engine.backtest_v3 import generate_report  # 复用单策略报告生成
 
@@ -739,7 +878,7 @@ def generate_compare_report(
     # 1. 归一化净值 → 同图对比 (首日=1.0) — 无有效曲线则跳过空图
     has_curve = any(nav is not None and len(nav) >= 5 for nav in navs.values())
     img_b64 = ""
-    if has_curve:
+    if has_curve and plt is not None:
         plt.figure(figsize=(12, 6))
         colors = {"faceji": "#58a6ff", "silverquant": "#3fb950", "tradingagents": "#bc8cff"}
         for name, nav in navs.items():
@@ -766,16 +905,29 @@ def generate_compare_report(
         if nav is None or len(nav) < 5:
             continue
         rets = nav.pct_change().dropna()
-        metrics_rows.append({
-            "strategy": name,
-            "sharpe": round(float(qs.stats.sharpe(rets)), 3),
-            "sortino": round(float(qs.stats.sortino(rets)), 3),
-            "cagr": round(float(qs.stats.cagr(rets)) * 100, 2),
-            "max_drawdown": round(float(qs.stats.max_drawdown(rets)) * 100, 2),
-            "volatility": round(float(qs.stats.volatility(rets)) * 100, 2),
-            "win_rate": round(float(qs.stats.win_rate(rets)) * 100, 2),
-            "n_days": int(len(rets)),
-        })
+        if qs is not None:
+            metrics_rows.append({
+                "strategy": name,
+                "sharpe": round(float(qs.stats.sharpe(rets)), 3),
+                "sortino": round(float(qs.stats.sortino(rets)), 3),
+                "cagr": round(float(qs.stats.cagr(rets)) * 100, 2),
+                "max_drawdown": round(float(qs.stats.max_drawdown(rets)) * 100, 2),
+                "volatility": round(float(qs.stats.volatility(rets)) * 100, 2),
+                "win_rate": round(float(qs.stats.win_rate(rets)) * 100, 2),
+                "n_days": int(len(rets)),
+            })
+        else:
+            m = _local_metrics(nav)
+            metrics_rows.append({
+                "strategy": name,
+                "sharpe": round(m["sharpe"], 3),
+                "sortino": round(m["sortino"], 3),
+                "cagr": m["cagr"],
+                "max_drawdown": m["max_drawdown"],
+                "volatility": m["volatility"],
+                "win_rate": m["win_rate"],
+                "n_days": m["n_days"],
+            })
 
     table_rows = "".join(
         f"<tr><td>{r['strategy']}</td><td>{r['sharpe']}</td><td>{r['sortino']}</td>"
@@ -785,6 +937,9 @@ def generate_compare_report(
     )
     img_html = (f'<img src="data:image/png;base64,{img_b64}" alt="净值对比">'
                 if img_b64 else '<p class="meta">无有效净值曲线（数据不足 5 天）</p>')
+    degrade_html = ("" if qs is not None else
+                    '<p class="meta" style="color:#f0b429">⚠️ quantstats 不可用，'
+                    '指标由内置 pandas 实现计算（口径近似）。</p>')
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <title>多策略对比报告</title>
@@ -799,6 +954,7 @@ img {{ max-width: 100%; border-radius: 8px; margin-top: 12px; }}
 </style></head><body>
 <h1>📊 多策略专业对比报告</h1>
 <p class="meta">生成: {datetime.now().isoformat(timespec='seconds')} · 参数: {json.dumps(params or {}, ensure_ascii=False)}</p>
+{degrade_html}
 <h2>净值对比 (首日=1.0)</h2>
 {img_html}
 <h2>核心指标对比</h2>
@@ -816,6 +972,7 @@ img {{ max-width: 100%; border-radius: 8px; margin-top: 12px; }}
         "params": params or {},
         "metrics": {"n_strategies": len(metrics_rows), "strategies": [r["strategy"] for r in metrics_rows]},
         "report_file": "report.html",
+        "report_engine": "quantstats" if qs is not None else "builtin",
         "n_days": max((r["n_days"] for r in metrics_rows), default=0),
         "n_trades": sum(len(nav) for nav in (navs or {}).values() if nav is not None),
     }

@@ -100,14 +100,19 @@ def main() -> int:
         from scripts.data_source_healthcheck import run_checks as _ds_check
         _h = _ds_check()
         if _h["status"] == 2:
-            logger.warning(f"[scan] 🔴 数据源 CRITICAL: A股链不可用 — 今日因子不可信, 建议中止")
+            # ADR-0006 严格 fail-closed: 关键源不可用时不再"带病扫描"，
+            # 直接非零退出，避免用残废因子生成票池/快照。
+            logger.error(f"[scan] 🔴 数据源 CRITICAL: A股链不可用 — 中止今日扫描")
+            return 2
         elif _h["status"] == 1:
             _down = [c["name"] for c in _h["endpoints"] if not c["ok"]]
             logger.warning(f"[scan] ⚠️ 数据源 DEGRADED: 不可用={_down} — 因子走降级源, 精度下降")
         else:
             logger.info(f"[scan] ✅ 数据源健康")
     except Exception as _e:
-        logger.warning(f"[scan] 数据源自检跳过: {_e}")
+        # ADR-0006: 自检本身失败 = 无法证明数据源健康 → 严格 fail-closed
+        logger.error(f"[scan] 🔴 数据源自检异常，按 CRITICAL 处理: {_e}")
+        return 2
 
     # 跨天清理: 本日若是全新的一天, 清掉昨日残留批文件, 从零开始
     _clean_old_batches()

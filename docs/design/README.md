@@ -29,6 +29,9 @@
 | 6 | [架构拆分方案](./architecture-split.md) | 12 个文件超 600 行，6 个超 1000 行，配置重复 | 🟡 P1 |
 | 7 | [可观测性方案](./observability.md) | 无日志规范、无健康检查、无监控告警 | 🟢 P2 |
 | 8 | [Dashboard 前端重构方案](./dashboard-refactoring.md) | HTML/CSS/JS 混在 Python 中，无交互/导出 | 🟢 P2 |
+| 9 | [交易系统加固设计（2026-11）](./risk-and-ledger-refactor.md) | 丢持仓/误卖/丢峰值/账本互覆/fail-open/回测不可复现 | 🔴 已实施 |
+
+> 2026-11-03 的加固决策记录见 [`docs/adr/`](../adr/README.md)（ADR-0001～0008）。
 
 ## 总体路线图
 

@@ -13,7 +13,15 @@ credentials/
 !data/event_calendar.json
 data/cache/
 data/eval_cache/
+# 旧 bug 路径 (_PROJECT_DIR=_SCRIPT_DIR) 曾写到这里, 全是 numpy 2.x 不可读的坏缓存
+engine/data/eval_cache/
 data/hl_runs/
+# 运行时产物 / 临时备份 (不入库)
+data/_backup_*/
+data/_backup_*.tar.gz
+data/backtest_v3_reports/
+data/behavior_brief.txt
+data/backtest/
 .agents/
 build/
 dist/

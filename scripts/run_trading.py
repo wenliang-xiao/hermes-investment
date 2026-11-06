@@ -79,6 +79,12 @@ def _aggregate_shadow(states: dict) -> dict:
                     "entry_score": pos.get("entry_score"),
                     "cost": pos_cost,
                     "reason": pos.get("reason", ""),
+                    # P0 修复 (ADR-0003, 2026-11-03): 必须带上峰值，否则
+                    # shadow_account 每日把 peak 重置为当日价，四档 trailing stop 失效。
+                    "peak": pos.get("peak") or pos.get("peak_price") or pos_entry,
+                    "peak_price": pos.get("peak_price") or pos.get("peak") or pos_entry,
+                    "peak_time": pos.get("peak_time", ""),
+                    "origin": "run_trading",
                 }
             else:
                 # 同名多策略合并: 数量累加, 成本按数量加权
@@ -99,6 +105,13 @@ def _aggregate_shadow(states: dict) -> dict:
                 new_cur = pos.get("current_price", 0) or 0
                 if new_cur > cur.get("current_price", 0):
                     cur["current_price"] = new_cur
+                # 峰值取较大值（trailing stop 依赖，不可丢）
+                for _k in ("peak", "peak_price"):
+                    _v = pos.get(_k) or 0
+                    if _v and float(_v) > float(cur.get(_k) or 0):
+                        cur[_k] = _v
+                if pos.get("peak_time") and not cur.get("peak_time"):
+                    cur["peak_time"] = pos["peak_time"]
                 if not cur.get("entry_score") and pos.get("entry_score"):
                     cur["entry_score"] = pos.get("entry_score")
 
@@ -112,6 +125,10 @@ def _aggregate_shadow(states: dict) -> dict:
         "history": all_history,
         "realized_pnl": round(realized, 2),
         "created_at": date.today().strftime("%Y-%m-%d"),
+        # ADR-0004 (2026-11-03): 本文件由 run_trading 独占写；
+        # run_daily 的"策略四"账本已迁到 shadow_strategy4.json。
+        "owner": "run_trading",
+        "schema_version": 2,
         # ⚠️ P0: 必须带 initialized, 否则 d+1 run_daily 的 init_portfolio() 判定
         # 账户"未初始化" → 清空 positions/history (每日账户被重置的根因)
         "initialized": True,
@@ -216,12 +233,47 @@ def run():
         pass
     print(f"   {len(stocks)}只标的", flush=True)
 
+    # 1.5 严格 fail-closed 前置门 (ADR-0006)
+    #   数据源自检 CRITICAL / 自检异常 → 今日禁 BUY（SELL/止损仍执行）
+    buy_block_reason = None
+    try:
+        from scripts.data_source_healthcheck import run_checks as _ds_check
+        _h = _ds_check()
+        atomic_write_json(os.path.join(_PROJECT_DIR, "data", "data_source_health.json"), _h)
+        if _h.get("status") == 2:
+            buy_block_reason = (
+                f"数据源自检 CRITICAL (a_share_ok={_h.get('a_share_ok')})"
+            )
+            print("  🔴 数据源 CRITICAL → 今日禁用 BUY（清仓/止损不受影响）", flush=True)
+        elif _h.get("status") == 1:
+            _down = [c["name"] for c in _h.get("endpoints", []) if not c.get("ok")]
+            print(f"  ⚠️ 数据源 DEGRADED ({_down}) → 允许 BUY，但因子精度可能下降", flush=True)
+        else:
+            print("  ✅ 数据源健康", flush=True)
+    except Exception as _e:
+        # 无法证明数据源健康 → 严格 fail-closed
+        buy_block_reason = f"数据源自检异常: {_e}"
+        print(f"  🔴 数据源自检异常 → 今日禁用 BUY: {_e}", flush=True)
+
     # 2. FactorEngine 批量评分
     print("\n🔍 Step 2: FactorEngine 批量评分...", flush=True)
     symbols = [s["symbol"] for s in stocks]
     engine = FactorEngine()
     batch_results = engine.score_batch(symbols)
     print(f"   ✅ {len(batch_results)}只评分完成", flush=True)
+
+    # 2.5 因子覆盖率门 (ADR-0006)：任一子因子有效覆盖率 <50% 或覆盖率未知 → 禁 BUY
+    _coverage = getattr(engine, "_last_coverage", None) or {}
+    _degraded = {k: v for k, v in _coverage.items() if v < 0.5}
+    if not _coverage:
+        buy_block_reason = buy_block_reason or "因子覆盖率不可用（无法证明评分可信）"
+        print("  🔴 因子覆盖率不可用 → 今日禁用 BUY", flush=True)
+    elif _degraded:
+        _detail = ", ".join(f"{k}={v:.0%}" for k, v in sorted(_degraded.items()))
+        buy_block_reason = buy_block_reason or f"因子覆盖率<50%: {_detail}"
+        print(f"  🔴 因子覆盖率过低 → 今日禁用 BUY: {_detail}", flush=True)
+    else:
+        print(f"  ✅ 因子覆盖率正常 ({len(_coverage)} 个子因子)", flush=True)
 
     # ── IC 动态权重数据闭环 (根治IC死代码: 每次评分累积真实IC历史) ──
     # 用昨日因子分 + 今日已实现收益回算昨日IC → 权重随时间真实数据驱动
@@ -338,7 +390,24 @@ def run():
             with open(st_path) as _f:
                 _states = json.load(_f)
             for _sname, _sdata in _states.items():
-                _sdata["positions"] = {k: v for k, v in _sdata.get("positions", {}).items() if v.get("current_price", 0) > 0}
+                # P0 修复 (ADR-0002, 2026-11-03): 不得丢弃 current_price<=0 的持仓。
+                # 旧逻辑会把停牌/行情失败当天 current_price 缺失的持仓静默删除，
+                # 随后落盘导致持仓永久消失（不产生卖出、现金不回流）。
+                _kept, _dropped = {}, []
+                for _sym, _pos in _sdata.get("positions", {}).items():
+                    if (_pos.get("current_price") or 0) <= 0:
+                        _fallback = _pos.get("entry_price") or 0
+                        if _fallback > 0:
+                            _pos["current_price"] = _fallback
+                            _kept[_sym] = _pos
+                            print(f"  ⚠️ [{_sname}] {_sym} 缺现价，暂用建仓价 {_fallback:.2f} 保留持仓", flush=True)
+                        else:
+                            _dropped.append(_sym)
+                    else:
+                        _kept[_sym] = _pos
+                if _dropped:
+                    print(f"  ❌ [{_sname}] 持仓 {_dropped} 现价与建仓价均无效，无法恢复", flush=True)
+                _sdata["positions"] = _kept
                 loaded_states[_sname] = _sdata
             print(f"   ✅ 恢复 {len(loaded_states)} 个策略历史状态", flush=True)
     except Exception:
@@ -376,15 +445,16 @@ def run():
     print(f"   ✅ 刷新 {refresh_hits} 个持仓实时价格 (含 peak 峰值追踪)", flush=True)
 
     today_str = date.today().strftime("%Y-%m-%d")
-    result = engine_te.run_daily(today_str, score_map, tech_map, price_map)
+    result = engine_te.run_daily(today_str, score_map, tech_map, price_map,
+                                 buy_block_reason=buy_block_reason)
 
     # ── 模拟盘主账户同步: 聚合三策略状态 → shadow_account.json (P0: Dashboard有真实数据) ──
     try:
         sa_path = os.path.join(_PROJECT_DIR, "data", "shadow_account.json")
         states_after = {name: s.save_state() for name, s in engine_te.strategies.items()}
         agg = _aggregate_shadow(states_after)
-        with open(sa_path, "w") as f:
-            json.dump(agg, f, ensure_ascii=False, indent=2, default=str)
+        from utils.atomic_io import atomic_write_json as _atomic_write
+        _atomic_write(sa_path, agg)
         print(f"💾 模拟盘主账户已同步: {sa_path} "
               f"(持仓{len(agg['positions'])}只, 历史{len(agg['history'])}条)", flush=True)
     except Exception as e:

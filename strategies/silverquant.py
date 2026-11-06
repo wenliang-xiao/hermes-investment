@@ -5,7 +5,10 @@ strategies/silverquant.py — SilverQuant 策略纯决策函数
 """
 from __future__ import annotations
 
-from .base import Signal, PositionData, SilverQuantConfig
+from .base import (
+    Signal, PositionData, SilverQuantConfig,
+    TRAILING_MIN_HOLD_DAYS, hold_days, trailing_stop_threshold,
+)
 
 
 def decide(
@@ -31,8 +34,11 @@ def decide(
         key=lambda s: score_map.get(s, 0), reverse=True
     )[:cfg.max_candidates]
 
+    # 剩余可建仓槽位（含本轮已生成的 BUY，修复静态快照越界）
+    slots_left = max(0, cfg.max_positions - len(positions))
+
     for sym in candidates:
-        if len(positions) >= cfg.max_positions:
+        if slots_left <= 0:
             break
         score = score_map.get(sym, 0)
         if score < cfg.entry_threshold:
@@ -40,12 +46,17 @@ def decide(
         price = price_map.get(sym, 0)
         if price <= 0:
             continue
+        if cash < cfg.slot_amount:
+            break  # 现金不足一个固定槽位
+        # ADR-0005: 固定 ¥slot_amount/槽位（用当前现金折算成百分比）
+        size_pct = round(min(100.0, cfg.slot_amount / cash * 100), 2)
 
         signals.append(Signal(
             symbol=sym, action="BUY", price=price,
             reason=f"槽位建仓(评分{score:.1f})",
-            priority="MED", size_pct=3.0, score=score,
+            priority="MED", size_pct=size_pct, score=score,
         ))
+        slots_left -= 1
 
     # ─── 清仓：4层卖出组件 ───
     for sym, pos in positions.items():
@@ -70,14 +81,18 @@ def decide(
             ))
             continue
 
-        # 2. FallSeller: -12%峰值回落
-        if dd <= cfg.trailing_stop_pct:
-            signals.append(Signal(
-                symbol=sym, action="SELL", price=price,
-                reason=f"FallSeller({dd:.1f}%)", priority="HIGH",
-                pnl_pct=pnl_pct, score=score,
-            ))
-            continue
+        # 2. FallSeller: 四档 trailing（docs/STRATEGY.md §5.4）
+        #    持仓满 TRAILING_MIN_HOLD_DAYS 天后启用；日期缺失时不放宽风控。
+        hd = hold_days(pos.entry_date)
+        if hd is None or hd >= TRAILING_MIN_HOLD_DAYS:
+            trail_pct, tier = trailing_stop_threshold(pnl_pct)
+            if dd <= trail_pct:
+                signals.append(Signal(
+                    symbol=sym, action="SELL", price=price,
+                    reason=f"FallSeller({tier}{dd:.1f}%)", priority="HIGH",
+                    pnl_pct=pnl_pct, score=score,
+                ))
+                continue
 
         # 3. MASeller: MA死叉(MA20<MA60 ⟺ ma20d>ma60d)，亏损未达-5%豁免
         tech = tech_map.get(sym, {})

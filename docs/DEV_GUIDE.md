@@ -92,8 +92,8 @@ grep -r "from analysis\." --include="*.py" -l | grep -v analysis/
 部署到 ECS 前确认：
 
 ```bash
-# 1. Dashboard 启动正常
-python3 dashboard/server.py 8686 &
+# 1. Dashboard 启动正常（必须走脚本，内含 FACTOR_A_AKSHARE_PRIMARY=1）
+./scripts/start_dashboard.sh 8686 &
 
 # 2. 日报管线正常
 python3 scripts/run_daily.py
