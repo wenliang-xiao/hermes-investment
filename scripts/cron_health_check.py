@@ -20,7 +20,7 @@ import json
 import os
 import sys
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 PROJECT = Path("/home/admin/.hermes/investment_system")
@@ -37,8 +37,42 @@ DATA_FILES = {
     "data/shadow_event_history.json": 26,  # 事件影子 08:00
 }
 
+# 按 cron 计划判陈旧 (小时阈值会把周末误判成漏跑, 周一必报假警)
+# 文件 → (计划小时, 是否仅工作日, 宽限分钟)
+DATA_SCHEDULES = {
+    "data/factor_daily.json": (7, True, 120),
+    "data/etf_discovery.json": (20, True, 120),
+    "data/dragon_tiger.json": (17, True, 120),
+    "data/shadow_event_history.json": (8, True, 120),
+    "data/news_cache.json": (9, True, 240),
+}
+
 # 实时 cron 状态 (从 Hermes cron 状态文件读取, 兼容 hermes cron list)
 CRON_STATE = Path.home() / ".hermes" / "cron" / "cron_jobs.json"
+
+
+def _first_due_after(ts: datetime, hour: int, weekdays_only: bool = True) -> datetime:
+    """返回 ts 之后第一次计划执行时间 (每日 hour 点, 可选仅工作日)。"""
+    d = ts.date()
+    for _ in range(11):
+        cand = datetime.combine(d, time(hour=hour))
+        if cand > ts and (not weekdays_only or cand.weekday() < 5):
+            return cand
+        d += timedelta(days=1)
+    return ts + timedelta(days=11)
+
+
+def _stale_by_schedule(path: Path, hour: int, weekdays_only: bool = True,
+                       grace_min: int = 90) -> bool:
+    """按 cron 计划判断是否真的漏跑 — 周一早上不会因为周末没跑而误报。
+
+    逻辑: 找 mtime 之后第一个计划时间点, 若该时间点已过(+宽限)仍未更新 → 陈旧。
+    """
+    if not path.exists():
+        return True
+    mtime = datetime.fromtimestamp(path.stat().st_mtime)
+    due = _first_due_after(mtime, hour, weekdays_only)
+    return datetime.now() > due + timedelta(minutes=grace_min)
 
 
 def _age_hours(path: Path) -> float | None:
@@ -134,10 +168,19 @@ def main() -> int:
             print(f"| {rel} | 不存在 | {max_h}h | ❌ 缺失 |")
             issues.append(f"数据文件缺失: {rel}")
         else:
-            ok = age <= max_h
-            if not ok:
-                issues.append(f"数据陈旧: {rel} ({age:.0f}h > {max_h}h)")
-            print(f"| {rel} | {age:.1f}h | {max_h}h | {'✅' if ok else '❌ 陈旧'} |")
+            sched = DATA_SCHEDULES.get(rel)
+            if sched:
+                hour, wd_only, grace = sched
+                missed = _stale_by_schedule(p, hour, wd_only, grace)
+                ok = not missed
+                if not ok:
+                    issues.append(f"数据漏跑: {rel} (最近一次计划 {hour:02d}:00 未产出, {age:.0f}h 未更新)")
+                print(f"| {rel} | {age:.1f}h | 计划{hour:02d}:00 | {'✅' if ok else '❌ 漏跑'} |")
+            else:
+                ok = age <= max_h
+                if not ok:
+                    issues.append(f"数据陈旧: {rel} ({age:.0f}h > {max_h}h)")
+                print(f"| {rel} | {age:.1f}h | {max_h}h | {'✅' if ok else '❌ 陈旧'} |")
     print()
 
     # ── 3. 回测快照累积 ────────────────────────────────

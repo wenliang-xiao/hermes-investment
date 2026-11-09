@@ -37,7 +37,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # ── 配置 ──────────────────────────────────────────────
-DEFAULT_TIME_BUDGET = int(os.environ.get("FACTOR_SCAN_TIME_BUDGET", "1200"))  # 秒
+# 时间预算: 单批耗时已从 ~200s 涨到 ~400-620s(新浪源+财报), 1200s 只够跑 2-3 批,
+# 导致 batch4 与港美股批长期饿死 (2026-11-09 实测: 仅 60/80 只A股, 港美股 0 只)。
+# 07:00 起跑, 3000s=50min 仍早于 08:30 日报。
+DEFAULT_TIME_BUDGET = int(os.environ.get("FACTOR_SCAN_TIME_BUDGET", "3000"))  # 秒
 # 跑几个批(每批约 20 只A股, ~15min)。全量=4批 + 第5批港美股。
 A_BATCHES = 4
 A_BATCH_SIZE = 20
@@ -214,9 +217,11 @@ def main() -> int:
         if bi < A_BATCHES:
             time.sleep(3)
 
-    # ── 3. 港美股扫描(作为批5, 若时间允许) ──
+    # ── 3. 港美股扫描(批5) — 恒执行, 不受时间预算限制
+    # 仅 9 只、成本低; 一旦被预算挤掉会导致港股池整天缺失 (2026-11-09 实测 总池60只/港美0)
     hk_batch_exists = os.path.exists(_batch_files()[HK_US_BATCH_INDEX - 1])
-    if time.time() - start_wall <= budget:
+    force_hk_us = True  # 港美股批强制跑
+    if force_hk_us:
         if not hk_batch_exists:
             try:
                 from config import WATCHLIST
