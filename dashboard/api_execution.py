@@ -13,6 +13,24 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 
 
+def _display_name(name: Optional[str], sym: str) -> str:
+    """标的显示名: 优先快照里的真实中文名, 否则查 stock_names, 再兜底代码。
+
+    因子快照 (factor_daily/scan_snapshot) 不落 name 字段, 直接 info.get("name", sym)
+    会让面板出现 "688012 688012" 这种重复代码。
+    """
+    if name and str(name).strip() and str(name) != str(sym):
+        return str(name)
+    try:
+        from dashboard.shared import get_name
+        resolved = get_name(str(sym))
+        if resolved and resolved != str(sym):
+            return resolved
+    except Exception:
+        pass
+    return str(sym)
+
+
 @router.get("/api/v2/execution/board")
 async def execution_board():
     """
@@ -107,7 +125,7 @@ async def execution_board():
 
         entry = {
             "symbol": sym,
-            "name": info.get("name", sym),
+            "name": _display_name(info.get("name"), sym),
             "action": exec_res.get("action", "HOLD"),
             "action_confidence": exec_res.get("action_confidence", 0.5),
             "action_reason": exec_res.get("action_reason", ""),

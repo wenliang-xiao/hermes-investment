@@ -31,6 +31,21 @@ if _PARENT_DIR not in sys.path:
 
 logger = logging.getLogger(__name__)
 
+
+def _stock_name(sym: str) -> str:
+    """标的显示名 — 走本地映射表, 不触网 (扫描 89 只不能每次 30s 查库)。
+
+    data/stock_names.py 覆盖 A股/ETF/WATCHLIST; 未命中则回落代码本身。
+    """
+    try:
+        from data.stock_names import get_name
+        name = get_name(str(sym))
+        if name and name != str(sym):
+            return name
+    except Exception:
+        pass
+    return str(sym)
+
 # ═══════════════════════════════════════════════
 # Layer 3: 数据源定义 — 每个子因子的数据来源/公式/方向
 # ═══════════════════════════════════════════════
@@ -1555,7 +1570,7 @@ class FactorEngine:
 
             results.append({
                 "symbol": sym,
-                "name": sym,
+                "name": _stock_name(sym),
                 "date": date.today().isoformat(),
                 "scores": sym_style,
                 "composite": round(composite, 4),

@@ -1029,7 +1029,7 @@ async function loadSectorReversal() {
       '<th class="px-2 py-1 font-medium">反转证据</th></tr></thead><tbody>';
     (d.rows || []).forEach(x => {
       const c = color[x.stage] || 'text-gray-300';
-      html += '<tr class="border-t border-gray-700/50">' +
+      html += '<tr class="border-t border-gray-700/50 hover:bg-gray-700/40 cursor-pointer transition-colors" data-k="' + x.key + '" onclick="showSectorModal(this.dataset.k)">' +
         '<td class="px-2 py-1 text-gray-200">' + x.key + '<span class="text-gray-500 ml-1">' + x.symbol + '</span></td>' +
         '<td class="px-2 py-1 ' + c + '">' + x.stage + '</td>' +
         '<td class="px-2 py-1 text-right text-gray-100">' + (x.score ? x.score.toFixed(0) : '—') + '</td>' +
@@ -1050,6 +1050,114 @@ async function loadSectorReversal() {
     box.innerHTML = html;
   } catch (e) {
     box.innerHTML = '<div class="text-red-400 text-sm">板块反转加载失败: ' + e.message + '</div>';
+  }
+}
+
+// ── 板块反转弹窗: 评分构成 + 反转形态 + 相对强度 + 跨市场传导 + 方法论 ──
+let _sectorCache = null;
+async function showSectorModal(key) {
+  try {
+    if (!_sectorCache) {
+      const r = await fetch('/api/v2/sector_reversal');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      _sectorCache = await r.json();
+    }
+    const all = _sectorCache.sectors || [];
+    const s = all.find(x => x.key === key);
+    if (!s) { openModal('<div class="text-gray-300">未找到该板块详情</div>'); return; }
+
+    const clip = x => Math.max(0, Math.min(1, x || 0));
+    const rev = s.reversal || {};
+    // 与 engine.score_reversal 完全同构的四段分解
+    const parts = [
+      { label: '反转确认', w: 40, inp: 'recover_ratio=' + (rev.recover_ratio ?? 0).toFixed(2), r: clip(rev.recover_ratio), why: '大跌后收复失地比例, 上限1.0' },
+      { label: '相对强度', w: 25, inp: 'rs5=' + (s.rs_5d ?? 0).toFixed(2) + 'pp', r: clip((s.rs_5d || 0) / 10), why: 'rs5/10pp, 上限1.0' },
+      { label: '量能', w: 15, inp: 'vol_ratio=' + (rev.vol_ratio ?? 0).toFixed(2), r: clip(((rev.vol_ratio || 0) - 1) / 0.5), why: '(量比-1)/0.5, 上限1.0' },
+      { label: '回撤空间', w: 20, inp: 'dd60=' + (s.dd_60d ?? 0).toFixed(2) + '%', r: clip((-(s.dd_60d || 0) - 10) / 30), why: '(-dd60-10)/30, 上限1.0' },
+    ];
+    const zeroStage = ['补跌', '高位滞涨', '数据不足'].includes(s.stage);
+    let barHtml = '';
+    parts.forEach(p => {
+      const got = zeroStage ? 0 : p.w * p.r;
+      barHtml += `<div class="mb-2">
+        <div class="flex justify-between text-[11px] mb-0.5">
+          <span class="text-gray-300">${p.label} <span class="text-gray-500">权重${p.w}</span></span>
+          <span class="font-mono text-gray-200">${got.toFixed(1)} / ${p.w}</span>
+        </div>
+        <div class="h-1.5 bg-gray-700 rounded overflow-hidden"><div class="h-full bg-blue-500 rounded" style="width:${(p.r * 100).toFixed(0)}%"></div></div>
+        <div class="text-[10px] text-gray-500 mt-0.5">${p.inp} · ${p.why}</div>
+      </div>`;
+    });
+
+    const fmt = v => (v === null || v === undefined) ? '—' : ((v > 0 ? '+' : '') + Number(v).toFixed(2) + '%');
+    const fc = v => (v === null || v === undefined) ? 'text-gray-400' : (v > 0 ? 'text-red-400' : 'text-green-400');
+    const fired = rev.fired ? '<span class="text-green-400 font-semibold">✅ 已触发</span>' : '<span class="text-gray-400">未触发</span>';
+
+    // 跨市场传导 (transmission 用的是 symbol, 不是 key)
+    let transHtml = '';
+    const trans = (_sectorCache.transmission || []);
+    const nameOf = sym => (all.find(x => x.symbol === sym) || {}).name || sym;
+    const hits = trans.filter(t => t.leader === s.symbol || t.follower === s.symbol || t.leader === s.key || t.follower === s.key);
+    if (hits.length) {
+      transHtml = `<div class="mt-3"><h4 class="text-xs text-gray-400 font-medium mb-1">🌉 跨市场传导 (滞后市场补涨/补跌机会)</h4>` +
+        hits.map(t => `<div class="text-[11px] text-gray-300 ml-1 mb-0.5">${nameOf(t.leader)}(${t.leader}) ${fmt(t.leader_5d)} → ${nameOf(t.follower)}(${t.follower}) ${fmt(t.follower_5d)}
+          <span class="text-yellow-400 ml-1">缺口${t.gap_pp > 0 ? '+' : ''}${Number(t.gap_pp).toFixed(1)}pp</span>
+          <span class="text-gray-500 ml-1">领先${t.lag}日 · corr=${t.corr ?? '—'}</span></div>`).join('') + '</div>';
+    }
+
+    const m = s.method || {};
+    const methodHtml = Object.entries(m).map(([k, v]) =>
+      `<div class="flex gap-2 text-[10px] leading-relaxed"><span class="text-gray-500 shrink-0 w-24">${k}</span><span class="text-gray-400">${v}</span></div>`
+    ).join('');
+
+    openModal(`
+      <div class="flex items-start justify-between mb-3">
+        <div>
+          <h3 class="text-gray-100 font-semibold text-sm">🧭 ${s.name || s.key} <span class="text-gray-500 font-mono">${s.symbol}</span></h3>
+          <div class="text-[11px] text-gray-500 mt-0.5">${s.market === 'A' ? 'A股' : '海外'} · 数据截至 ${s.as_of || '—'}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-2xl font-mono text-gray-100">${s.score ? Number(s.score).toFixed(0) : '—'}</div>
+          <div class="text-[11px] text-gray-500">${s.stage}</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-4 gap-2 mb-3">
+        <div class="bg-gray-800 rounded p-2"><div class="text-[10px] text-gray-500">1日</div><div class="text-xs font-mono ${fc(s.ret_1d)}">${fmt(s.ret_1d)}</div></div>
+        <div class="bg-gray-800 rounded p-2"><div class="text-[10px] text-gray-500">5日</div><div class="text-xs font-mono ${fc(s.ret_5d)}">${fmt(s.ret_5d)}</div></div>
+        <div class="bg-gray-800 rounded p-2"><div class="text-[10px] text-gray-500">20日</div><div class="text-xs font-mono ${fc(s.ret_20d)}">${fmt(s.ret_20d)}</div></div>
+        <div class="bg-gray-800 rounded p-2"><div class="text-[10px] text-gray-500">距60日高</div><div class="text-xs font-mono text-gray-300">${fmt(s.dd_60d)}</div></div>
+      </div>
+
+      <h4 class="text-xs text-gray-400 font-medium mb-1">📊 评分构成 ${zeroStage ? '<span class="text-yellow-500 font-normal">(当前阶段无反转证据 → 强制记0)</span>' : ''}</h4>
+      ${barHtml}
+      <div class="text-[10px] text-gray-500 mb-3">合计 ${zeroStage ? 0 : parts.reduce((a, p) => a + p.w * p.r, 0).toFixed(1)} / 100 · ${s.score_note || ''}</div>
+
+      <h4 class="text-xs text-gray-400 font-medium mb-1">🔄 反转形态检测 ${fired}</h4>
+      <table class="w-full text-[11px] mb-1"><tbody>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">触发判定</td><td class="py-1 text-gray-300 text-right">${rev.reason || '—'}</td></tr>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">大跌日跌幅</td><td class="py-1 font-mono text-right ${fc(rev.drop_pct)}">${fmt(rev.drop_pct)}</td></tr>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">收复失地比例</td><td class="py-1 font-mono text-right text-gray-200">${((rev.recover_ratio ?? 0) * 100).toFixed(0)}%</td></tr>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">距今交易日</td><td class="py-1 font-mono text-right text-gray-200">${rev.days_since ?? '—'}</td></tr>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">跌日量比</td><td class="py-1 font-mono text-right text-gray-200">${(rev.vol_ratio_drop ?? rev.vol_ratio ?? '—')}</td></tr>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">反弹期量比</td><td class="py-1 font-mono text-right text-gray-200">${(rev.vol_ratio_rebound ?? '—')}</td></tr>
+        <tr><td class="py-1 text-gray-500">5日均量/20日基准</td><td class="py-1 font-mono text-right text-gray-200">${s.vol_ratio_5d ?? '—'}</td></tr>
+      </tbody></table>
+
+      <h4 class="text-xs text-gray-400 font-medium mt-3 mb-1">📐 相对强度与空间</h4>
+      <table class="w-full text-[11px]"><tbody>
+        <tr class="border-b border-gray-800"><td class="py-1 text-gray-500">RS5 (对基准)</td><td class="py-1 font-mono text-right text-gray-200">${s.rs_5d === null || s.rs_5d === undefined ? '—' : Number(s.rs_5d).toFixed(2) + 'pp'}</td></tr>
+        <tr><td class="py-1 text-gray-500">RS20 (对基准)</td><td class="py-1 font-mono text-right text-gray-200">${s.rs_20d === null || s.rs_20d === undefined ? '—' : Number(s.rs_20d).toFixed(2) + 'pp'}</td></tr>
+      </tbody></table>
+
+      ${transHtml}
+
+      <div class="mt-3 pt-2 border-t border-gray-700"><h4 class="text-xs text-gray-400 font-medium mb-1">🔍 方法论 (可审计)</h4>${methodHtml}</div>
+
+      <div class="mt-4 text-right"><button onclick="closeModal()" class="px-4 py-1.5 rounded-lg text-xs bg-gray-700 hover:bg-gray-600 text-gray-200">关闭</button></div>
+    `);
+  } catch (e) {
+    openModal('<div class="text-red-400">板块详情加载失败: ' + e.message + '</div>');
   }
 }
 
