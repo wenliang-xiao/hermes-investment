@@ -2993,7 +2993,147 @@
       "score_results_count": 47,
       "price_valid_count": 47,
       "price_zero_skipped": 0
+    },
+    {
+      "date": "2026-11-06",
+      "signals": [
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "603986",
+          "name": "兆易创新",
+          "price": 239.49,
+          "reason": "评分6.5+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.5
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "603259",
+          "name": "药明康德",
+          "price": 147.0,
+          "reason": "评分6.5+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.5
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "601899",
+          "name": "紫金矿业A",
+          "price": 28.28,
+          "reason": "评分6.3+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.3
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "688665",
+          "name": "四方光电",
+          "price": 39.76,
+          "reason": "评分6.3+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.3
+        },
+        {
+          "strategy": "faceji",
+          "action": "BUY",
+          "symbol": "300661",
+          "name": "圣邦股份",
+          "price": 80.81,
+          "reason": "评分6.2+MA趋势ok",
+          "priority": "HIGH",
+          "size_pct": 8.0,
+          "pnl_pct": null,
+          "score": 6.2
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "688012",
+          "name": "中微公司",
+          "price": 254.0,
+          "reason": "槽位建仓(评分7.0)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 7.0
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "300124",
+          "name": "汇川技术",
+          "price": 56.66,
+          "reason": "槽位建仓(评分6.9)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.9
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "300458",
+          "name": "全志科技",
+          "price": 26.95,
+          "reason": "槽位建仓(评分6.6)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.6
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "603986",
+          "name": "兆易创新",
+          "price": 239.49,
+          "reason": "槽位建仓(评分6.5)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.5
+        },
+        {
+          "strategy": "silverquant",
+          "action": "BUY",
+          "symbol": "603259",
+          "name": "药明康德",
+          "price": 147.0,
+          "reason": "槽位建仓(评分6.5)",
+          "priority": "MED",
+          "size_pct": 3.0,
+          "pnl_pct": null,
+          "score": 6.5
+        },
+        {
+          "strategy": "tradingagents",
+          "action": "BUY",
+          "symbol": "688012",
+          "name": "中微公司",
+          "price": 254.0,
+          "reason": "辩论分5.5(bull优先)",
+          "priority": "MED",
+          "size_pct": 12.0,
+          "pnl_pct": null,
+          "score": 5.5
+        }
+      ],
+      "score_results_count": 52,
+      "price_valid_count": 52,
+      "price_zero_skipped": 0
     }
   ],
-  "last_update": "2026-07-27"
+  "last_update": "2026-11-06"
 }

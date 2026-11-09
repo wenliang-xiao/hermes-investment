@@ -29,10 +29,18 @@ def load_score_history(days=7):
     import logging
     logger = logging.getLogger(__name__)
     snapshots = []
-    for d in range(days, 0, -1):
+    for d in range(days - 1, -1, -1):  # 含当天(盘前 07:00 日扫产出), 否则最新的快照永远读不到
         date = (datetime.now() - timedelta(days=d)).strftime("%Y-%m-%d")
-        path = os.path.join(ROOT, "data", f"scan_snapshot_{date}.json")
-        if os.path.exists(path):
+        # 2026-11-09: 快照实际由 merge_batches_today.py 写到 data/scan_snapshots/，
+        # 而本函数原来只查扁平目录 data/ → 永远读不到（累积再多也无用）。
+        # 优先新目录，扁平路径保留兼容旧数据。
+        path = None
+        for cand in (os.path.join(ROOT, "data", "scan_snapshots", f"scan_snapshot_{date}.json"),
+                     os.path.join(ROOT, "data", f"scan_snapshot_{date}.json")):
+            if os.path.exists(cand):
+                path = cand
+                break
+        if path:
             try:
                 with open(path) as f:
                     data = json.load(f)

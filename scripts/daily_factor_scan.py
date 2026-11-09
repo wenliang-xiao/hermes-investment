@@ -296,4 +296,18 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    # 2026-11-09: baostock 的 C 库在解释器退出阶段析构线程局部存储时会
+    # `double free or corruption (!prev)`（栈在 _dl_deallocate_tls），
+    # 此时扫描/合并/快照全部已完成，却让进程以 134 退出 → cron/看门狗误判失败。
+    # 手动 flush 后直接 os._exit，跳过解释器析构。
+    try:
+        logging.shutdown()
+    except Exception:
+        pass
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.flush()
+        except Exception:
+            pass
+    os._exit(_rc)

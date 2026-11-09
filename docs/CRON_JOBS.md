@@ -65,6 +65,9 @@
 0 20 * * 1-5 cd /home/work/wangshihan/hermes-investment && /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_etf_discovery.py --top-n 10 --per-category 2 >> logs/cron_etf.log 2>&1
 # 行为诊断：data/behavior_diagnosis.json（读 strategy_states，排在 run_trading 之后）
 20 20 * * 1-5 cd /home/work/wangshihan/hermes-investment && /home/work/hongkexin/software/python/py310-langchain-faq/bin/python scripts/run_behavior.py >> logs/cron_behavior.log 2>&1
+# 面板看门狗：每 10 分钟检查 8686 是否存活，挂了用 setsid 拉起（幂等，已在跑则空转）
+*/10 * * * * pgrep -f 'dashboard/server[.]py' >/dev/null || (cd /home/work/wangshihan/hermes-investment && setsid nohup ./scripts/start_dashboard.sh 8686 >> logs/dashboard.log 2>&1 &)
+@reboot cd /home/work/wangshihan/hermes-investment && setsid nohup ./scripts/start_dashboard.sh 8686 >> logs/dashboard.log 2>&1 &
 ```
 
 要点:
@@ -84,6 +87,10 @@
   + 绝对路径解释器）。直接 `python dashboard/server.py` 时点回测会触发 baostock C 层
   `corrupted double-linked list`，进程还在但 HTTP 全部超时，只能 kill -9。
   后台：`nohup ./scripts/start_dashboard.sh 8686 > /tmp/hermes_dashboard.log 2>&1 &`。
+- **面板自带看门狗**（2026-11-09 新增）：`*/10 * * * * pgrep -f 'dashboard/server[.]py'` 不在就
+  `setsid nohup ./scripts/start_dashboard.sh 8686` 拉起，日志落 `logs/dashboard.log`；另有 `@reboot` 拉起。
+  起因：面板只靠 `nohup ... &` 手工起、无守护，会话回收后进程静默消失（日志无 traceback），
+  外部访问 8686 直接连不上。
 
 ---
 
@@ -241,6 +248,17 @@ cd /home/admin/.hermes/investment_system && \
 ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 ```
 
+**本地开发机（2026-11-09 核实）:**
+- 历史快照**无法恢复**：`data/_backup_20261103_*`（11-03 的 data 全量备份）、git 全历史、
+  `origin/main`、全盘搜索均无 `scan_snapshot_*.json`。累积从 `2026-11-09`（1 天）重新开始，
+  按工作日 07:00 日扫计约 12 周到 60 天。
+- **消费方路径 bug 已修**（`engine/strategy_comparison.py:load_score_history`）：原来只读扁平
+  `data/scan_snapshot_<date>.json`（无人写），而生产者 `merge_batches_today.py` 写的是
+  `data/scan_snapshots/`；且循环 `range(days, 0, -1)` **不含当天**，导致最新快照永远读不到。
+  现改为优先 `data/scan_snapshots/`、兼容扁平旧路径，且窗口含当天。
+- 注意 `run_comparison` 目前只被已下线的 `/api/comparison` 引用，面板回测走
+  `evaluator_fixed` 真实数据引擎 —— 快照累积暂不影响线上回测。
+
 ---
 
 ## 5. 故障排查速查表
@@ -253,6 +271,7 @@ ls /home/admin/.hermes/investment_system/data/scan_snapshots/ | wc -l
 | cron 报 `RuntimeError: HTTP 502 (Cloudflare)` 且 `tokens=~6k` | **LLM 网关 `api.spanagent.xyz` 瞬时 502**（agent 首次响应即死，扫描未执行） | **不是数据源故障。** 已改为 no_agent 脚本免疫；老日志出现则重跑 `daily_factor_scan.py` |
 | 扫描卡住无评分输出 8min+ | baostock/CSC 挂起 | `rm -f data/scanner_progress.json` + 重跑；连败2次→报陈旧数据 |
 | `faceji-factor-daily-scan` 部分完成" | 时间预算/批失败 | 重跑同一命令续扫；快照用最大日期 |
+| 日志末尾 `double free or corruption (!prev)` + `Backtrace`（但摘要已是「✅ 全量成功」） | baostock C 库在**解释器退出阶段**析构 TLS 时崩（栈在 `_dl_deallocate_tls`），扫描/合并/快照均已完成 | 2026-11-09 已在 `daily_factor_scan.py` 收尾处 `logging.shutdown()` + flush + `os._exit(rc)` 跳过析构；再出现先确认该改动还在。数据不受影响 |
 | 日报推送空消息"今日无新信号" | push 脚本副本滞后 | 参考 `v10-trading-system-maintenance` skill §推送到飞书群 |
 
 **统一恢复口诀:** 因子扫描失败 → 重跑 `daily_factor_scan.py`（可续扫）→ 仍失败则报告
