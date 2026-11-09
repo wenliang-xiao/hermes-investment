@@ -306,3 +306,27 @@ class TestLoadLatestEventRisk:
         p = tmp_path / "history.json"
         p.write_text(json.dumps([]))
         assert ere.load_latest_event_risk(str(p)) is None
+
+
+class TestEarningsMustNotLiquidate:
+    """2026-11-02 事故回归: 3 家美股财报并列 → 曾判 extreme → 清仓实亏 -20,702"""
+
+    def test_three_earnings_alone_is_high_not_extreme(self):
+        d = (ere.datetime.now() + ere.timedelta(days=1)).strftime("%Y-%m-%d")
+        events = [future_event(date=d, symbol=s, risk_level="high")
+                  for s in ("AMD", "ANET", "COHR")]
+        result = ere.calc_event_risk(calendar(events))
+        assert result["level"] == "high", "个股财报集群最多降仓, 不得清仓"
+        assert result["risk_adjust"] <= 0.6
+
+    def test_earnings_plus_gold_spike_is_extreme(self):
+        d = (ere.datetime.now() + ere.timedelta(days=1)).strftime("%Y-%m-%d")
+        result = ere.calc_event_risk(
+            calendar([future_event(date=d, risk_level="high")]),
+            market_moves={"gold_1d_pct": 2.5})
+        assert result["level"] == "extreme", "市场级证据 + 事件 才是 extreme"
+
+    def test_cross_market_resonance_alone_is_extreme(self):
+        result = ere.calc_event_risk(
+            calendar(), market_moves={"nasdaq_1d_pct": -5.5, "a_chain_1d_pct": -7.5})
+        assert result["level"] == "high"  # 单条 systemic → high

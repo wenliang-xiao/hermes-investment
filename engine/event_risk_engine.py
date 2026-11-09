@@ -45,7 +45,14 @@ def calc_event_risk(calendar: dict, market_moves: dict | None = None, hours: int
         {"level", "triggered_by", "risk_adjust", "captions"}
     """
     market_moves = market_moves or {}
-    strong: list[str] = []
+    # 触发源分两类, 不可混算:
+    #   systemic  = 市场级证据 (金价急拉 / 跨市场共振) — 唯一有资格触发 extreme
+    #   calendar  = 事件级证据 (个股财报等) — 再多也只到 high(降仓)
+    # 2026-11-02 事故: AMD/ANET/COHR 三家财报并列为 2+ strong → extreme → 清仓 4 个持仓,
+    # 实亏 -20,702, 随后 4 个交易日科创50 +7.98%/半导体 +7.64% 踏空。
+    # 个股财报不是系统性风险, 必须要有市场级证据才能清仓。
+    systemic: list[str] = []
+    calendar_strong: list[str] = []
     weak: list[str] = []
 
     for ev in calendar.get("events", []):
@@ -53,33 +60,34 @@ def calc_event_risk(calendar: dict, market_moves: dict | None = None, hours: int
             continue
         title = ev.get("title", ev.get("symbol", "事件"))
         if ev.get("risk_level") == "high":
-            strong.append(f"未来{hours}h内 {title}")
+            calendar_strong.append(f"未来{hours}h内 {title}")
         elif ev.get("risk_level") == "med":
             weak.append(f"未来{hours}h内 {title}")
 
     gold_1d = market_moves.get("gold_1d_pct")
     gold_5d = market_moves.get("gold_5d_pct")
     if gold_1d is not None and gold_1d > GOLD_1D_THRESHOLD:
-        strong.append(f"黄金单日急拉 {gold_1d}%>{GOLD_1D_THRESHOLD}%")
+        systemic.append(f"黄金单日急拉 {gold_1d}%>{GOLD_1D_THRESHOLD}%")
     elif gold_5d is not None and gold_5d > GOLD_5D_THRESHOLD:
-        strong.append(f"黄金5日累计 {gold_5d}%>{GOLD_5D_THRESHOLD}%")
+        systemic.append(f"黄金5日累计 {gold_5d}%>{GOLD_5D_THRESHOLD}%")
 
     nasdaq_1d = market_moves.get("nasdaq_1d_pct")
     a_chain_1d = market_moves.get("a_chain_1d_pct")
     if (nasdaq_1d is not None and a_chain_1d is not None
             and nasdaq_1d < NASDAQ_1D_THRESHOLD and a_chain_1d < A_CHAIN_1D_THRESHOLD):
-        strong.append(f"跨市场共振：纳指 {nasdaq_1d}% + A股映射链 {a_chain_1d}%")
+        systemic.append(f"跨市场共振：纳指 {nasdaq_1d}% + A股映射链 {a_chain_1d}%")
 
-    if len(strong) >= 2:
+    n_sys, n_ev = len(systemic), len(calendar_strong)
+    if n_sys >= 2 or (n_sys >= 1 and n_ev >= 1):
         level = "extreme"
-    elif len(strong) == 1:
+    elif n_sys >= 1 or n_ev >= 1:
         level = "high"
     elif weak:
         level = "moderate"
     else:
         level = "none"
 
-    triggered_by = strong + weak
+    triggered_by = systemic + calendar_strong + weak
     return {
         "level": level,
         "triggered_by": triggered_by,
